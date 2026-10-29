@@ -12,6 +12,13 @@ import { failureSnapshot, makeBucket } from './common';
 import { getRecipe } from './recipes';
 import { ProviderFetchResult, UsageProvider } from './UsageProvider';
 
+const UNSAFE_PATH_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Reads an own (non-inherited) property only — never walks the prototype chain. */
+function readOwnProperty(obj: object, key: string): any {
+  return Object.prototype.hasOwnProperty.call(obj, key) ? (obj as any)[key] : undefined;
+}
+
 /** Resolves a path like `a.b[0].c` or `a/b/0/c` against a parsed JSON value. */
 export function resolvePath(root: any, path: string | undefined): any {
   if (!path) return undefined;
@@ -21,8 +28,8 @@ export function resolvePath(root: any, path: string | undefined): any {
     .filter(Boolean);
   let cur = root;
   for (const p of parts) {
-    if (cur == null) return undefined;
-    cur = cur[p];
+    if (cur == null || typeof cur !== 'object' || UNSAFE_PATH_KEYS.has(p)) return undefined;
+    cur = readOwnProperty(cur, p);
   }
   return cur;
 }
