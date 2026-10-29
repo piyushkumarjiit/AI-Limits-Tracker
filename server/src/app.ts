@@ -82,6 +82,7 @@ async function handleApi(
     if (typeof password !== 'string' || !safeEqual(password, config.adminPassword)) {
       return send(res, 401, { error: 'Incorrect password' });
     }
+    limiter.reset(ip);
     const cookie = [
       `alt_session=${createSession(auth.appSecret)}`,
       'Path=/',

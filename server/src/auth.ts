@@ -73,6 +73,7 @@ export function isBrowserAuthed(req: IncomingMessage, config: AuthConfig): boole
 
 export interface LoginLimiter {
   tooManyAttempts(ip: string): boolean;
+  reset(ip: string): void;
 }
 
 /** Per-IP login throttle: more than 10 attempts inside 15 minutes is refused. */
@@ -88,5 +89,8 @@ export function createLoginLimiter(): LoginLimiter {
     rec.count++;
     return rec.count > 10;
   }
-  return { tooManyAttempts };
+  function reset(ip: string): void {
+    loginAttempts.delete(ip);
+  }
+  return { tooManyAttempts, reset };
 }

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -10,6 +11,16 @@ import type { Tracker } from '../server/src/tracker';
 const ADMIN_PASSWORD = 'test-admin-password-123';
 const APP_SECRET = 'test-app-secret-0123456789abcdef';
 const API_TOKEN = 'test-api-token-abc123';
+
+/**
+ * Independent oracle for the documented alt_session token contract:
+ * `<issued>.<base64url(HMAC-SHA256(issued, APP_SECRET))>`. Derived here with
+ * node:crypto rather than the server's own sign(), so a mis-keyed or
+ * secret-dropping implementation is rejected.
+ */
+function independentSign(issued: string, secret: string): string {
+  return createHmac('sha256', secret).update(issued).digest('base64url');
+}
 
 let totalTests = 0;
 let passedTests = 0;
@@ -123,6 +134,54 @@ async function runAllTests() {
     assert(/Max-Age=15552000/.test(rawCookie), 'Login: session lives 180 days by default', rawCookie);
   });
 
+  console.log('\nSuite 1b: Login limiter');
+  await withApp({}, async ({ baseUrl }) => {
+    for (let i = 0; i < 9; i++) {
+      const res = await fetch(`${baseUrl}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'wrong-password' }),
+      });
+      await res.text();
+      assert(res.status === 401, `Limiter: wrong password ${i + 1}/9 is 401`, `got ${res.status}`);
+    }
+
+    const firstOk = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: ADMIN_PASSWORD }),
+    });
+    await firstOk.text();
+    assert(firstOk.status === 200, 'Limiter: correct password after 9 failures is 200', `got ${firstOk.status}`);
+
+    const secondOk = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: ADMIN_PASSWORD }),
+    });
+    await secondOk.text();
+    assert(secondOk.status === 200, 'Limiter: a successful login resets the attempt window', `got ${secondOk.status}`);
+  });
+
+  await withApp({}, async ({ baseUrl }) => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const res = await fetch(`${baseUrl}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'wrong-password' }),
+      });
+      await res.text();
+      statuses.push(res.status);
+    }
+    assert(
+      statuses.slice(0, 10).every((s) => s === 401),
+      'Limiter: first 10 failed attempts are 401',
+      statuses.join(',')
+    );
+    assert(statuses[10] === 429, 'Limiter: the 11th failed attempt is 429', `got ${statuses[10]}`);
+  });
+
   console.log('\nSuite 2: Session cookie verification');
   await withApp({}, async ({ baseUrl }) => {
     const noCookie = await fetch(`${baseUrl}/api/state`);
@@ -150,6 +209,27 @@ async function runAllTests() {
     const expired = `${expiredIssued}.${sign(expiredIssued, APP_SECRET)}`;
     const expiredRes = await fetch(`${baseUrl}/api/state`, { headers: { Cookie: `alt_session=${expired}` } });
     assert(expiredRes.status === 401, '/api/state: expired cookie is 401', `got ${expiredRes.status}`);
+  });
+
+  console.log('\nSuite 2b: Session signature independent oracle');
+  await withApp({}, async ({ baseUrl }) => {
+    const issued = String(Date.now());
+
+    const knownVector = `${issued}.${independentSign(issued, APP_SECRET)}`;
+    const accepted = await fetch(`${baseUrl}/api/state`, { headers: { Cookie: `alt_session=${knownVector}` } });
+    assert(
+      accepted.status === 200,
+      '/api/state: cookie built from an independent HMAC-SHA256(issued, APP_SECRET) is 200',
+      `got ${accepted.status}`
+    );
+
+    const foreignSecret = `${issued}.${independentSign(issued, 'a-different-app-secret-0123456789')}`;
+    const foreignRes = await fetch(`${baseUrl}/api/state`, { headers: { Cookie: `alt_session=${foreignSecret}` } });
+    assert(
+      foreignRes.status === 401,
+      '/api/state: cookie signed with a different secret is 401',
+      `got ${foreignRes.status}`
+    );
   });
 
   console.log('\nSuite 3: Bearer token');
