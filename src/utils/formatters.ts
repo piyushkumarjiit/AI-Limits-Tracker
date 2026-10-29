@@ -6,24 +6,24 @@ export function formatTimeRemaining(resetsAt: string | null | undefined): string
   if (isNaN(target)) return '—';
   const diffSec = Math.floor((target - Date.now()) / 1000);
 
-  if (diffSec <= 0) return 'Сброшен';
+  if (diffSec <= 0) return 'Reset';
 
   const days = Math.floor(diffSec / 86400);
   const hours = Math.floor((diffSec % 86400) / 3600);
   const minutes = Math.floor((diffSec % 3600) / 60);
 
-  if (days > 0) return `${days}д ${hours}ч`;
-  if (hours > 0) return `${hours}ч ${minutes}м`;
-  return `${minutes}м`;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 export function formatRelative(iso: string | null | undefined): string {
-  if (!iso) return 'никогда';
+  if (!iso) return 'never';
   const diffSec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (diffSec < 60) return 'только что';
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} мин назад`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} ч назад`;
-  return `${Math.floor(diffSec / 86400)} д назад`;
+  if (diffSec < 60) return 'just now';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} min ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  return `${Math.floor(diffSec / 86400)}d ago`;
 }
 
 export function formatClock(iso: string): string {
@@ -34,28 +34,24 @@ export function formatClock(iso: string): string {
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
   if (sameDay) return `${hh}:${mm}`;
-  if (yesterday) return 'Вчера';
+  if (yesterday) return 'Yesterday';
   return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
-export const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-export const WEEKDAYS_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+export const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function greeting(date = new Date()): string {
   const h = date.getHours();
-  if (h < 5) return 'Доброй ночи,';
-  if (h < 12) return 'Доброе утро,';
-  if (h < 18) return 'Добрый день,';
-  return 'Добрый вечер,';
+  if (h < 5) return 'Good night,';
+  if (h < 12) return 'Good morning,';
+  if (h < 18) return 'Good afternoon,';
+  return 'Good evening,';
 }
 
-/** Russian plural: plural(4, ['аккаунт', 'аккаунта', 'аккаунтов']) → 'аккаунта' */
+/** English plural: plural(1, ['item', 'items', 'items']) → 'item'; any other n → forms[2] ('items'). */
 export function plural(n: number, forms: [string, string, string]): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return forms[0];
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return forms[1];
-  return forms[2];
+  return n === 1 ? forms[0] : forms[2];
 }
 
 /** Re-renders the caller every `intervalMs` so countdowns stay live. */

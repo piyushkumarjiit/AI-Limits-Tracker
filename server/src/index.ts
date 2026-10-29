@@ -175,10 +175,10 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (path === '/api/login' && method === 'POST') {
     // X-Real-IP is client-controlled unless a trusted reverse proxy sets it (TRUST_PROXY=1)
     const ip = (process.env.TRUST_PROXY === '1' && (req.headers['x-real-ip'] as string)) || req.socket.remoteAddress || '';
-    if (tooManyAttempts(ip)) return send(res, 429, { error: 'Слишком много попыток, подождите 15 минут' });
+    if (tooManyAttempts(ip)) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
     const { password } = await readBody(req);
     if (typeof password !== 'string' || !safeEqual(password, ADMIN_PASSWORD)) {
-      return send(res, 401, { error: 'Неверный пароль' });
+      return send(res, 401, { error: 'Incorrect password' });
     }
     loginAttempts.delete(ip);
     return send(res, 200, { ok: true }, {
@@ -229,7 +229,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
 
   if (path === '/api/accounts/manual' && method === 'POST') {
     const { provider, input, accountId } = await readBody(req);
-    if (!ALL_PROVIDERS.includes(provider)) return send(res, 400, { error: 'Неизвестный сервис' });
+    if (!ALL_PROVIDERS.includes(provider)) return send(res, 400, { error: 'Unknown provider' });
     const result = await tracker.connectManual(provider, String(input || ''), accountId);
     return send(res, result.ok ? 200 : 400, result);
   }

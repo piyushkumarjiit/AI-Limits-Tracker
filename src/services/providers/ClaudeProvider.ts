@@ -23,10 +23,10 @@ export function parseClaudeUsage(data: any): QuotaBucket[] {
   if (!data || typeof data !== 'object') return buckets;
 
   const windows: Array<[string, string, 'session_5h' | 'weekly_7d']> = [
-    ['five_hour', 'Сессия (5ч)', 'session_5h'],
-    ['seven_day', 'Неделя', 'weekly_7d'],
-    ['seven_day_opus', 'Неделя · Opus', 'weekly_7d'],
-    ['seven_day_sonnet', 'Неделя · Sonnet', 'weekly_7d'],
+    ['five_hour', 'Session (5h)', 'session_5h'],
+    ['seven_day', 'Weekly', 'weekly_7d'],
+    ['seven_day_opus', 'Weekly · Opus', 'weekly_7d'],
+    ['seven_day_sonnet', 'Weekly · Sonnet', 'weekly_7d'],
   ];
 
   for (const [key, label, type] of windows) {
@@ -42,7 +42,7 @@ export function parseClaudeUsage(data: any): QuotaBucket[] {
     const pct =
       typeof extra.utilization === 'number' ? extra.utilization : (used / extra.monthly_limit) * 100;
     buckets.push(
-      makeBucket('extra_usage', 'Доп. расход', 'monthly_30d', pct, null, {
+      makeBucket('extra_usage', 'Extra usage', 'monthly_30d', pct, null, {
         used: (used / 100).toFixed(2),
         limit: (extra.monthly_limit / 100).toFixed(2),
         currency: 'USD',
@@ -56,7 +56,7 @@ export function parseClaudeUsage(data: any): QuotaBucket[] {
     const usedMinor = spend.used.amount_minor || 0;
     const limitMinor = spend.limit.amount_minor || 1;
     buckets.push(
-      makeBucket('extra_usage', 'Доп. расход', 'monthly_30d', (usedMinor / limitMinor) * 100, null, {
+      makeBucket('extra_usage', 'Extra usage', 'monthly_30d', (usedMinor / limitMinor) * 100, null, {
         used: (usedMinor / 100).toFixed(2),
         limit: (limitMinor / 100).toFixed(2),
         currency: spend.used.currency || 'USD',
@@ -86,8 +86,8 @@ export class ClaudeProvider implements UsageProvider {
           'claude',
           legacy ? 'reauth_required' : 'not_configured',
           legacy
-            ? 'Старое подключение не поддерживает фоновое обновление — переподключите аккаунт'
-            : 'Аккаунт не подключён'
+            ? 'Legacy connection does not support background refresh — reconnect the account'
+            : 'Account not connected'
         ),
       };
     }
@@ -104,7 +104,7 @@ export class ClaudeProvider implements UsageProvider {
           accountId,
           'claude',
           'error',
-          aborted ? 'Claude не ответил вовремя' : err?.message || 'Сбой сети при запросе к Claude'
+          aborted ? 'Claude did not respond in time' : err?.message || 'Network error while requesting Claude'
         ),
       };
     }
@@ -127,7 +127,7 @@ export class ClaudeProvider implements UsageProvider {
             accountId,
             'claude',
             'reauth_required',
-            'Сессия Claude истекла — войдите в аккаунт заново'
+            'Claude session expired — sign in again'
           ),
         };
       }
@@ -157,19 +157,19 @@ export class ClaudeProvider implements UsageProvider {
 
     if (resp.status === 401 || resp.status === 403) {
       return {
-        snapshot: failureSnapshot(accountId, 'claude', 'reauth_required', 'Сессия Claude истекла — войдите заново'),
+        snapshot: failureSnapshot(accountId, 'claude', 'reauth_required', 'Claude session expired — sign in again'),
         updatedCredentials: changed ? creds : undefined,
       };
     }
     if (resp.status === 429) {
       return {
-        snapshot: failureSnapshot(accountId, 'claude', 'rate_limited', 'Слишком частые запросы — повторим позже'),
+        snapshot: failureSnapshot(accountId, 'claude', 'rate_limited', 'Too many requests — will retry later'),
         updatedCredentials: changed ? creds : undefined,
       };
     }
     if (!resp.ok) {
       return {
-        snapshot: failureSnapshot(accountId, 'claude', 'error', `Claude вернул HTTP ${resp.status}`),
+        snapshot: failureSnapshot(accountId, 'claude', 'error', `Claude returned HTTP ${resp.status}`),
         updatedCredentials: changed ? creds : undefined,
       };
     }
@@ -236,7 +236,7 @@ export class ClaudeProvider implements UsageProvider {
           accountId,
           'claude',
           cf ? 'error' : 'reauth_required',
-          cf ? 'Cloudflare заблокировал запрос — переподключите через вход в аккаунт' : 'sessionKey истёк — переподключите аккаунт'
+          cf ? 'Cloudflare blocked the request — reconnect by signing in' : 'sessionKey expired — reconnect the account'
         ),
       };
     }
@@ -263,19 +263,19 @@ export class ClaudeProvider implements UsageProvider {
 
     if (!orgId) {
       return {
-        snapshot: failureSnapshot(accountId, 'claude', 'error', 'Не удалось определить организацию Claude'),
+        snapshot: failureSnapshot(accountId, 'claude', 'error', 'Could not determine the Claude organization'),
       };
     }
 
     const usageResp = await isolatedFetch(`https://claude.ai/api/organizations/${orgId}/usage`, { headers });
     if (usageResp.status === 401 || usageResp.status === 403) {
       return {
-        snapshot: failureSnapshot(accountId, 'claude', 'reauth_required', 'sessionKey истёк — переподключите аккаунт'),
+        snapshot: failureSnapshot(accountId, 'claude', 'reauth_required', 'sessionKey expired — reconnect the account'),
       };
     }
     if (!usageResp.ok) {
       return {
-        snapshot: failureSnapshot(accountId, 'claude', 'error', `Claude вернул HTTP ${usageResp.status}`),
+        snapshot: failureSnapshot(accountId, 'claude', 'error', `Claude returned HTTP ${usageResp.status}`),
       };
     }
 
