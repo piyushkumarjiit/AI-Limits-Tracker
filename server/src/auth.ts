@@ -68,7 +68,7 @@ export interface AuthConfig {
 export function isAuthed(req: IncomingMessage, config: AuthConfig): boolean {
   const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (config.apiToken && bearer && safeEqual(bearer, config.apiToken)) return true;
-  // NOTE: bearer attempts are not counted toward the login limiter; use a long random API_TOKEN.
+  // The API checks a separate per-address and global bearer limiter before calling this.
   return isBrowserAuthed(req, config);
 }
 
@@ -133,10 +133,10 @@ const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
 /**
  * Failure-only throttle: 10 failed attempts per address inside 15 minutes, plus a
- * global 60-failure ceiling so rotating spoofed addresses still hits a wall. The
- * per-address ceiling is checked before a password is verified; the global ceiling
- * is consulted only for attempts that already failed, so a valid login is never
- * refused by it. Successful logins reset the address; expired records are pruned
+ * global 60-failure ceiling so rotating spoofed addresses still hits a wall. Callers
+ * check both ceilings before any credential is compared, so a tripped ceiling refuses
+ * even valid credentials for up to the window (a restart clears the in-memory
+ * counters). Successful logins reset the address; expired records are pruned
  * on every call and the map is capped so it cannot grow without bound.
  */
 export function createLoginLimiter(opts: LoginLimiterOptions = {}): LoginLimiter {
