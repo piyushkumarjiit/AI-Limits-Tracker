@@ -439,15 +439,43 @@ async function runAllTests() {
   });
 
   console.log('\nSuite 8: Host allowlist');
-  await withApp({ allowedHosts: ['allowed.example'] }, async ({ baseUrl, port }) => {
+  await withApp({ allowedHosts: ['allowed.example', 'pinned.example:8443', '[::1]'] }, async ({ baseUrl, port }) => {
     const allowed = await rawGet(port, '/api/health', 'allowed.example');
     assert(/^HTTP\/1\.1 200/.test(allowed), 'Host allowlist: a listed Host is served', allowed.split('\r\n')[0]);
 
-    const denied = await rawGet(port, '/api/health', 'other.example');
+    const allowedWithPort = await rawGet(port, '/api/state', 'allowed.example:1455');
+    assert(
+      /^HTTP\/1\.1 401/.test(allowedWithPort),
+      'Host allowlist: a listed Host with a non-default port is accepted',
+      allowedWithPort.split('\r\n')[0]
+    );
+
+    const pinned = await rawGet(port, '/api/state', 'pinned.example');
+    assert(
+      /^HTTP\/1\.1 401/.test(pinned),
+      'Host allowlist: a configured entry with a port matches a bare Host',
+      pinned.split('\r\n')[0]
+    );
+
+    const ipv6 = await rawGet(port, '/api/state', '[::1]:1455');
+    assert(
+      /^HTTP\/1\.1 401/.test(ipv6),
+      'Host allowlist: IPv6 brackets and port are stripped before comparing',
+      ipv6.split('\r\n')[0]
+    );
+
+    const denied = await rawGet(port, '/api/state', 'other.example');
     assert(/^HTTP\/1\.1 421/.test(denied), 'Host allowlist: an unlisted Host is 421', denied.split('\r\n')[0]);
 
-    const viaFetch = await fetch(`${baseUrl}/api/health`);
+    const viaFetch = await fetch(`${baseUrl}/api/state`);
     assert(viaFetch.status === 421, 'Host allowlist: an unlisted Host via fetch is 421', `got ${viaFetch.status}`);
+
+    const probe = await rawGet(port, '/api/health', '127.0.0.1:1455');
+    assert(
+      /^HTTP\/1\.1 200/.test(probe),
+      'Host allowlist: GET /api/health is exempt so the image healthcheck passes',
+      probe.split('\r\n')[0]
+    );
   });
 
   await withApp({}, async ({ port }) => {

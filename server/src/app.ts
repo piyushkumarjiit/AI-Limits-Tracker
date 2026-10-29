@@ -107,6 +107,17 @@ function originHost(origin: string | undefined): string | null {
   }
 }
 
+/** Hostname from a Host header or allowlist entry: lowercased, without the port or IPv6 brackets. */
+function hostnameOf(value: string): string {
+  const host = value.trim().toLowerCase();
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']');
+    return end > 0 ? host.slice(1, end) : host;
+  }
+  const colon = host.indexOf(':');
+  return colon === -1 ? host : host.slice(0, colon);
+}
+
 const ALL_PROVIDERS: ProviderType[] = [...NATIVE_PROVIDERS, ...RECIPE_PROVIDERS, 'custom'];
 
 /* ---------------- Routes ---------------- */
@@ -336,15 +347,12 @@ export function createApp(config: AppConfig, deps: AppDeps) {
   };
   const limiter = createLoginLimiter();
   const bearerLimiter = createLoginLimiter();
-  const allowedHosts = (config.allowedHosts || []).map((h) => h.trim().toLowerCase()).filter(Boolean);
+  const allowedHosts = (config.allowedHosts || []).map(hostnameOf).filter(Boolean);
 
   const server = createServer({ maxHeaderSize: config.maxHeaderSize ?? 8192 }, async (req, res) => {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     if (config.secureCookies) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
-      if (allowedHosts.length && !allowedHosts.includes((req.headers.host || '').toLowerCase())) {
-        return send(res, 421, { error: 'misdirected request' });
-      }
       let url: URL;
       try {
         url = new URL(req.url || '/', 'http://localhost');
@@ -353,6 +361,10 @@ export function createApp(config: AppConfig, deps: AppDeps) {
         return send(res, 400, { error: 'bad request' });
       }
       const method = req.method || 'GET';
+      const healthProbe = method === 'GET' && url.pathname === '/api/health';
+      if (allowedHosts.length && !healthProbe && !allowedHosts.includes(hostnameOf(req.headers.host || ''))) {
+        return send(res, 421, { error: 'misdirected request' });
+      }
       if (url.pathname.startsWith('/api/') && method !== 'GET' && method !== 'HEAD') {
         const csrf = csrfError(req, auth);
         if (csrf) return send(res, csrf.status, { error: csrf.error });
