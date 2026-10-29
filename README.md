@@ -8,7 +8,7 @@
 
 Mobile app · self-hosted web panel (PWA) · Chrome extension. Honest numbers, live reset timers, low-limit alerts. Your credentials never leave your own device or server.
 
-<a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker/stargazers"><img src="https://img.shields.io/github/stars/Rauan228/AI-Limits-Tracker?style=flat&color=1f9d74" alt="Stars" /></a>
+<a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker/stargazers"><img src="https://img.shields.io/github/stars/piyushkumarjiit/AI-Limits-Tracker?style=flat&color=1f9d74" alt="Stars" /></a>
 <img src="https://img.shields.io/badge/license-MIT-black" alt="MIT" />
 <img src="https://img.shields.io/badge/Claude%20·%20ChatGPT%20·%20Gemini-supported-e2683c" alt="Providers" />
 
@@ -29,7 +29,6 @@ You have more than one AI subscription — maybe **two Claude accounts and two C
 - ⏱ **Live reset countdowns** — "resets in 2h 14m", recalculated every tick.
 - 📊 **Real statistics** — day streaks, limit hits, time spent in the red zone, burn-rate forecast ("will run out in 1h 40m"), busiest hours & weekdays, per-account comparison. All computed from real measurements — no invented message counts.
 - 🔔 **Alerts** — at 20% / 10% / 0% remaining, on restore, and when a session needs re-login. Optional Telegram push on the server.
-- **Remote Codex chat** — send tasks from the web panel on your phone, stream replies, stop work and handle approvals on your own laptop. One-time pairing, separate control authorization and locally selected projects. [Setup](integrations/CODEX-REMOTE.md).
 - 🔒 **Private by design** — tokens live only on your device (Keychain/Keystore) or your own server (AES-256-GCM encrypted). Requests go straight to Anthropic / OpenAI / Google. No third-party backend, ever.
 
 ## Three ways to use it
@@ -152,6 +151,6 @@ This tool only **reads** your usage — it never generates anything, so it puts 
 
 ## License
 
-MIT © [Rauan](https://github.com/Rauan228)
+MIT © [Piyush Kumar](https://github.com/piyushkumarjiit) · based on the original [AI Limits Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan
 
 <div align="center"><sub>If this saved you a login dance, a ⭐ is appreciated.</sub></div>

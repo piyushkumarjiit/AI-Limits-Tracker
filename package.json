@@ -59,5 +59,7 @@
     "node-forge": "^1.4.1",
     "uuid": "^11.1.1"
   },
+  "author": "Piyush Kumar <piyushkumar.jiit@gmail.com> (https://github.com/piyushkumarjiit)",
+  "license": "MIT",
   "private": true
 }
