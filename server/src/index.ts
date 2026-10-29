@@ -1,7 +1,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { NATIVE_PROVIDERS, type ProviderType, RECIPE_PROVIDERS } from '../../src/models/types';
 import { computeStats, forecastWindow } from '../../src/services/stats';
 import { notify } from './notify';
@@ -12,7 +12,7 @@ const PORT = Number(process.env.PORT) || 8795;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const APP_SECRET = process.env.APP_SECRET || '';
 const API_TOKEN = process.env.API_TOKEN || '';
-const DATA_DIR = process.env.DATA_DIR || resolve('data');
+const DATA_DIR = resolve(process.env.DATA_DIR || 'data');
 const WEB_DIR = resolve(process.env.WEB_DIR || 'public');
 const SESSION_DAYS = 180;
 
@@ -21,7 +21,7 @@ if (!ADMIN_PASSWORD || APP_SECRET.length < 16) {
   process.exit(1);
 }
 
-const store = new Store(join(DATA_DIR, 'tracker.db'), APP_SECRET);
+const store = new Store(DATA_DIR, 'tracker.db', APP_SECRET);
 const tracker = new Tracker(store);
 
 /* ---------------- Auth ---------------- */
@@ -41,11 +41,20 @@ function sessionCookie(): string {
   return `${issued}.${sign(issued)}`;
 }
 
-function parseCookies(req: IncomingMessage): Record<string, string> {
-  const out: Record<string, string> = {};
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function parseCookies(req: IncomingMessage): Map<string, string> {
+  const out = new Map<string, string>();
   for (const part of (req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i <= 0) continue;
+    const key = part.slice(0, i).trim();
+    if (UNSAFE_KEYS.has(key)) continue;
+    try {
+      out.set(key, decodeURIComponent(part.slice(i + 1).trim()));
+    } catch {
+      // ignore malformed cookie values
+    }
   }
   return out;
 }
@@ -57,7 +66,7 @@ function isAuthed(req: IncomingMessage): boolean {
 }
 
 function isBrowserAuthed(req: IncomingMessage): boolean {
-  const raw = parseCookies(req).alt_session;
+  const raw = parseCookies(req).get('alt_session');
   if (!raw) return false;
   const [issued, sig] = raw.split('.');
   if (!issued || !sig || !safeEqual(sig, sign(issued))) return false;
@@ -94,7 +103,8 @@ async function readBody(req: IncomingMessage, max = 256 * 1024): Promise<any> {
   }
   if (!chunks.length) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    // Drop prototype-pollution keys at every depth
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'), (k, v) => (UNSAFE_KEYS.has(k) ? undefined : v));
   } catch {
     return {};
   }
@@ -112,13 +122,31 @@ const MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+/** True only if `target` resolves to a path strictly inside `base` (no null bytes). */
+function isInside(base: string, target: string): boolean {
+  if (target.includes('\0')) return false;
+  const b = resolve(base);
+  return resolve(target).startsWith(b + sep);
+}
+
 function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string) {
-  const rel = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
-  let file = join(WEB_DIR, rel);
-  if (!file.startsWith(WEB_DIR) || !existsSync(file) || statSync(file).isDirectory()) {
-    file = join(WEB_DIR, 'index.html'); // SPA fallback
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    res.writeHead(400).end('Bad request');
+    return;
   }
-  if (!existsSync(file)) {
+  if (decoded.includes('\0')) {
+    res.writeHead(400).end('Bad request');
+    return;
+  }
+  const rel = normalize(decoded).replace(/^([/\\])+/, '');
+  let file = resolve(WEB_DIR, rel);
+  if (!isInside(WEB_DIR, file) || !existsSync(file) || statSync(file).isDirectory()) {
+    file = resolve(WEB_DIR, 'index.html'); // SPA fallback
+  }
+  if (!isInside(WEB_DIR, file) || !existsSync(file)) {
     res.writeHead(404).end('Not found');
     return;
   }
