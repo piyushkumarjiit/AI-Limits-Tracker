@@ -10,9 +10,11 @@ import { Tracker } from './tracker';
 // carry stack traces and messages only; secrets are never part of them.
 process.on('unhandledRejection', (reason) => {
   console.error('unhandledRejection:', reason);
+  process.exitCode = 1;
 });
 process.on('uncaughtException', (err) => {
   console.error('uncaughtException:', err);
+  process.exitCode = 1;
 });
 
 const warnings = validateConfigWarnings(process.env);

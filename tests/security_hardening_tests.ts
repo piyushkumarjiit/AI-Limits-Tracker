@@ -1,5 +1,6 @@
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { AddressInfo, connect } from 'node:net';
+import { AddressInfo, connect, createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, type AppConfig } from '../server/src/app';
@@ -92,6 +93,28 @@ async function withApp(overrides: Partial<AppConfig>, fn: (ctx: Ctx) => Promise<
     store.close();
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Runs the real server entrypoint and resolves with its exit code (null if it had to be killed). */
+function runServerProcess(env: Record<string, string>): Promise<number | null> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', join('server', 'src', 'index.ts')], {
+      env: {
+        PATH: process.env.PATH || '',
+        ADMIN_PASSWORD,
+        APP_SECRET,
+        HOST: '127.0.0.1',
+        WEB_DIR: tmpdir(),
+        ...env,
+      },
+      stdio: 'ignore',
+    });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 20000);
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
 }
 
 function sessionCookieFrom(res: Response): string | null {
@@ -660,6 +683,26 @@ async function runAllTests() {
     await good.text();
     assert(good.status === 200, 'Bearer: a valid token still works from a fresh address', `got ${good.status}`);
   });
+
+  console.log('\nSuite 12b: Startup failures exit non-zero');
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'alt-startup-'));
+    const blocker = createNetServer();
+    try {
+      await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+      const busyPort = (blocker.address() as AddressInfo).port;
+      const portInUse = await runServerProcess({ PORT: String(busyPort), DATA_DIR: join(dir, 'data') });
+      assert(portInUse !== 0 && portInUse !== null, 'Startup: a port already in use exits non-zero', `exit ${portInUse}`);
+
+      const notADir = join(dir, 'file');
+      writeFileSync(notADir, '');
+      const badDataDir = await runServerProcess({ PORT: '0', DATA_DIR: join(notADir, 'data') });
+      assert(badDataDir !== 0 && badDataDir !== null, 'Startup: an unusable DATA_DIR exits non-zero', `exit ${badDataDir}`);
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
 
   console.log('\nSuite 13: Response headers');
   await withApp({}, async ({ baseUrl }) => {
