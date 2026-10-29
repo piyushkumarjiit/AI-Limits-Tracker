@@ -1,7 +1,7 @@
 # REFACTOR_STATUS
 Branch: refactor/harden-docker
-Last Completed Step: 2.5
-Next Immediate Step: 3.1
+Last Completed Step: 3.3
+Next Immediate Step: 4.1
 Blockers: none (deepmerge low-severity advisory accepted: no patched release, Expo dev tooling only)
 
 ## Phase 1
@@ -16,9 +16,9 @@ Blockers: none (deepmerge low-severity advisory accepted: no patched release, Ex
 - [x] 2.4 (semgrep.yml; pages.yml already had permissions) workflow permissions
 - [x] 2.5 dependabot / npm audit
 ## Phase 3
-- [ ] 3.1 encryption at rest
-- [ ] 3.2 auth/API hardening
-- [ ] 3.3 curlParser audit
+- [x] 3.1 (scrypt key, v2 prefix, legacy auto-migrate) encryption at rest
+- [x] 3.2 (security headers, hashed timing-safe compare, TRUST_PROXY gate for X-Real-IP) auth/API hardening
+- [x] 3.3 (curlParser is regex-only, no exec/eval) curlParser audit
 ## Phase 4
 - [ ] 4.1 find Cyrillic
 - [ ] 4.2 translate
