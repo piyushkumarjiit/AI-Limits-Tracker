@@ -7,7 +7,6 @@ import { computeStats, forecastWindow } from '../../src/services/stats';
 import { notify } from './notify';
 import { Store } from './store';
 import { Tracker } from './tracker';
-import { RemoteHub, RemoteRoutes } from './remote';
 
 const PORT = Number(process.env.PORT) || 8795;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
@@ -135,21 +134,11 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string
 
 const ALL_PROVIDERS: ProviderType[] = [...NATIVE_PROVIDERS, ...RECIPE_PROVIDERS, 'custom'];
 
-const remote = new RemoteRoutes(new RemoteHub(store), {
-  secret: APP_SECRET,
-  hasSession: isBrowserAuthed,
-  verifyPassword: password => safeEqual(password, ADMIN_PASSWORD),
-  rateLimit: tooManyAttempts,
-  readBody,
-});
-
 /* ---------------- Routes ---------------- */
 
 async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   const path = url.pathname;
   const method = req.method || 'GET';
-
-  if (await remote.handle(req, res, url)) return;
 
   if (path === '/api/health') return send(res, 200, { ok: true });
 
@@ -271,45 +260,6 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
       );
     }
     return send(res, 200, { stats, forecasts });
-  }
-
-  if (path === '/api/agents/report' && method === 'POST') {
-    const b = await readBody(req);
-    const id = String(b.id || '').slice(0, 200);
-    const status = ['working', 'waiting', 'done', 'idle'].includes(b.status) ? b.status : 'idle';
-    if (!id) return send(res, 400, { error: 'id required' });
-    const now = new Date().toISOString();
-    const prev = store.getAgent(id);
-    const project = String(b.project || b.cwd || 'проект').split(/[/\\]/).filter(Boolean).pop() || 'проект';
-    store.upsertAgent({
-      id,
-      source: ['claude', 'codex', 'other'].includes(b.source) ? b.source : 'other',
-      project: project.slice(0, 80),
-      cwd: b.cwd ? String(b.cwd).slice(0, 300) : undefined,
-      title: b.title ? String(b.title).slice(0, 200) : undefined,
-      status,
-      lastMessage: b.lastMessage ? String(b.lastMessage).slice(0, 4000) : undefined,
-      model: b.model ? String(b.model).slice(0, 60) : undefined,
-      startedAt: prev?.startedAt || now,
-      updatedAt: now,
-    });
-    // Push once when an agent finishes or starts waiting for input (unless a silent sync)
-    if (!b.silent && (status === 'done' || status === 'waiting') && prev?.status !== status) {
-      const label = status === 'done' ? '✅ Агент закончил' : '⏳ Агент ждёт ввода';
-      const firstLine = (b.lastMessage ? String(b.lastMessage) : '').split('\n').find((l: string) => l.trim()) || '';
-      void notify(`${label}: ${project}`, firstLine.slice(0, 200));
-    }
-    return send(res, 200, { ok: true });
-  }
-
-  if (path === '/api/agents' && method === 'GET') {
-    store.pruneAgents(new Date(Date.now() - 7 * 86400 * 1000).toISOString());
-    return send(res, 200, { agents: store.listAgents(50) });
-  }
-  const am = /^\/api\/agents\/(.+)$/.exec(path);
-  if (am && method === 'DELETE') {
-    store.deleteAgent(decodeURIComponent(am[1]));
-    return send(res, 200, { ok: true });
   }
 
   if (path === '/api/alerts' && method === 'GET') return send(res, 200, { alerts: store.alerts(100) });
