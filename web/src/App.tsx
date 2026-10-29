@@ -1030,7 +1030,7 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
         </button>
       </div>
       <p className="footnote">
-        AI Limits Tracker · open source · <a href="https://github.com/Rauan228/AI-Limits-Tracker" target="_blank" rel="noopener">GitHub</a>
+        AI Limits Tracker · open source · <a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker" target="_blank" rel="noopener">GitHub</a>
       </p>
     </>
   );

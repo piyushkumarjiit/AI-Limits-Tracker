@@ -8,7 +8,7 @@ import { loadStore, PROVIDERS, setEnabled, syncProvider, TrackedAccount, updateB
 import { Logo, Ring } from './widgets';
 import './popup.css';
 
-const PANEL_URL = 'https://github.com/Rauan228/AI-Limits-Tracker#web-panel';
+const PANEL_URL = 'https://github.com/piyushkumarjiit/AI-Limits-Tracker#web-panel';
 
 function App() {
   const [accounts, setAccounts] = useState<Partial<Record<ProviderType, TrackedAccount>>>({});
