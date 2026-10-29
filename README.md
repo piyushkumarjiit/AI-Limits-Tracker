@@ -8,7 +8,7 @@
 
 Mobile app · self-hosted web panel (PWA) · Chrome extension. Honest numbers, live reset timers, low-limit alerts. Your credentials never leave your own device or server.
 
-<a href="https://github.com/Rauan228/AI-Limits-Tracker/stargazers"><img src="https://img.shields.io/github/stars/Rauan228/AI-Limits-Tracker?style=flat&color=1f9d74" alt="Stars" /></a>
+<a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker/stargazers"><img src="https://img.shields.io/github/stars/Rauan228/AI-Limits-Tracker?style=flat&color=1f9d74" alt="Stars" /></a>
 <img src="https://img.shields.io/badge/license-MIT-black" alt="MIT" />
 <img src="https://img.shields.io/badge/Claude%20·%20ChatGPT%20·%20Gemini-supported-e2683c" alt="Providers" />
 
@@ -47,17 +47,45 @@ You have more than one AI subscription — maybe **two Claude accounts and two C
 A single Node file (**zero runtime dependencies**, Node 22+) that polls your accounts around the clock, stores encrypted history, serves a password-protected PWA, and can push alerts to Telegram. Install it to your phone's home screen and it behaves like a native app.
 
 ```bash
-git clone https://github.com/Rauan228/AI-Limits-Tracker.git
+git clone https://github.com/piyushkumarjiit/AI-Limits-Tracker.git
 cd AI-Limits-Tracker
 npm install
 npm run build:server && npm run build:web
 
-cp server/.env.example server/.env   # set ADMIN_PASSWORD and APP_SECRET
+cp .env.example .env                 # set ADMIN_PASSWORD and APP_SECRET
 WEB_DIR=web/dist DATA_DIR=./data node server/dist/server.mjs
 # open http://localhost:8795
 ```
 
-**Deploy to a VPS** (Ubuntu + nginx) — systemd unit, nginx vhost and a one-shot script are in [`deploy/`](deploy/):
+### Run with Docker (recommended)
+
+```bash
+git clone https://github.com/piyushkumarjiit/AI-Limits-Tracker.git
+cd AI-Limits-Tracker
+cp .env.example .env                 # set ADMIN_PASSWORD and APP_SECRET (openssl rand -hex 32)
+mkdir -p data && sudo chown 1000:1000 data   # the container runs as UID 1000 (node)
+
+docker compose up -d                 # builds locally, or pulls ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
+# open http://localhost:1455
+```
+
+The image is a two-stage build: Expo/TypeScript tooling stays in the build stage, and the runtime image contains only the compiled server bundle (zero runtime dependencies) and the web panel. It runs as a non-root user with a read-only root filesystem, all capabilities dropped and `no-new-privileges`. Only `/app/data` is writable — that is where the SQLite database lives.
+
+> If you do not create `data/` first, Docker creates it owned by root and the container cannot write to it. Run the `chown` line above, or point the volume at a directory your user owns.
+
+**Offline / air-gapped transfer** — build once, then move the image:
+
+```bash
+docker save ai-limits-tracker:latest | gzip > ai-limits-tracker.tar.gz
+scp ai-limits-tracker.tar.gz user@node:/tmp/
+# on the target node:
+gunzip -c /tmp/ai-limits-tracker.tar.gz | docker load
+docker compose up -d --no-build
+```
+
+Images are published for `linux/amd64` and `linux/arm64` by [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) on every push to `main` and on `v*` tags.
+
+**Deploy to a VPS with systemd + nginx instead** — systemd unit, nginx vhost and a one-shot script are in [`deploy/`](deploy/). When a reverse proxy sits in front of the app, set `TRUST_PROXY=1` so rate limiting uses the real client IP:
 
 ```bash
 npm run build:server && npm run build:web

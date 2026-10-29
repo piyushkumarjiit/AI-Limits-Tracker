@@ -1,8 +1,8 @@
 # REFACTOR_STATUS
 Branch: refactor/harden-docker
-Last Completed Step: 4.3
-Next Immediate Step: 5.1
-Blockers: none (deepmerge low-severity advisory accepted: no patched release, Expo dev tooling only)
+Last Completed Step: 5.7 (all phases complete)
+Next Immediate Step: none - open PR
+Blockers: none
 
 ## Phase 1
 - [x] 1.1 delete remote/agent files (done by user)
@@ -24,10 +24,10 @@ Blockers: none (deepmerge low-severity advisory accepted: no patched release, Ex
 - [x] 4.2 translate
 - [x] 4.3 (zero Cyrillic repo-wide; typecheck:all, 3 builds, 59/59 tests green) verify
 ## Phase 5
-- [ ] 5.1 .dockerignore
-- [ ] 5.2 Dockerfile
-- [ ] 5.3 docker-compose.yml
-- [ ] 5.4 docker-publish workflow
-- [ ] 5.5 build + smoke test
-- [ ] 5.6 README
-- [ ] 5.7 final gate
+- [x] 5.1 .dockerignore
+- [x] 5.2 Dockerfile
+- [x] 5.3 docker-compose.yml
+- [x] 5.4 docker-publish workflow
+- [x] 5.5 build + smoke test
+- [x] 5.6 README
+- [x] 5.7 final gate

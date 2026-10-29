@@ -23,7 +23,7 @@ AI Limits Tracker solves a gap that other usage trackers miss: people who own mo
 - Privacy: credentials stay in the device Keychain/Keystore or on a self-hosted server (AES-256-GCM). Requests go directly to Anthropic, OpenAI and Google with no third-party backend. The tool only reads usage and never generates anything.
 
 ## Links
-- Source code and documentation: https://github.com/Rauan228/AI-Limits-Tracker
+- Source code and documentation: https://github.com/piyushkumarjiit/AI-Limits-Tracker
 - License: MIT
 
 ## Common questions it answers

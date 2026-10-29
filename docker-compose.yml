@@ -1,0 +1,23 @@
+services:
+  ai-limits-tracker:
+    image: ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
+    build: .
+    ports:
+      - "${PORT:-1455}:1455"
+    # The container runs as UID 1000; ./data must be writable by it:
+    #   mkdir -p data && sudo chown 1000:1000 data
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      # Set TRUST_PROXY=1 only when a reverse proxy in front of the container sets X-Real-IP
+      TRUST_PROXY: "${TRUST_PROXY:-0}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
