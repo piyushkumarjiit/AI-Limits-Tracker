@@ -594,8 +594,8 @@ async function runAllTests() {
     assert(refused === 10, 'Login: the rest of the held-body burst is refused with 429', statuses.join(','));
   });
 
-  console.log('\nSuite 11: Global failure ceiling backstops only failed attempts');
-  await withApp({ trustProxy: true }, async ({ baseUrl }) => {
+  console.log('\nSuite 11: Global failure ceiling hard-bounds guessing');
+  await withApp({ trustProxy: true }, async ({ baseUrl, port }) => {
     const attempt = (ip: string, password: string) =>
       fetch(`${baseUrl}/api/login`, {
         method: 'POST',
@@ -616,27 +616,49 @@ async function runAllTests() {
 
     const correct = await attempt('203.0.113.200', ADMIN_PASSWORD);
     await correct.text();
-    assert(correct.status === 200, 'Global ceiling: a correct password still succeeds during an active ceiling', `got ${correct.status}`);
+    assert(correct.status === 429, 'Global ceiling: a correct password is refused while the ceiling holds', `got ${correct.status}`);
 
     const wrong = await attempt('203.0.113.201', 'wrong-password');
     await wrong.text();
-    assert(wrong.status === 429, 'Global ceiling: a wrong password is still refused during an active ceiling', `got ${wrong.status}`);
+    assert(wrong.status === 429, 'Global ceiling: a fresh address is refused while the ceiling holds', `got ${wrong.status}`);
+
+    const unread = await rawRequest(
+      port,
+      'POST /api/login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n' +
+        'X-Real-IP: 203.0.113.202\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{"password":'
+    );
+    assert(
+      /^HTTP\/1\.1 429/.test(unread),
+      'Global ceiling: an over-ceiling request is refused without reading the body',
+      unread.split('\r\n')[0]
+    );
   });
 
   console.log('\nSuite 12: Bearer token limiter');
-  await withApp({}, async ({ baseUrl }) => {
+  await withApp({ trustProxy: true }, async ({ baseUrl }) => {
+    const withIp = (ip: string, token: string) =>
+      fetch(`${baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}`, 'X-Real-IP': ip } });
+
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {
-      const res = await fetch(`${baseUrl}/api/state`, { headers: { Authorization: 'Bearer wrong-token' } });
+      const res = await withIp('198.51.100.10', 'wrong-token');
       await res.text();
       statuses.push(res.status);
     }
     assert(statuses.slice(0, 10).every((s) => s === 401), 'Bearer: the first 10 failures are 401', statuses.join(','));
     assert(statuses[10] === 429, 'Bearer: the 11th failed token is 429', `got ${statuses[10]}`);
 
-    const good = await fetch(`${baseUrl}/api/state`, { headers: { Authorization: `Bearer ${API_TOKEN}` } });
+    const sameAddress = await withIp('198.51.100.10', API_TOKEN);
+    await sameAddress.text();
+    assert(
+      sameAddress.status === 429,
+      'Bearer: a valid token cannot skip a tripped per-address limiter',
+      `got ${sameAddress.status}`
+    );
+
+    const good = await withIp('198.51.100.11', API_TOKEN);
     await good.text();
-    assert(good.status === 200, 'Bearer: a valid token still works', `got ${good.status}`);
+    assert(good.status === 200, 'Bearer: a valid token still works from a fresh address', `got ${good.status}`);
   });
 
   console.log('\nSuite 13: Response headers');

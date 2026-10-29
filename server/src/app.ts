@@ -177,16 +177,21 @@ async function handleApi(
 
   if (path === '/api/login' && method === 'POST') {
     const ip = clientIp(req, config.trustProxy);
-    if (limiter.tooManyAttempts(ip)) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
+    // Deliberate tradeoff: once the global ceiling is reached every login is refused
+    // for up to the window, even with the correct password, so rotated addresses
+    // cannot keep guessing. Restarting the process clears the in-memory counters.
+    if (limiter.tooManyAttempts(ip) || limiter.globalExceeded()) {
+      return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
+    }
     const { password } = await readBody(req);
-    if (limiter.tooManyAttempts(ip)) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
+    if (limiter.tooManyAttempts(ip) || limiter.globalExceeded()) {
+      return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
+    }
     if (typeof password !== 'string' || !safeEqual(password, config.adminPassword)) {
       // Only failures count toward the throttle; back off exponentially (never log the password).
-      const globalExceeded = limiter.globalExceeded();
       const failures = limiter.recordFailure(ip);
       console.log(`login_failed ip=${ip} ts=${Math.floor(Date.now() / 1000)}`);
       await sleep(limiter.delayMs(failures));
-      if (globalExceeded) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
       return send(res, 401, { error: 'Incorrect password' });
     }
     limiter.reset(ip);
@@ -213,17 +218,19 @@ async function handleApi(
     return send(res, 200, { ok: true }, { 'Set-Cookie': cookie });
   }
 
-  if (!isAuthed(req, auth)) {
-    // Failed Bearer attempts are throttled per address as well, so a wrong token
-    // cannot be brute-forced. A valid token is never delayed or refused.
-    if (/^Bearer\s+/i.test(req.headers.authorization || '')) {
-      const ip = clientIp(req, config.trustProxy);
-      if (bearerLimiter.tooManyAttempts(ip) || bearerLimiter.globalExceeded()) {
-        return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
-      }
+  if (/^Bearer\s+/i.test(req.headers.authorization || '')) {
+    // Bearer attempts are throttled per address and by the global ceiling, both
+    // checked before the token is compared so a tripped limiter never verifies a guess.
+    const ip = clientIp(req, config.trustProxy);
+    if (bearerLimiter.tooManyAttempts(ip) || bearerLimiter.globalExceeded()) {
+      return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
+    }
+    if (!isAuthed(req, auth)) {
       const failures = bearerLimiter.recordFailure(ip);
       await sleep(bearerLimiter.delayMs(failures));
+      return send(res, 401, { error: 'unauthorized' });
     }
+  } else if (!isAuthed(req, auth)) {
     return send(res, 401, { error: 'unauthorized' });
   }
 
