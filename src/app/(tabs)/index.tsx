@@ -95,9 +95,9 @@ export default function DashboardScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.hello}>{greeting()}</Text>
             <Text style={styles.name}>
-              {userName || 'друг'} <Text style={styles.wave}>👋</Text>
+              {userName || 'friend'} <Text style={styles.wave}>👋</Text>
             </Text>
-            <Text style={styles.sub}>Все AI аккаунты в одном месте{'\n'}и под контролем</Text>
+            <Text style={styles.sub}>All your AI accounts in one place{'\n'}and under control</Text>
           </View>
           <View style={styles.headerRight}>
             <TouchableOpacity onPress={() => router.push('/notifications')} hitSlop={10} style={styles.bell}>
@@ -113,7 +113,7 @@ export default function DashboardScreen() {
         <Card style={styles.summary}>
           <View style={styles.summaryTop}>
             <View>
-              <Text style={styles.summaryLabel}>Общее использование</Text>
+              <Text style={styles.summaryLabel}>Overall usage</Text>
               <Text style={styles.summaryValue}>{stats.avg === null ? '—' : `${stats.avg}%`}</Text>
             </View>
             {trend !== null && (
@@ -126,7 +126,7 @@ export default function DashboardScreen() {
                   )}
                   <Text style={[styles.trendText, trend > 0 && { color: Colors.exhausted }]}>{Math.abs(trend)}%</Text>
                 </View>
-                <Text style={styles.trendSub}>по сравнению{'\n'}с прошлой неделей</Text>
+                <Text style={styles.trendSub}>compared{'\n'}to last week</Text>
               </View>
             )}
           </View>
@@ -134,10 +134,10 @@ export default function DashboardScreen() {
             <View style={[styles.fill, { width: `${Math.min(100, stats.avg ?? 0)}%` }]} />
           </View>
           <View style={styles.statsRow}>
-            <Stat value={String(accounts.length)} label={plural(accounts.length, ['аккаунт', 'аккаунта', 'аккаунтов'])} />
-            <Stat value={String(stats.healthy)} label="активны" />
-            <Stat value={String(stats.low)} label="на исходе" />
-            <Stat value={stats.nearestReset ? formatTimeRemaining(stats.nearestReset) : '—'} label="до сброса" />
+            <Stat value={String(accounts.length)} label={plural(accounts.length, ['account', 'accounts', 'accounts'])} />
+            <Stat value={String(stats.healthy)} label="active" />
+            <Stat value={String(stats.low)} label="running low" />
+            <Stat value={stats.nearestReset ? formatTimeRemaining(stats.nearestReset) : '—'} label="until reset" />
           </View>
         </Card>
 
@@ -145,7 +145,7 @@ export default function DashboardScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
             {filters.map((f) => {
               const active = f === filter;
-              const label = f === 'all' ? 'Все' : PROVIDER_NAMES[f];
+              const label = f === 'all' ? 'All' : PROVIDER_NAMES[f];
               const n = f === 'all' ? accounts.length : counts[f];
               return (
                 <TouchableOpacity key={f} style={[styles.chip, active && styles.chipActive]} onPress={() => setFilter(f)}>
@@ -165,11 +165,11 @@ export default function DashboardScreen() {
 
         {accounts.length === 0 && (
           <EmptyState
-            title="Пока нет аккаунтов"
-            text="Добавьте аккаунты Claude, ChatGPT или Gemini — можно несколько аккаунтов одного сервиса, у каждого будут свои лимиты."
+            title="No accounts yet"
+            text="Add Claude, ChatGPT, or Gemini accounts — you can connect multiple accounts for the same service, each with its own limits."
             action={
               <PrimaryButton
-                label="Добавить аккаунт"
+                label="Add account"
                 icon={<Plus size={18} color="#fff" />}
                 onPress={() => router.push('/create')}
                 style={{ alignSelf: 'stretch' }}

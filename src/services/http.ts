@@ -8,11 +8,62 @@
  * show identical numbers. With it, the only identity a request carries is the
  * token / cookie header we attach explicitly for that account.
  */
+function isPrivateIPv4(host: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
+
+/**
+ * SSRF guard: only https, and never localhost, loopback, link-local or
+ * private (RFC 1918) addresses. Throws on anything unsafe; returns the parsed URL.
+ */
+export function assertSafeUrl(raw: string): URL {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error('Invalid URL');
+  }
+  if (u.protocol !== 'https:') throw new Error('Only https URLs are allowed');
+  if (u.username || u.password) throw new Error('URL must not contain credentials');
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
+    throw new Error('Host is not allowed');
+  }
+  if (isPrivateIPv4(host)) throw new Error('Private addresses are not allowed');
+  if (host.includes(':')) {
+    // IPv6 literal: block loopback, unspecified, unique-local, link-local and IPv4-mapped
+    const v4mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
+    if (
+      host === '::1' ||
+      host === '::' ||
+      /^f[cd]/.test(host) ||
+      /^fe[89ab]/.test(host) ||
+      host.startsWith('::ffff:') ||
+      (v4mapped && isPrivateIPv4(v4mapped[1]))
+    ) {
+      throw new Error('Private addresses are not allowed');
+    }
+  }
+  return u;
+}
+
 export async function isolatedFetch(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {}
 ): Promise<Response> {
   const { timeoutMs = 15000, ...rest } = init;
+  assertSafeUrl(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

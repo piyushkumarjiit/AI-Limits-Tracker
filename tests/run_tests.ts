@@ -64,7 +64,7 @@ async function runAllTests() {
   console.log('  AI LIMITS TRACKER - UNIT & E2E TESTS  ');
   console.log('========================================\n');
 
-  console.log('Suite 1: cURL и ручной ввод');
+  console.log('Suite 1: cURL and manual input');
   {
     const claudeCurl = `curl 'https://claude.ai/api/organizations/org-uuid-12345/usage' -H 'cookie: sessionKey=sk-ant-sid01-testkey123; other=val' -H 'origin: https://claude.ai'`;
     const claudeParsed = parseCurlForProvider(claudeCurl, 'claude');
@@ -72,7 +72,7 @@ async function runAllTests() {
     assert(claudeParsed.sessionKey === 'sk-ant-sid01-testkey123', 'Claude cURL: sessionKey');
 
     const cmdCurl = `curl ^"https://claude.ai/api/organizations/org-9/usage^" ^\n  -H ^"cookie: sessionKey=sk-ant-sid01-cmd; a=b^"`;
-    assert(parseCurlForProvider(cmdCurl, 'claude').sessionKey === 'sk-ant-sid01-cmd', 'Claude cURL (cmd/Windows формат)');
+    assert(parseCurlForProvider(cmdCurl, 'claude').sessionKey === 'sk-ant-sid01-cmd', 'Claude cURL (cmd/Windows format)');
 
     const chatgptCurl = `curl 'https://chatgpt.com/backend-api/wham/usage' -H 'cookie: __Secure-next-auth.session-token=jwt; cf_clearance=abc' -H 'chatgpt-account-id: acct-openai-99'`;
     assert(parseCurlForProvider(chatgptCurl, 'chatgpt').orgId === 'acct-openai-99', 'ChatGPT cURL: account id');
@@ -82,34 +82,34 @@ async function runAllTests() {
     assert(g.bl === 'boq_assistant-bard_2026' && g.sid === '-123456789' && g.atToken === 'SNlM0e_token_val', 'Gemini cURL: bl/sid/at');
 
     const m1 = parseManualInput('sk-ant-sid01-abc_DEF-123', 'claude');
-    assert(m1.ok && m1.credentials.sessionKey === 'sk-ant-sid01-abc_DEF-123' && m1.credentials.authType === 'cookie', 'Ручной ввод: голый sessionKey');
+    assert(m1.ok && m1.credentials.sessionKey === 'sk-ant-sid01-abc_DEF-123' && m1.credentials.authType === 'cookie', 'Manual input: bare sessionKey');
     const m2 = parseManualInput('Bearer ' + fakeJwt({ a: 1 }), 'chatgpt');
-    assert(m2.ok && m2.credentials.authType === 'token', 'Ручной ввод: access token ChatGPT');
-    assert(!parseManualInput('hello', 'claude').ok, 'Ручной ввод: мусор отклоняется');
-    assert(!parseManualInput('foo=bar', 'gemini').ok, 'Ручной ввод: Gemini без PSID отклоняется');
+    assert(m2.ok && m2.credentials.authType === 'token', 'Manual input: ChatGPT access token');
+    assert(!parseManualInput('hello', 'claude').ok, 'Manual input: garbage is rejected');
+    assert(!parseManualInput('foo=bar', 'gemini').ok, 'Manual input: Gemini without PSID is rejected');
   }
 
-  console.log('\nSuite 2: OAuth callback и коды');
+  console.log('\nSuite 2: OAuth callback and codes');
   {
-    assert(isClaudeCallbackUrl('https://console.anthropic.com/oauth/code/callback?code=abc&state=xyz'), 'Claude callback распознан');
+    assert(isClaudeCallbackUrl('https://console.anthropic.com/oauth/code/callback?code=abc&state=xyz'), 'Claude callback recognized');
     assert(!isClaudeCallbackUrl('https://claude.ai/oauth/authorize?code=true'), 'Claude authorize ≠ callback');
-    assert(isChatGPTCallbackUrl('http://localhost:1455/auth/callback?code=c1&state=s1'), 'ChatGPT callback распознан');
+    assert(isChatGPTCallbackUrl('http://localhost:1455/auth/callback?code=c1&state=s1'), 'ChatGPT callback recognized');
     const c1 = parseAuthCode('http://localhost:1455/auth/callback?code=c%2B1&state=s1');
-    assert(c1?.code === 'c+1' && c1?.state === 's1', 'parseAuthCode: из URL');
+    assert(c1?.code === 'c+1' && c1?.state === 's1', 'parseAuthCode: from URL');
     const c2 = parseAuthCode('abc123#st456');
-    assert(c2?.code === 'abc123' && c2?.state === 'st456', 'parseAuthCode: формат code#state');
-    assert(parseAuthCode('   ') === null, 'parseAuthCode: пустая строка');
+    assert(c2?.code === 'abc123' && c2?.state === 'st456', 'parseAuthCode: code#state format');
+    assert(parseAuthCode('   ') === null, 'parseAuthCode: empty string');
 
     const id = identityFromTokens(
       fakeJwt({ email: 'two@example.com', 'https://api.openai.com/auth': { chatgpt_account_id: 'acc-2', chatgpt_plan_type: 'plus' } })
     );
-    assert(id.email === 'two@example.com' && id.accountId === 'acc-2' && id.plan === 'Plus', 'ChatGPT: email/account/plan из id_token');
+    assert(id.email === 'two@example.com' && id.accountId === 'acc-2' && id.plan === 'Plus', 'ChatGPT: email/account/plan from id_token');
 
-    assert(claudePlanFromProfile({ organization: { rate_limit_tier: 'default_claude_max_20x' } }) === 'Max 20x', 'Claude план: Max 20x');
-    assert(claudePlanFromProfile({ organization: { organization_type: 'claude_pro' } }) === 'Pro', 'Claude план: Pro');
+    assert(claudePlanFromProfile({ organization: { rate_limit_tier: 'default_claude_max_20x' } }) === 'Max 20x', 'Claude plan: Max 20x');
+    assert(claudePlanFromProfile({ organization: { organization_type: 'claude_pro' } }) === 'Pro', 'Claude plan: Pro');
   }
 
-  console.log('\nSuite 3: Парсинг ответов API');
+  console.log('\nSuite 3: API response parsing');
   {
     const buckets = parseClaudeUsage({
       five_hour: { utilization: 32, resets_at: new Date(Date.now() + 3600e3).toISOString() },
@@ -117,9 +117,9 @@ async function runAllTests() {
       seven_day_opus: null,
       extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 1250, utilization: 25 },
     });
-    assert(buckets.length === 3, 'Claude: 5ч + неделя + доп. расход');
-    assert(buckets[0].remainingPercent === 68, 'Claude: остаток 5ч = 68%');
-    assert(buckets[2].details?.used === '12.50', 'Claude: доп. расход в $');
+    assert(buckets.length === 3, 'Claude: 5h + weekly + extra usage');
+    assert(buckets[0].remainingPercent === 68, 'Claude: 5h remaining = 68%');
+    assert(buckets[2].details?.used === '12.50', 'Claude: extra usage in $');
 
     const gpt = parseChatGPTUsage({
       plan_type: 'pro',
@@ -129,12 +129,12 @@ async function runAllTests() {
       },
       credits: { balance: '12.5', unlimited: false },
     });
-    assert(gpt.buckets.length === 2 && gpt.buckets[0].label === 'Codex · 5ч', 'ChatGPT: окна 5ч и неделя');
-    assert(gpt.buckets[1].windowType === 'weekly_7d', 'ChatGPT: недельное окно');
-    assert(gpt.plan === 'Pro' && gpt.credits === 12.5, 'ChatGPT: план и кредиты');
+    assert(gpt.buckets.length === 2 && gpt.buckets[0].label === 'Codex · 5h', 'ChatGPT: 5h and weekly windows');
+    assert(gpt.buckets[1].windowType === 'weekly_7d', 'ChatGPT: weekly window');
+    assert(gpt.plan === 'Pro' && gpt.credits === 12.5, 'ChatGPT: plan and credits');
   }
 
-  console.log('\nSuite 4: Изоляция нескольких аккаунтов одного провайдера');
+  console.log('\nSuite 4: Isolation of multiple accounts of the same provider');
   {
     const usageByToken: Record<string, number> = { 'tok-A': 20, 'tok-B': 90 };
     const calls = mockFetch((url, init) => {
@@ -151,10 +151,10 @@ async function runAllTests() {
       provider.fetchUsage('claude-a', { authType: 'oauth', accessToken: 'tok-A', refreshToken: 'r-A', expiresAt: far }),
       provider.fetchUsage('claude-b', { authType: 'oauth', accessToken: 'tok-B', refreshToken: 'r-B', expiresAt: far }),
     ]);
-    assert(ra.snapshot.buckets[0].utilizationPercent === 20 && rb.snapshot.buckets[0].utilizationPercent === 90, 'Два Claude-аккаунта получают СВОИ лимиты');
-    assert(ra.snapshot.email === 'a@x.com' && rb.snapshot.email === 'b@x.com', 'Каждый аккаунт определён по своему email');
-    assert(calls.every((c) => c.credentials === 'omit'), 'Все запросы без общего cookie-jar (credentials: omit)');
-    assert(!calls.some((c) => 'Cookie' in c.headers), 'OAuth-запросы не несут cookie');
+    assert(ra.snapshot.buckets[0].utilizationPercent === 20 && rb.snapshot.buckets[0].utilizationPercent === 90, 'Two Claude accounts get THEIR OWN limits');
+    assert(ra.snapshot.email === 'a@x.com' && rb.snapshot.email === 'b@x.com', 'Each account is identified by its own email');
+    assert(calls.every((c) => c.credentials === 'omit'), 'All requests without a shared cookie-jar (credentials: omit)');
+    assert(!calls.some((c) => 'Cookie' in c.headers), 'OAuth requests carry no cookie');
 
     // ChatGPT: two accounts, each with its own ChatGPT-Account-Id
     const gptCalls = mockFetch((url, init) => {
@@ -167,11 +167,11 @@ async function runAllTests() {
       fakeJwt({ exp: Math.floor(far / 1000), 'https://api.openai.com/auth': { chatgpt_account_id: acc } });
     const g1 = await gp.fetchUsage('gpt-1', { authType: 'oauth', accessToken: tokenFor('acc-1'), expiresAt: far });
     const g2 = await gp.fetchUsage('gpt-2', { authType: 'oauth', accessToken: tokenFor('acc-2'), expiresAt: far });
-    assert(g1.snapshot.buckets[0].utilizationPercent === 5 && g2.snapshot.buckets[0].utilizationPercent === 70, 'Два ChatGPT-аккаунта получают СВОИ лимиты');
-    assert(gptCalls.map((c) => c.headers['ChatGPT-Account-Id']).join(',') === 'acc-1,acc-2', 'ChatGPT-Account-Id берётся из токена аккаунта');
+    assert(g1.snapshot.buckets[0].utilizationPercent === 5 && g2.snapshot.buckets[0].utilizationPercent === 70, 'Two ChatGPT accounts get THEIR OWN limits');
+    assert(gptCalls.map((c) => c.headers['ChatGPT-Account-Id']).join(',') === 'acc-1,acc-2', 'ChatGPT-Account-Id is taken from the account token');
   }
 
-  console.log('\nSuite 5: Обновление токенов');
+  console.log('\nSuite 5: Token refresh');
   {
     const calls = mockFetch((url, init) => {
       if (url.includes('/v1/oauth/token')) {
@@ -187,25 +187,25 @@ async function runAllTests() {
     });
     const expired: AccountCredentials = { authType: 'oauth', accessToken: 'old', refreshToken: 'r-old', expiresAt: Date.now() - 1000 };
     const res = await new ClaudeProvider().fetchUsage('claude-a', expired);
-    assert(res.snapshot.status === 'ok', 'Истёкший access token обновляется автоматически');
-    assert(res.updatedCredentials?.refreshToken === 'rotated', 'Новый refresh token сохраняется (ротация)');
-    assert(calls[0].url.includes('/v1/oauth/token'), 'Refresh выполняется до запроса лимитов');
+    assert(res.snapshot.status === 'ok', 'Expired access token is refreshed automatically');
+    assert(res.updatedCredentials?.refreshToken === 'rotated', 'New refresh token is saved (rotation)');
+    assert(calls[0].url.includes('/v1/oauth/token'), 'Refresh happens before the limits request');
 
     mockFetch(() => ({ status: 400, body: { error: 'invalid_grant' } }));
     const dead = await new ClaudeProvider().fetchUsage('claude-a', expired);
-    assert(dead.snapshot.status === 'reauth_required', 'Отозванный refresh token → «Нужен вход»');
+    assert(dead.snapshot.status === 'reauth_required', 'Revoked refresh token → Sign-in required');
   }
 
-  console.log('\nSuite 6: Честные статусы и устаревшие данные');
+  console.log('\nSuite 6: Honest statuses and stale data');
   {
     (globalThis as any).fetch = realFetch;
     const legacy = await new ClaudeProvider().fetchUsage('c', { webSessionActive: true });
-    assert(legacy.snapshot.status === 'reauth_required' && legacy.snapshot.buckets.length === 0, 'Старая web-сессия без ключа: без фейковых 0%');
+    assert(legacy.snapshot.status === 'reauth_required' && legacy.snapshot.buckets.length === 0, 'Legacy web session without key: no fake 0%');
 
     const empty = await new ChatGPTProvider().fetchUsage('g', {});
-    assert(empty.snapshot.status === 'not_configured', 'ChatGPT без данных → not_configured');
+    assert(empty.snapshot.status === 'not_configured', 'ChatGPT without data → not_configured');
     const gem = await new GeminiProvider().fetchUsage('g', {});
-    assert(gem.snapshot.status === 'not_configured' && gem.snapshot.buckets.length === 0, 'Gemini без данных → not_configured');
+    assert(gem.snapshot.status === 'not_configured' && gem.snapshot.buckets.length === 0, 'Gemini without data → not_configured');
 
     const prev: UsageSnapshot = {
       accountId: 'x', providerType: 'claude', planName: 'Pro', status: 'ok', fetchedAt: '2026-01-01T00:00:00Z',
@@ -213,37 +213,37 @@ async function runAllTests() {
     };
     const failed: UsageSnapshot = { ...prev, status: 'rate_limited', errorMessage: '429', buckets: [], fetchedAt: new Date().toISOString() };
     const merged = mergeWithPrevious(failed, prev);
-    assert(merged.isStale === true && merged.buckets[0].utilizationPercent === 40 && merged.status === 'rate_limited', 'Временный сбой: последние реальные данные помечены устаревшими');
+    assert(merged.isStale === true && merged.buckets[0].utilizationPercent === 40 && merged.status === 'rate_limited', 'Transient failure: last real data is marked stale');
   }
 
-  console.log('\nSuite 7: Форматирование');
+  console.log('\nSuite 7: Formatting');
   {
     assert(formatTimeRemaining(null) === '—', 'null → —');
-    assert(formatTimeRemaining(new Date(Date.now() - 5000).toISOString()) === 'Сброшен', 'прошлое → Сброшен');
-    assert(formatTimeRemaining(new Date(Date.now() + 25 * 60e3 + 500).toISOString()) === '25м', '25м');
-    assert(formatTimeRemaining(new Date(Date.now() + (2 * 3600 + 15 * 60) * 1000 + 500).toISOString()) === '2ч 15м', '2ч 15м');
-    assert(formatTimeRemaining(new Date(Date.now() + (3 * 86400 + 4 * 3600) * 1000 + 500).toISOString()) === '3д 4ч', '3д 4ч');
-    assert(plural(4, ['аккаунт', 'аккаунта', 'аккаунтов']) === 'аккаунта' && plural(11, ['a', 'b', 'c']) === 'c', 'Склонение');
+    assert(formatTimeRemaining(new Date(Date.now() - 5000).toISOString()) === 'Reset', 'past → Reset');
+    assert(formatTimeRemaining(new Date(Date.now() + 25 * 60e3 + 500).toISOString()) === '25m', '25m');
+    assert(formatTimeRemaining(new Date(Date.now() + (2 * 3600 + 15 * 60) * 1000 + 500).toISOString()) === '2h 15m', '2h 15m');
+    assert(formatTimeRemaining(new Date(Date.now() + (3 * 86400 + 4 * 3600) * 1000 + 500).toISOString()) === '3d 4h', '3d 4h');
+    assert(plural(1, ['item', 'items', 'items']) === 'item' && plural(4, ['item', 'items', 'items']) === 'items' && plural(11, ['a', 'b', 'c']) === 'c', 'Pluralization');
   }
 
-  console.log('\nSuite 8: Движок рецептов (Cursor/Copilot/Perplexity/… + Custom)');
+  console.log('\nSuite 8: Recipe engine (Cursor/Copilot/Perplexity/… + Custom)');
   {
-    assert(resolvePath({ a: { b: [{ c: 7 }] } }, 'a.b[0].c') === 7, 'resolvePath: вложенный путь с индексом');
-    assert(resolvePath({ a: 1 }, 'x.y') === undefined, 'resolvePath: отсутствующий путь → undefined');
+    assert(resolvePath({ a: { b: [{ c: 7 }] } }, 'a.b[0].c') === 7, 'resolvePath: nested path with index');
+    assert(resolvePath({ a: 1 }, 'x.y') === undefined, 'resolvePath: missing path → undefined');
 
     // used/limit mapping (Cursor shape)
     const cursorBody = { 'gpt-4': { numRequests: 125, maxRequestUsage: 500 } };
     const b = mapWindow(cursorBody, { id: 'p', label: 'Premium', windowType: 'monthly_30d', usedPath: 'gpt-4.numRequests', limitPath: 'gpt-4.maxRequestUsage' })!;
-    assert(b.utilizationPercent === 25 && b.remainingPercent === 75, 'mapWindow: used/limit → 25% использовано');
-    assert(b.details?.used === '125' && b.details?.limit === '500', 'mapWindow: детали used/limit');
+    assert(b.utilizationPercent === 25 && b.remainingPercent === 75, 'mapWindow: used/limit → 25% used');
+    assert(b.details?.used === '125' && b.details?.limit === '500', 'mapWindow: used/limit details');
 
     // remaining/limit (Grok/Poe shape)
     const grok = mapWindow({ remainingQueries: 8, totalQueries: 20 }, { id: 'w', label: 'W', windowType: 'sliding_window', remainingPath: 'remainingQueries', limitPath: 'totalQueries' })!;
-    assert(grok.utilizationPercent === 60, 'mapWindow: remaining/limit → 60% использовано');
+    assert(grok.utilizationPercent === 60, 'mapWindow: remaining/limit → 60% used');
 
     // percent 0-1 with scale
     const frac = mapWindow({ u: 0.42 }, { id: 'x', label: 'X', windowType: 'sliding_window', usedPercentPath: 'u', percentScale: 1 })!;
-    assert(frac.utilizationPercent === 42, 'mapWindow: доля 0-1 масштабируется в проценты');
+    assert(frac.utilizationPercent === 42, 'mapWindow: 0-1 fraction is scaled to percent');
 
     // reset formats
     const r = mapWindow({ u: 10, reset: 120 }, { id: 'r', label: 'R', windowType: 'sliding_window', usedPercentPath: 'u', resetPath: 'reset', resetFormat: 'seconds_from_now' })!;
@@ -251,21 +251,21 @@ async function runAllTests() {
 
     // auto-detect for custom (arbitrary response)
     const auto = autoDetectWindows({ limits: { used: 30, limit: 100, resetAt: new Date(Date.now() + 3600e3).toISOString() } });
-    assert(auto.length === 1 && auto[0].utilizationPercent === 30, 'autoDetect: находит used/limit в произвольном JSON');
+    assert(auto.length === 1 && auto[0].utilizationPercent === 30, 'autoDetect: finds used/limit in arbitrary JSON');
     const autoPct = autoDetectWindows({ quota: { utilization: 0.5 } });
-    assert(autoPct.length === 1 && autoPct[0].utilizationPercent === 50, 'autoDetect: находит долю utilization');
+    assert(autoPct.length === 1 && autoPct[0].utilizationPercent === 50, 'autoDetect: finds utilization fraction');
 
     // applyRecipe end-to-end
     const snap = applyRecipe('acc', 'cursor', { usageUrl: 'x', auth: 'cookie', planPath: 'plan', windows: [{ id: 'p', label: 'P', windowType: 'monthly_30d', usedPath: 'u', limitPath: 'l' }] } as any, { plan: 'Pro', u: 1, l: 4 });
-    assert(snap.status === 'ok' && snap.planName === 'Pro' && snap.buckets[0].utilizationPercent === 25, 'applyRecipe: собирает снапшот + план');
+    assert(snap.status === 'ok' && snap.planName === 'Pro' && snap.buckets[0].utilizationPercent === 25, 'applyRecipe: builds snapshot + plan');
 
     // registry returns a RecipeProvider for new types
-    assert(getProvider('grok') instanceof RecipeProvider && getProvider('custom') instanceof RecipeProvider, 'Реестр: новые сервисы → RecipeProvider');
+    assert(getProvider('grok') instanceof RecipeProvider && getProvider('custom') instanceof RecipeProvider, 'Registry: new services → RecipeProvider');
 
     // custom cURL → recipe
     const customCurl = `curl 'https://api.svc.com/v1/usage' -H 'cookie: session=abc' `;
     const cm = parseManualInput(customCurl, 'custom');
-    assert(cm.ok && cm.credentials.recipe?.usageUrl === 'https://api.svc.com/v1/usage' && cm.credentials.recipe?.auth === 'cookie', 'Custom: cURL → рецепт с URL и cookie-auth');
+    assert(cm.ok && cm.credentials.recipe?.usageUrl === 'https://api.svc.com/v1/usage' && cm.credentials.recipe?.auth === 'cookie', 'Custom: cURL → recipe with URL and cookie-auth');
     const cmPost = parseManualInput(`curl 'https://poe.com/api/gql_POST' -H 'authorization: Bearer eyJx.y.z' --data-raw '{"q":1}'`, 'custom');
     assert(cmPost.ok && cmPost.credentials.recipe?.method === 'POST' && cmPost.credentials.recipe?.body === '{"q":1}' && cmPost.credentials.recipe?.auth === 'bearer', 'Custom: POST + body + bearer');
 
@@ -276,11 +276,11 @@ async function runAllTests() {
     // needsVerification recipe with no matching fields → honest error, not crash
     const unverified = await getProvider('mistral').fetchUsage('m', { authType: 'cookie', cookies: 'x=y' });
     // fetch will fail on network in test env; status is error/reauth, never ok with fake data
-    assert(unverified.snapshot.status !== 'ok', 'Непроверенный рецепт без сети не выдаёт фейковые данные');
+    assert(unverified.snapshot.status !== 'ok', 'Unverified recipe without network does not produce fake data');
   }
 
   console.log('\n========================================');
-  console.log(`ИТОГИ: Всего: ${totalTests} | Пройдено: ${passedTests} | Ошибок: ${failedTests}`);
+  console.log(`SUMMARY: Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`);
   console.log('========================================\n');
 
   if (failedTests > 0) process.exit(1);

@@ -142,7 +142,7 @@ export const PROVIDER_NAMES: Record<ProviderType, string> = {
   mistral: 'Mistral',
   deepseek: 'DeepSeek',
   poe: 'Poe',
-  custom: 'Другой сервис',
+  custom: 'Other service',
 };
 
 export const PROVIDER_COMPANY: Record<ProviderType, string> = {
@@ -156,7 +156,7 @@ export const PROVIDER_COMPANY: Record<ProviderType, string> = {
   mistral: 'Mistral AI',
   deepseek: 'DeepSeek',
   poe: 'Quora',
-  custom: 'Произвольный endpoint',
+  custom: 'Custom endpoint',
 };
 
 /** Distinct chart colors per account: provider hue, alternating shade for 2nd+ account. */

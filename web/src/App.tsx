@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AgentSession, AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
+import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES } from '../../src/constants/theme';
-import { formatTimeRemaining, greeting, MONTHS_SHORT, plural } from '../../src/utils/formatters';
+import { formatTimeRemaining, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
 import { Account, api, ApiError } from './api';
 import { BarChart, Donut, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
-import RemotePage from './RemotePage';
 
 /* ---------------- Router ---------------- */
 
@@ -31,20 +30,20 @@ function useTick(ms = 30000) {
   }, [ms]);
 }
 
-const WEEKDAYS_MON = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const WEEKDAYS_MON = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function relative(iso?: string | null): string {
-  if (!iso) return 'никогда';
+  if (!iso) return 'never';
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return 'только что';
-  if (s < 3600) return `${Math.floor(s / 60)} мин назад`;
-  if (s < 86400) return `${Math.floor(s / 3600)} ч назад`;
-  return `${Math.floor(s / 86400)} д назад`;
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
 }
 
 function clock(t: number | string): string {
   const d = new Date(t);
-  return d.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function useColors(accounts: Account[]) {
@@ -119,17 +118,11 @@ export default function App() {
   switch (path) {
     case 'account': {
       const acc = accounts.find((a) => a.id === param);
-      page = acc ? <AccountPage account={acc} reload={load} go={go} /> : <Empty title="Аккаунт не найден" />;
+      page = acc ? <AccountPage account={acc} reload={load} go={go} /> : <Empty title="Account not found" />;
       break;
     }
     case 'stats':
       page = <StatsPage accounts={accounts} />;
-      break;
-    case 'agents':
-      page = <AgentsPage />;
-      break;
-    case 'remote':
-      page = <RemotePage initialThreadId={param} />;
       break;
     case 'accounts':
       page = <AccountsPage accounts={accounts} go={go} reload={load} syncing={syncing} onRefresh={refreshAll} />;
@@ -147,34 +140,33 @@ export default function App() {
       page = <HomePage state={state} go={go} syncing={syncing} onRefresh={refreshAll} />;
   }
 
-  const tab = !path ? 'home' : path === 'account' ? 'home' : path === 'remote' ? 'agents' : path;
+  const tab = !path ? 'home' : path === 'account' ? 'home' : path;
   return (
     <div className="shell">
       <nav className="sidebar">
         <div className="brand">
           <span className="brand-mark">◔</span> AI Limits
         </div>
-        <NavItem icon="home" label="Главная" active={tab === 'home'} onClick={() => go('/')} />
-        <NavItem icon="terminal" label="Агенты" active={tab === 'agents'} onClick={() => go('/agents')} />
-        <NavItem icon="chart" label="Статистика" active={tab === 'stats'} onClick={() => go('/stats')} />
-        <NavItem icon="users" label="Аккаунты" active={tab === 'accounts'} onClick={() => go('/accounts')} />
-        <NavItem icon="bell" label="Уведомления" active={tab === 'alerts'} onClick={() => go('/alerts')} />
-        <NavItem icon="settings" label="Настройки" active={tab === 'settings'} onClick={() => go('/settings')} />
+        <NavItem icon="home" label="Home" active={tab === 'home'} onClick={() => go('/')} />
+        <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
+        <NavItem icon="users" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
+        <NavItem icon="bell" label="Alerts" active={tab === 'alerts'} onClick={() => go('/alerts')} />
+        <NavItem icon="settings" label="Settings" active={tab === 'settings'} onClick={() => go('/settings')} />
         <button className="btn dark wide" onClick={() => go('/add')}>
-          <Icon name="plus" size={18} /> Добавить аккаунт
+          <Icon name="plus" size={18} /> Add account
         </button>
       </nav>
       <main className="main">{page}</main>
       <nav className="tabbar">
-        <NavItem icon="home" label="Главная" active={tab === 'home'} onClick={() => go('/')} />
-        <NavItem icon="terminal" label="Агенты" active={tab === 'agents'} onClick={() => go('/agents')} />
+        <NavItem icon="home" label="Home" active={tab === 'home'} onClick={() => go('/')} />
+        <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
         <div className="fab-slot">
-          <button className="fab" aria-label="Добавить аккаунт" onClick={() => go('/add')}>
+          <button className="fab" aria-label="Add account" onClick={() => go('/add')}>
             <Icon name="plus" size={26} stroke={2.4} />
           </button>
         </div>
-        <NavItem icon="users" label="Аккаунты" active={tab === 'accounts'} onClick={() => go('/accounts')} />
-        <NavItem icon="settings" label="Настройки" active={tab === 'settings'} onClick={() => go('/settings')} />
+        <NavItem icon="users" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
+        <NavItem icon="settings" label="Settings" active={tab === 'settings'} onClick={() => go('/settings')} />
       </nav>
     </div>
   );
@@ -199,7 +191,7 @@ const Header: React.FC<{ title: string; sub?: string; back?: boolean; right?: Re
   <header className="page-head">
     <div className="page-head-row">
       {back ? (
-        <button className="icon-btn" onClick={() => history.back()} aria-label="Назад">
+        <button className="icon-btn" onClick={() => history.back()} aria-label="Back">
           <Icon name="arrowLeft" size={22} />
         </button>
       ) : (
@@ -240,11 +232,11 @@ const Login: React.FC<{ onDone: () => void }> = ({ onDone }) => {
           <Logo type="gemini" size={40} />
         </div>
         <h1>AI Limits Tracker</h1>
-        <p className="muted">Все лимиты Claude, ChatGPT и Gemini — на одном экране.</p>
-        <input type="password" placeholder="Пароль" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus autoComplete="current-password" />
+        <p className="muted">All your Claude, ChatGPT and Gemini limits on one screen.</p>
+        <input type="password" placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus autoComplete="current-password" />
         {err && <p className="error">{err}</p>}
         <button className="btn dark wide" disabled={busy || !pw}>
-          {busy ? 'Вход…' : 'Войти'}
+          {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
     </div>
@@ -293,17 +285,17 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
       <header className="home-head">
         <div>
           <p className="hello">{greeting()}</p>
-          <h1 className="hero-name">Твои лимиты 👋</h1>
-          <p className="muted">Все AI аккаунты в одном месте и под контролем</p>
+          <h1 className="hero-name">Your limits 👋</h1>
+          <p className="muted">All your AI accounts in one place, under control</p>
         </div>
         <div className="home-actions">
-          <button className={`icon-btn ${syncing ? 'spin' : ''}`} onClick={onRefresh} aria-label="Обновить">
+          <button className={`icon-btn ${syncing ? 'spin' : ''}`} onClick={onRefresh} aria-label="Refresh">
             <Icon name="refresh" />
           </button>
-          <button className="icon-btn only-mobile" onClick={() => go('/stats')} aria-label="Статистика">
+          <button className="icon-btn only-mobile" onClick={() => go('/stats')} aria-label="Stats">
             <Icon name="chart" />
           </button>
-          <button className="icon-btn bell" onClick={() => go('/alerts')} aria-label="Уведомления">
+          <button className="icon-btn bell" onClick={() => go('/alerts')} aria-label="Alerts">
             <Icon name="bell" />
             {attention && <i className="dot" />}
           </button>
@@ -313,31 +305,30 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
       <section className="card summary">
         <div className="summary-top">
           <div>
-            <p className="label">Общее использование</p>
+            <p className="label">Overall usage</p>
             <p className="big">{avg === null ? '—' : `${avg}%`}</p>
           </div>
           {streak !== null && streak > 0 && (
-            <div className="streak-pill" title="Дней подряд с активностью">
-              <Icon name="flame" size={16} /> {streak} {plural(streak, ['день', 'дня', 'дней'])} подряд
+            <div className="streak-pill" title="Days in a row with activity">
+              <Icon name="flame" size={16} /> {streak} {streak === 1 ? 'day' : 'days'} in a row
             </div>
           )}
         </div>
         <div className="track"><i style={{ width: `${Math.min(100, avg ?? 0)}%` }} /></div>
         <div className="stats4">
-          <Stat v={String(accounts.length)} l={plural(accounts.length, ['аккаунт', 'аккаунта', 'аккаунтов'])} />
-          <Stat v={String(healthy)} l="активны" />
-          <Stat v={String(low)} l="на исходе" />
-          <Stat v={nearest ? formatTimeRemaining(nearest) : '—'} l="до сброса" />
+          <Stat v={String(accounts.length)} l={accounts.length === 1 ? 'account' : 'accounts'} />
+          <Stat v={String(healthy)} l="active" />
+          <Stat v={String(low)} l="running low" />
+          <Stat v={nearest ? formatTimeRemaining(nearest) : '—'} l="until reset" />
         </div>
       </section>
 
-      <AgentsStrip go={go} />
 
       {accounts.length > 0 && (
         <div className="chips">
           {filters.map((f) => (
             <button key={f} className={`chip ${f === filter ? 'active' : ''}`} onClick={() => setFilter(f)}>
-              {f === 'all' ? 'Все' : PROVIDER_NAMES[f]} <i>{f === 'all' ? accounts.length : counts[f]}</i>
+              {f === 'all' ? 'All' : PROVIDER_NAMES[f]} <i>{f === 'all' ? accounts.length : counts[f]}</i>
             </button>
           ))}
         </div>
@@ -360,12 +351,12 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
               <div className="ac-right">
                 {b && b.remainingPercent != null && b.remainingPercent < 100 && b.resetsAt && (
                   <>
-                    <span className="muted small">Сброс через</span>
+                    <span className="muted small">Resets in</span>
                     <b className="reset"><Icon name="clock" size={13} stroke={2.4} /> {formatTimeRemaining(b.resetsAt)}</b>
                   </>
                 )}
                 {a.latestSnapshot?.isStale ? (
-                  <span className="stale">данные от {clock(a.latestSnapshot.fetchedAt)}</span>
+                  <span className="stale">data from {clock(a.latestSnapshot.fetchedAt)}</span>
                 ) : (
                   <MiniBars values={bars[a.id] || []} />
                 )}
@@ -376,11 +367,11 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
       </div>
 
       {accounts.length === 0 && (
-        <Empty title="Пока нет аккаунтов" text="Подключите Claude, ChatGPT или Gemini. Можно несколько аккаунтов одного сервиса — у каждого свои лимиты.">
-          <button className="btn dark" onClick={() => go('/add')}><Icon name="plus" size={18} /> Добавить аккаунт</button>
+        <Empty title="No accounts yet" text="Connect Claude, ChatGPT or Gemini. You can add several accounts for the same service — each one has its own limits.">
+          <button className="btn dark" onClick={() => go('/add')}><Icon name="plus" size={18} /> Add account</button>
         </Empty>
       )}
-      <p className="footnote">Сервер обновляет данные каждые {state.intervalMin} мин · последнее обновление {relative(state.lastSyncAllAt)}</p>
+      <p className="footnote">Server refreshes data every {state.intervalMin} min · last update {relative(state.lastSyncAllAt)}</p>
     </>
   );
 };
@@ -399,7 +390,7 @@ function dailyPeak(points: StatPoint[], days: number) {
   for (let i = days - 1; i >= 0; i--) {
     const from = start.getTime() - i * 86400000;
     const d = new Date(from);
-    labels.push(days <= 7 ? ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d.getDay()] : i % 5 === 0 ? String(d.getDate()) : '');
+    labels.push(days <= 7 ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] : i % 5 === 0 ? String(d.getDate()) : '');
     let max: number | null = null;
     for (const p of points) if (p.t >= from && p.t < from + 86400000 && p.session !== null) max = Math.max(max ?? 0, p.session);
     values.push(max);
@@ -433,7 +424,7 @@ const AccountPage: React.FC<{ account: Account; reload: () => Promise<void>; go:
     }
   };
   const remove = async () => {
-    if (!confirm(`Удалить «${account.name}» и его историю?`)) return;
+    if (!confirm(`Delete "${account.name}" and its history?`)) return;
     await api.remove(account.id);
     await reload();
     go('/');
@@ -445,7 +436,7 @@ const AccountPage: React.FC<{ account: Account; reload: () => Promise<void>; go:
         title=""
         back
         right={
-          <button className={`icon-btn ${busy ? 'spin' : ''}`} onClick={refresh} aria-label="Обновить">
+          <button className={`icon-btn ${busy ? 'spin' : ''}`} onClick={refresh} aria-label="Refresh">
             <Icon name="refresh" />
           </button>
         }
@@ -462,38 +453,38 @@ const AccountPage: React.FC<{ account: Account; reload: () => Promise<void>; go:
       {snap && snap.status !== 'ok' && (
         <div className={`alert-box ${needsLogin ? 'bad' : ''}`}>
           <div className="grow">
-            <b>{snap.errorMessage || 'Ошибка обновления'}</b>
-            {snap.isStale && <span className="muted small">Показаны данные от {clock(snap.fetchedAt)}</span>}
+            <b>{snap.errorMessage || 'Refresh failed'}</b>
+            {snap.isStale && <span className="muted small">Showing data from {clock(snap.fetchedAt)}</span>}
           </div>
-          {needsLogin && <button className="btn dark small" onClick={() => go(`/add/${account.id}`)}>Войти</button>}
+          {needsLogin && <button className="btn dark small" onClick={() => go(`/add/${account.id}`)}>Sign in</button>}
         </div>
       )}
 
-      <Segmented value={tab} onChange={setTab} options={[['overview', 'Обзор'], ['limits', 'Лимиты'], ['history', 'История'], ['settings', 'Настройки']]} />
+      <Segmented value={tab} onChange={setTab} options={[['overview', 'Overview'], ['limits', 'Limits'], ['history', 'History'], ['settings', 'Settings']]} />
 
       {tab === 'overview' && (
         <div className="overview">
           <div className="big-ring">
             <Ring remaining={main?.remainingPercent ?? null} size={220} stroke={16} provider={account.providerType} dim={snap?.isStale} />
             {main && <p className="muted small">{main.label}</p>}
-            <p className="muted">Сброс через</p>
+            <p className="muted">Resets in</p>
             <p className="reset-big"><Icon name="clock" size={20} stroke={2.4} /> {formatTimeRemaining(main?.resetsAt)}</p>
           </div>
           <div className="tiles">
             {(snap?.buckets || []).slice(0, 3).map((b) => <Tile key={b.id} b={b} />)}
           </div>
           <div className="section-row">
-            <h2>Использование за {range} дней</h2>
-            <Segmented value={range} onChange={setRange} options={[['7', '7 дней'], ['30', '30 дней']]} />
+            <h2>Usage over {range} days</h2>
+            <Segmented value={range} onChange={setRange} options={[['7', '7 days'], ['30', '30 days']]} />
           </div>
           <div className="card">
             {chart.values.some((v) => v !== null) ? (
               <BarChart labels={chart.labels} series={[{ color: '#5f5d58', values: chart.values }]} max={100} />
             ) : (
-              <p className="muted center pad">График заполнится по мере обновлений: каждый день — пиковая загрузка 5-часового окна.</p>
+              <p className="muted center pad">The chart fills in as data refreshes: each day shows peak load of the 5-hour window.</p>
             )}
           </div>
-          <p className="footnote">Обновлено {relative(account.lastSyncAt)}</p>
+          <p className="footnote">Updated {relative(account.lastSyncAt)}</p>
         </div>
       )}
 
@@ -501,20 +492,20 @@ const AccountPage: React.FC<{ account: Account; reload: () => Promise<void>; go:
         <div className="stack">
           {(snap?.buckets || []).map((b) => <LimitRow key={b.id} b={b} />)}
           {snap?.credits && (
-            <div className="card limit-row"><div className="limit-head"><b>Баланс кредитов</b><span>{snap.credits.balance} {snap.credits.currency}</span></div></div>
+            <div className="card limit-row"><div className="limit-head"><b>Credit balance</b><span>{snap.credits.balance} {snap.credits.currency}</span></div></div>
           )}
-          {!snap?.buckets?.length && <p className="muted center pad">{needsLogin ? 'Войдите в аккаунт, чтобы увидеть лимиты.' : 'Сервис не вернул лимитов.'}</p>}
+          {!snap?.buckets?.length && <p className="muted center pad">{needsLogin ? 'Sign in to the account to see limits.' : 'The service returned no limits.'}</p>}
         </div>
       )}
 
       {tab === 'history' && (
         <div className="stack">
           <div className="card">
-            <p className="label">Сессионное окно, % использования</p>
-            {points.length ? <LineChart values={points.slice(-60).map((p) => p.session)} color={Colors[account.providerType].chart} /> : <p className="muted center pad">История пока пуста.</p>}
+            <p className="label">Session window, % used</p>
+            {points.length ? <LineChart values={points.slice(-60).map((p) => p.session)} color={Colors[account.providerType].chart} /> : <p className="muted center pad">No history yet.</p>}
           </div>
           <div className="card table">
-            <div className="tr th"><span>Время</span><span>Сессия</span><span>Неделя</span></div>
+            <div className="tr th"><span>Time</span><span>Session</span><span>Week</span></div>
             {[...points].reverse().slice(0, 40).map((p, i) => (
               <div className="tr" key={i}><span>{clock(p.t)}</span><span>{p.session ?? '—'}%</span><span>{p.weekly != null ? `${p.weekly}%` : '—'}</span></div>
             ))}
@@ -525,21 +516,21 @@ const AccountPage: React.FC<{ account: Account; reload: () => Promise<void>; go:
       {tab === 'settings' && (
         <div className="stack">
           <div className="card">
-            <p className="label">Название</p>
+            <p className="label">Name</p>
             <div className="row">
               <input value={name} onChange={(e) => setName(e.target.value)} />
               {name.trim() && name !== account.name && (
-                <button className="btn dark small" onClick={async () => { await api.rename(account.id, name); await reload(); }}>Сохранить</button>
+                <button className="btn dark small" onClick={async () => { await api.rename(account.id, name); await reload(); }}>Save</button>
               )}
             </div>
-            {account.email && <p className="muted small mt">Аккаунт: {account.email}</p>}
+            {account.email && <p className="muted small mt">Account: {account.email}</p>}
             <label className="switch-row mt">
-              <span>Отслеживать</span>
+              <span>Track</span>
               <input type="checkbox" checked={account.isActive} onChange={async (e) => { await api.setActive(account.id, e.target.checked); await reload(); }} />
             </label>
           </div>
-          <button className="btn light wide" onClick={() => go(`/add/${account.id}`)}>Переподключить аккаунт</button>
-          <button className="btn danger wide" onClick={remove}><Icon name="trash" size={18} /> Удалить аккаунт</button>
+          <button className="btn light wide" onClick={() => go(`/add/${account.id}`)}>Reconnect account</button>
+          <button className="btn danger wide" onClick={remove}><Icon name="trash" size={18} /> Delete account</button>
         </div>
       )}
     </>
@@ -551,7 +542,7 @@ const Tile: React.FC<{ b: QuotaBucket }> = ({ b }) => (
     <span className="muted small ellipsis">{b.label}</span>
     <b>
       {b.details?.used ? `$${b.details.used}` : b.remainingPercent === null ? '—' : `${Math.round(b.remainingPercent)}%`}
-      <small>{b.details?.limit ? ` / $${b.details.limit}` : ' ост.'}</small>
+      <small>{b.details?.limit ? ` / $${b.details.limit}` : ' left'}</small>
     </b>
   </div>
 );
@@ -561,14 +552,14 @@ const LimitRow: React.FC<{ b: QuotaBucket }> = ({ b }) => {
   const color = used === null ? Colors.unavailable : used >= 90 ? Colors.exhausted : used >= 70 ? Colors.critical : Colors.ring;
   return (
     <div className="card limit-row">
-      <div className="limit-head"><b>{b.label}</b><span>{used === null ? '—' : `${Math.round(used)}% исп.`}</span></div>
+      <div className="limit-head"><b>{b.label}</b><span>{used === null ? '—' : `${Math.round(used)}% used`}</span></div>
       <div className="track"><i style={{ width: `${Math.min(100, used ?? 0)}%`, background: color }} /></div>
       <p className="muted small">
         {b.details?.used
-          ? `Потрачено $${b.details.used} из $${b.details.limit}`
+          ? `Spent $${b.details.used} of $${b.details.limit}`
           : b.resetsAt
-          ? `Сброс через ${formatTimeRemaining(b.resetsAt)} · ${new Date(b.resetsAt).toLocaleString('ru-RU', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
-          : 'Время сброса не сообщается'}
+          ? `Resets in ${formatTimeRemaining(b.resetsAt)} · ${new Date(b.resetsAt).toLocaleString('en-US', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
+          : 'Reset time not reported'}
       </p>
     </div>
   );
@@ -576,7 +567,7 @@ const LimitRow: React.FC<{ b: QuotaBucket }> = ({ b }) => {
 
 /* ---------------- Stats ---------------- */
 
-const RANGES: Array<[string, string]> = [['7', '7Д'], ['30', '30Д'], ['90', '3М'], ['365', '1Г']];
+const RANGES: Array<[string, string]> = [['7', '7D'], ['30', '30D'], ['90', '3M'], ['365', '1Y']];
 
 const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
   const [range, setRange] = useState('30');
@@ -602,49 +593,49 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
 
   return (
     <>
-      <Header title="Статистика" sub="Активность и лимиты по всем аккаунтам" />
+      <Header title="Stats" sub="Activity and limits across all accounts" />
       <Segmented value={range} onChange={setRange} options={RANGES as Array<[string, string]>} />
       {!s ? (
         <div className="splash small"><div className="spinner" /></div>
       ) : (
         <div className="stack">
           <div className="kpis">
-            <Kpi icon="flame" value={`${s.currentStreak}`} label={`${plural(s.currentStreak, ['день', 'дня', 'дней'])} подряд`} accent />
-            <Kpi value={`${s.longestStreak}`} label="рекорд серии" />
-            <Kpi value={`${s.activeDays}`} label={`активных ${plural(s.activeDays, ['день', 'дня', 'дней'])}`} />
-            <Kpi value={`${s.limitHits}`} label={`${plural(s.limitHits, ['упор', 'упора', 'упоров'])} в лимит`} />
-            <Kpi value={s.redZoneMinutes >= 60 ? `${Math.round(s.redZoneMinutes / 60)}ч` : `${s.redZoneMinutes}м`} label="в красной зоне (<20%)" />
-            <Kpi value={s.busiestHour === null ? '—' : `${String(s.busiestHour).padStart(2, '0')}:00`} label="самый активный час" />
+            <Kpi icon="flame" value={`${s.currentStreak}`} label={`${s.currentStreak === 1 ? 'day' : 'days'} in a row`} accent />
+            <Kpi value={`${s.longestStreak}`} label="longest streak" />
+            <Kpi value={`${s.activeDays}`} label={`active ${s.activeDays === 1 ? 'day' : 'days'}`} />
+            <Kpi value={`${s.limitHits}`} label={`limit ${s.limitHits === 1 ? 'hit' : 'hits'}`} />
+            <Kpi value={s.redZoneMinutes >= 60 ? `${Math.round(s.redZoneMinutes / 60)}h` : `${s.redZoneMinutes}m`} label="in red zone (<20%)" />
+            <Kpi value={s.busiestHour === null ? '—' : `${String(s.busiestHour).padStart(2, '0')}:00`} label="busiest hour" />
           </div>
 
           <div className="card">
-            <h2>Календарь активности</h2>
+            <h2>Activity calendar</h2>
             <Heatmap calendar={s.calendar} days={Math.min(Number(range), 182)} />
           </div>
 
           <div className="two-col">
             <div className="card">
-              <h2>Распределение нагрузки</h2>
+              <h2>Load distribution</h2>
               <div className="dist">
-                <Donut segments={dist.items.map((x) => ({ value: x.used, color: colors[x.a.id] }))} value={`${dist.avg}%`} label="в среднем" />
+                <Donut segments={dist.items.map((x) => ({ value: x.used, color: colors[x.a.id] }))} value={`${dist.avg}%`} label="on average" />
                 <div className="legend">
                   {dist.items.map((x) => (
                     <div key={x.a.id}><i style={{ background: colors[x.a.id] }} /><span className="ellipsis">{x.a.name}</span><b>{x.share}%</b></div>
                   ))}
-                  {!dist.items.length && <p className="muted small">Нет текущих данных</p>}
+                  {!dist.items.length && <p className="muted small">No current data</p>}
                 </div>
               </div>
             </div>
             <div className="card">
-              <h2>Прогноз (5-часовое окно)</h2>
+              <h2>Forecast (5-hour window)</h2>
               <div className="forecasts">
                 {accounts.map((a) => {
                   const f = data!.forecasts[a.id];
                   const session = a.latestSnapshot?.buckets.find((b) => b.windowType === 'session_5h');
-                  let text = 'темп ровный — хватит до сброса';
-                  if (!session) text = 'нет данных';
-                  else if (f?.exhaustAt && !f.safeUntilReset) text = `кончится через ${formatTimeRemaining(new Date(f.exhaustAt).toISOString())}`;
-                  else if (f?.burnRatePerHour) text = `${f.burnRatePerHour}%/ч — хватит до сброса`;
+                  let text = 'steady pace — lasts until reset';
+                  if (!session) text = 'no data';
+                  else if (f?.exhaustAt && !f.safeUntilReset) text = `runs out in ${formatTimeRemaining(new Date(f.exhaustAt).toISOString())}`;
+                  else if (f?.burnRatePerHour) text = `${f.burnRatePerHour}%/h — lasts until reset`;
                   return (
                     <div key={a.id} className="fc-row">
                       <Logo type={a.providerType} size={26} />
@@ -659,7 +650,7 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
 
           <div className="two-col">
             <div className="card">
-              <h2>По часам</h2>
+              <h2>By hour</h2>
               <div className="hours">
                 {s.byHour.map((v, h) => (
                   <div key={h} className="hour" title={`${h}:00`}>
@@ -670,7 +661,7 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
               </div>
             </div>
             <div className="card">
-              <h2>По дням недели</h2>
+              <h2>By weekday</h2>
               <div className="weekdays">
                 {s.byWeekday.map((v, d) => (
                   <div key={d}><span>{WEEKDAYS_MON[d]}</span><div className="track"><i style={{ width: `${(v / maxDay) * 100}%` }} /></div></div>
@@ -680,7 +671,7 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
           </div>
 
           <div className="card table">
-            <div className="tr th five"><span>Аккаунт</span><span>Средн.</span><span>Пик</span><span>Упоры</span><span>Доля</span></div>
+            <div className="tr th five"><span>Account</span><span>Avg.</span><span>Peak</span><span>Limit hits</span><span>Share</span></div>
             {s.perAccount.map((p) => {
               const a = accounts.find((x) => x.id === p.accountId);
               if (!a) return null;
@@ -696,7 +687,7 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
             })}
           </div>
           <p className="footnote">
-            Сервисы не сообщают число сообщений или токенов по подписке — статистика считается по изменению «% использования» лимитов. Замеров: {s.measurements}.
+Services don't report message or token counts for a subscription — stats are calculated from changes in limit "% used". Measurements: {s.measurements}.
           </p>
         </div>
       )}
@@ -753,11 +744,11 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
   return (
     <>
       <Header
-        title="Аккаунты"
-        sub="Управление всеми AI аккаунтами"
-        right={<button className={`icon-btn ${syncing ? 'spin' : ''}`} onClick={onRefresh} aria-label="Обновить все"><Icon name="refresh" /></button>}
+        title="Accounts"
+        sub="Manage all AI accounts"
+        right={<button className={`icon-btn ${syncing ? 'spin' : ''}`} onClick={onRefresh} aria-label="Refresh all"><Icon name="refresh" /></button>}
       />
-      <button className="btn dark wide mb" onClick={() => go('/add')}><Icon name="plus" size={18} /> Добавить аккаунт</button>
+      <button className="btn dark wide mb" onClick={() => go('/add')}><Icon name="plus" size={18} /> Add account</button>
       <div className="stack">
         {accounts.map((a, i) => (
           <div key={a.id} className="card list-row">
@@ -765,17 +756,17 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
               <Logo type={a.providerType} size={46} />
               <div className="grow">
                 <b className="ellipsis">{a.name}</b>
-                <span className="muted small ellipsis">{a.email || `обновлено ${relative(a.lastSyncAt)}`}</span>
+                <span className="muted small ellipsis">{a.email || `updated ${relative(a.lastSyncAt)}`}</span>
               </div>
               <StatusDot account={a} />
             </button>
             <div className="order">
-              <button disabled={i === 0} onClick={() => move(i, -1)} aria-label="Выше">▲</button>
-              <button disabled={i === accounts.length - 1} onClick={() => move(i, 1)} aria-label="Ниже">▼</button>
+              <button disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up">▲</button>
+              <button disabled={i === accounts.length - 1} onClick={() => move(i, 1)} aria-label="Move down">▼</button>
             </div>
           </div>
         ))}
-        {!accounts.length && <Empty title="Нет аккаунтов" text="Нажмите «Добавить аккаунт»." />}
+        {!accounts.length && <Empty title="No accounts" text='Tap "Add account".' />}
       </div>
     </>
   );
@@ -785,9 +776,9 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
 
 const DEFAULT_GUIDE = {
   steps: [
-    'Откройте сайт сервиса на компьютере и войдите в нужный аккаунт.',
-    'DevTools (F12) → Network → найдите запрос, который возвращает ваши лимиты.',
-    'Правой кнопкой → Copy → Copy as cURL и вставьте сюда.',
+    'Open the service website on your computer and sign in to the account you want.',
+    'DevTools (F12) → Network → find the request that returns your limits.',
+    'Right-click → Copy → Copy as cURL and paste it here.',
   ],
   placeholder: 'curl …',
 };
@@ -795,47 +786,47 @@ const DEFAULT_GUIDE = {
 const GUIDES: Partial<Record<ProviderType, { steps: string[]; placeholder: string }>> = {
   claude: {
     steps: [
-      'Откройте claude.ai на компьютере и войдите в нужный аккаунт.',
+      'Open claude.ai on your computer and sign in to the account you want.',
       'DevTools (F12) → Application → Cookies → https://claude.ai.',
-      'Скопируйте значение cookie sessionKey (начинается с sk-ant-sid…). Можно и целиком cURL: Network → любой запрос к /api → Copy as cURL.',
+      'Copy the sessionKey cookie value (starts with sk-ant-sid…). You can also paste a full cURL: Network → any request to /api → Copy as cURL.',
     ],
-    placeholder: 'sk-ant-sid01-…  или  curl …',
+    placeholder: 'sk-ant-sid01-…  or  curl …',
   },
   chatgpt: {
     steps: [
-      'Откройте chatgpt.com на компьютере и войдите в нужный аккаунт.',
-      'DevTools (F12) → Network → любой запрос к backend-api → Copy as cURL.',
-      'Вставьте cURL сюда — сервер возьмёт cookie сессии и будет сам обновлять доступ.',
+      'Open chatgpt.com on your computer and sign in to the account you want.',
+      'DevTools (F12) → Network → any request to backend-api → Copy as cURL.',
+      'Paste the cURL here — the server will take the session cookie and refresh access automatically.',
     ],
     placeholder: 'curl https://chatgpt.com/backend-api/…',
   },
   gemini: {
     steps: [
-      'Откройте gemini.google.com на компьютере и войдите в нужный Google-аккаунт.',
-      'DevTools (F12) → Network → отправьте любое сообщение → запрос batchexecute → Copy as cURL.',
-      'Для второго Google-аккаунта используйте отдельный профиль браузера.',
+      'Open gemini.google.com on your computer and sign in to the Google account you want.',
+      'DevTools (F12) → Network → send any message → batchexecute request → Copy as cURL.',
+      'For a second Google account, use a separate browser profile.',
     ],
     placeholder: "curl 'https://gemini.google.com/_/BardChatUi/data/batchexecute…",
   },
   cursor: {
-    steps: ['Откройте cursor.com/settings и войдите.', 'DevTools → Network → запрос usage → Copy as cURL.', 'Вставьте сюда.'],
+    steps: ['Open cursor.com/settings and sign in.', 'DevTools → Network → usage request → Copy as cURL.', 'Paste it here.'],
     placeholder: 'curl https://cursor.com/api/usage …',
   },
   custom: {
     steps: [
-      'Откройте сайт сервиса и найдите страницу с лимитами/квотой.',
-      'DevTools → Network → запрос, возвращающий лимиты → Copy as cURL.',
-      'Вставьте — сервер сам найдёт в ответе проценты и время сброса.',
+      'Open the service website and find the page with limits/quota.',
+      'DevTools → Network → the request that returns limits → Copy as cURL.',
+      'Paste it — the server will find the percentages and reset time in the response.',
     ],
-    placeholder: 'curl … (любой сервис)',
+    placeholder: 'curl … (any service)',
   },
 };
 
 const ADD_GROUPS: Array<{ title: string; items: ProviderType[] }> = [
-  { title: 'Основные', items: ['claude', 'chatgpt', 'gemini'] },
-  { title: 'Кодинг', items: ['cursor', 'copilot'] },
-  { title: 'Чат-ассистенты', items: ['perplexity', 'grok', 'mistral', 'deepseek', 'poe'] },
-  { title: 'Любой другой сервис', items: ['custom'] },
+  { title: 'Main', items: ['claude', 'chatgpt', 'gemini'] },
+  { title: 'Coding', items: ['cursor', 'copilot'] },
+  { title: 'Chat assistants', items: ['perplexity', 'grok', 'mistral', 'deepseek', 'poe'] },
+  { title: 'Any other service', items: ['custom'] },
 ];
 
 const supportsOAuth = (p: ProviderType) => p === 'claude' || p === 'chatgpt';
@@ -889,7 +880,7 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
   if (!provider) {
     return (
       <>
-        <Header title="Добавить аккаунт" back />
+        <Header title="Add account" back />
         <div className="stack">
           {ADD_GROUPS.map((g) => (
             <div key={g.title}>
@@ -899,14 +890,14 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
                   <Logo type={p} size={44} />
                   <div className="grow">
                     <b>{PROVIDER_NAMES[p]}</b>
-                    <span className="muted small">{PROVIDER_COMPANY[p]}{accounts.some((a) => a.providerType === p) ? ' · ещё один аккаунт' : ''}</span>
+                    <span className="muted small">{PROVIDER_COMPANY[p]}{accounts.some((a) => a.providerType === p) ? ' · another account' : ''}</span>
                   </div>
                   <Icon name="chevron" />
                 </button>
               ))}
             </div>
           ))}
-          <p className="info">Можно подключить сколько угодно аккаунтов одного сервиса. Данные каждого аккаунта хранятся отдельно и в зашифрованном виде, а один и тот же аккаунт дважды подключить нельзя.</p>
+          <p className="info">You can connect as many accounts for the same service as you like. Each account's data is stored separately and encrypted, and the same account can't be connected twice.</p>
         </div>
       </>
     );
@@ -916,12 +907,12 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
   const codePlaceholder = provider === 'claude' ? 'code#state' : 'http://localhost:1455/auth/callback?code=…';
   return (
     <>
-      <Header title={reconnect ? `Обновить доступ: ${reconnect.name}` : `Подключить ${PROVIDER_NAMES[provider]}`} back />
+      <Header title={reconnect ? `Reconnect: ${reconnect.name}` : `Connect ${PROVIDER_NAMES[provider]}`} back />
 
       {supportsOAuth(provider) && (
         <Segmented
           value={mode}
-          options={[['oauth', 'Вход в аккаунт'], ['manual', 'Вручную (cURL)']]}
+          options={[['oauth', 'Sign in to account'], ['manual', 'Manual (cURL)']]}
           onChange={(m) => { setMode(m); setErr(''); setInput(''); }}
         />
       )}
@@ -930,23 +921,23 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
         <div className="stack">
           <div className="card steps">
             <div className="step"><i>1</i><div className="grow">
-              <b>Откройте вход</b>
-              <p className="small muted">Войдите в {reconnect ? 'нужный' : 'любой'} аккаунт {PROVIDER_NAMES[provider]}. Для второго аккаунта — окно инкогнито или другой профиль браузера. Вход держится неделями и продлевается сам.</p>
+              <b>Open the sign-in page</b>
+              <p className="small muted">Sign in to {reconnect ? 'the account you want' : 'any'} {PROVIDER_NAMES[provider]} account. For a second account, use an incognito window or a different browser profile. Sign-in lasts for weeks and renews itself.</p>
               <button className="btn dark small" onClick={startOAuth} style={{ marginTop: 8 }}>
-                <Icon name="external" size={16} /> {oauth ? 'Открыть ещё раз' : 'Открыть страницу входа'}
+                <Icon name="external" size={16} /> {oauth ? 'Open again' : 'Open sign-in page'}
               </button>
             </div></div>
             <div className="step"><i>2</i><div className="grow">
-              <b>{provider === 'claude' ? 'Нажмите Authorize и скопируйте код' : 'Скопируйте адрес после входа'}</b>
-              <p className="small muted">{provider === 'claude' ? 'Claude покажет код вида xxxx#yyyy.' : 'Браузер откроет localhost:1455/auth/callback?code=… и покажет ошибку — это нормально, скопируйте весь адрес из строки.'}</p>
+              <b>{provider === 'claude' ? 'Click Authorize and copy the code' : 'Copy the address after signing in'}</b>
+              <p className="small muted">{provider === 'claude' ? 'Claude will show a code like xxxx#yyyy.' : 'The browser will open localhost:1455/auth/callback?code=… and show an error — that is normal; copy the whole address from the address bar.'}</p>
             </div></div>
             <div className="step"><i>3</i><div className="grow">
-              <b>Вставьте сюда</b>
+              <b>Paste it here</b>
               <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={codePlaceholder} disabled={!oauth} style={{ marginTop: 6 }} />
             </div></div>
           </div>
           {err && <p className="error">{err}</p>}
-          <button className="btn dark wide" disabled={!oauth || !input.trim() || busy} onClick={submit}>{busy ? 'Подключаем…' : 'Подключить'}</button>
+          <button className="btn dark wide" disabled={!oauth || !input.trim() || busy} onClick={submit}>{busy ? 'Connecting…' : 'Connect'}</button>
         </div>
       ) : (
         <div className="stack">
@@ -956,12 +947,12 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
             ))}
           </div>
           <textarea rows={7} value={input} onChange={(e) => setInput(e.target.value)} placeholder={guide.placeholder} />
-          {supportsOAuth(provider) && <p className="muted tiny">⚠ Вход по cURL/sessionKey живёт недолго (у Claude ~30 мин). Для долгой работы используйте «Вход в аккаунт».</p>}
+          {supportsOAuth(provider) && <p className="muted tiny">⚠ cURL/sessionKey sign-in doesn't last long (about 30 min for Claude). For long-term use, choose "Sign in to account".</p>}
           {err && <p className="error">{err}</p>}
-          <button className="btn dark wide" disabled={!input.trim() || busy} onClick={submit}>{busy ? 'Проверяем…' : 'Подключить'}</button>
+          <button className="btn dark wide" disabled={!input.trim() || busy} onClick={submit}>{busy ? 'Checking…' : 'Connect'}</button>
         </div>
       )}
-      <p className="muted tiny center" style={{ marginTop: 10 }}>Данные шифруются на вашем сервере и отправляются только в {PROVIDER_NAMES[provider]}.</p>
+      <p className="muted tiny center" style={{ marginTop: 10 }}>Data is encrypted on your server and sent only to {PROVIDER_NAMES[provider]}.</p>
     </>
   );
 };
@@ -977,9 +968,9 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
   return (
     <>
       <Header
-        title="Уведомления"
+        title="Alerts"
         back
-        right={items?.length ? <button className="link-btn" onClick={async () => { await api.clearAlerts(); setItems([]); }}>Очистить</button> : null}
+        right={items?.length ? <button className="link-btn" onClick={async () => { await api.clearAlerts(); setItems([]); }}>Clear</button> : null}
       />
       <div className="card list">
         {(items || []).map((n) => (
@@ -995,105 +986,9 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
             <span className="muted tiny">{clock(n.createdAt)}</span>
           </div>
         ))}
-        {items && !items.length && <Empty title="Уведомлений нет" text="Здесь появятся предупреждения о низком лимите, исчерпании, восстановлении и необходимости войти заново." />}
+        {items && !items.length && <Empty title="No alerts" text="Warnings about low limits, exhaustion, recovery and re-login requirements will appear here." />}
       </div>
     </>
-  );
-};
-
-/* ---------------- Agents ---------------- */
-
-const AGENT_STATUS: Record<string, { label: string; cls: string }> = {
-  working: { label: 'Идёт работа', cls: 'working' },
-  waiting: { label: 'Ждёт ввода', cls: 'waiting' },
-  done: { label: 'Готово', cls: 'done' },
-  idle: { label: 'Завершён', cls: 'idle' },
-};
-
-function agentIcon(source: string): string {
-  return source === 'claude' ? 'C' : source === 'codex' ? 'Co' : '•';
-}
-
-function useAgents(pollMs = 8000): [AgentSession[] | null, () => void] {
-  const [agents, setAgents] = useState<AgentSession[] | null>(null);
-  const load = useCallback(() => {
-    api.agents().then((r) => setAgents(r.agents)).catch(() => setAgents([]));
-  }, []);
-  useEffect(() => {
-    load();
-    const t = setInterval(() => document.visibilityState === 'visible' && load(), pollMs);
-    return () => clearInterval(t);
-  }, [load, pollMs]);
-  return [agents, load];
-}
-
-const AgentCard: React.FC<{ a: AgentSession; onRemove?: () => void; expanded?: boolean }> = ({ a, onRemove, expanded }) => {
-  const [open, setOpen] = useState(Boolean(expanded));
-  const st = AGENT_STATUS[a.status] || AGENT_STATUS.idle;
-  return (
-    <div className={`card agent-card ${st.cls}`}>
-      <div className="agent-head" onClick={() => setOpen((o) => !o)}>
-        <span className={`agent-badge ${a.source}`}>{agentIcon(a.source)}</span>
-        <div className="grow">
-          <b className="ellipsis">{a.project}</b>
-          <span className="muted small">{a.source === 'claude' ? 'Claude Code' : a.source === 'codex' ? 'Codex' : 'Агент'} · {relative(a.updatedAt)}</span>
-        </div>
-        <span className={`agent-status ${st.cls}`}>
-          {a.status === 'working' && <i className="pulse" />}
-          {st.label}
-        </span>
-      </div>
-      {a.lastMessage && (
-        <p className={`agent-msg ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)}>{a.lastMessage}</p>
-      )}
-      {a.source === 'codex' && <a className="btn remote-open" href={`#/remote/${encodeURIComponent(a.id.replace(/^codex:/, ''))}`}>Открыть чат Codex <Icon name="chevron" size={16} /></a>}
-      {onRemove && (
-        <button className="agent-remove" onClick={onRemove} aria-label="Убрать">×</button>
-      )}
-    </div>
-  );
-};
-
-const AgentsPage: React.FC = () => {
-  const [agents, reload] = useAgents(6000);
-  return (
-    <>
-      <Header
-        title="Агенты"
-        sub="Claude Code и Codex на твоих машинах"
-        right={<div className="row"><a className="btn dark" href="#/remote">Чат Codex</a><button className="icon-btn" onClick={reload} aria-label="Обновить"><Icon name="refresh" /></button></div>}
-      />
-      {!agents ? (
-        <div className="splash small"><div className="spinner" /></div>
-      ) : agents.length === 0 ? (
-        <Empty title="Пока нет агентов" text="Настройте хуки Claude Code и Codex, чтобы видеть здесь их статус и последнее сообщение прямо с телефона.">
-          <a className="btn dark" href="https://github.com/Rauan228/AI-Limits-Tracker/tree/main/integrations" target="_blank" rel="noopener"><Icon name="external" size={16} /> Как подключить</a>
-        </Empty>
-      ) : (
-        <div className="stack">
-          {agents.map((a) => (
-            <AgentCard key={a.id} a={a} expanded onRemove={async () => { await api.removeAgent(a.id); reload(); }} />
-          ))}
-        </div>
-      )}
-    </>
-  );
-};
-
-/** Compact strip on the Home page showing only active (working/waiting) agents. */
-const AgentsStrip: React.FC<{ go: (to: string) => void }> = ({ go }) => {
-  const [agents] = useAgents(8000);
-  const active = (agents || []).filter((a) => a.status === 'working' || a.status === 'waiting');
-  if (!agents || !agents.length) return null;
-  const show = active.length ? active : agents.slice(0, 2);
-  return (
-    <section className="agents-strip">
-      <div className="section-head">
-        <h2>Агенты {active.length > 0 && <span className="agents-count">{active.length} активны</span>}</h2>
-        <button className="link-btn" onClick={() => go('/agents')}>Все →</button>
-      </div>
-      {show.map((a) => <AgentCard key={a.id} a={a} />)}
-    </section>
   );
 };
 
@@ -1111,31 +1006,31 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
   }, []);
   return (
     <>
-      <Header title="Настройки" sub={`Последнее обновление: ${relative(state.lastSyncAllAt)}`} />
+      <Header title="Settings" sub={`Last update: ${relative(state.lastSyncAllAt)}`} />
       <div className="card menu">
         <label className="menu-row">
-          <span>Обновление данных</span>
+          <span>Data refresh</span>
           <select value={state.intervalMin} onChange={async (e) => { await api.setInterval(Number(e.target.value)); await reload(); }}>
-            {[5, 10, 15, 30, 60].map((m) => <option key={m} value={m}>каждые {m} мин</option>)}
+            {[5, 10, 15, 30, 60].map((m) => <option key={m} value={m}>every {m} min</option>)}
           </select>
         </label>
         <div className="menu-row">
-          <span>Telegram-уведомления</span>
-          <span className="muted small">{state.telegram ? 'подключены' : 'не настроены (TELEGRAM_BOT_TOKEN)'}</span>
+          <span>Telegram notifications</span>
+          <span className="muted small">{state.telegram ? 'connected' : 'not configured (TELEGRAM_BOT_TOKEN)'}</span>
         </div>
         <div className="menu-row column">
-          <span>Установить как приложение</span>
+          <span>Install as app</span>
           <span className="muted small">
-            iPhone: Safari → «Поделиться» → «На экран „Домой“». Android: меню Chrome → «Установить приложение».
+            iPhone: Safari → "Share" → "Add to Home Screen". Android: Chrome menu → "Install app".
           </span>
-          {installEvt && <button className="btn dark small mt" onClick={() => installEvt.prompt()}>Установить</button>}
+          {installEvt && <button className="btn dark small mt" onClick={() => installEvt.prompt()}>Install</button>}
         </div>
         <button className="menu-row danger" onClick={async () => { await api.logout(); location.reload(); }}>
-          <span>Выйти</span><Icon name="logout" size={18} />
+          <span>Sign out</span><Icon name="logout" size={18} />
         </button>
       </div>
       <p className="footnote">
-        AI Limits Tracker · open source · <a href="https://github.com/Rauan228/AI-Limits-Tracker" target="_blank" rel="noopener">GitHub</a>
+        AI Limits Tracker · open source · <a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker" target="_blank" rel="noopener">GitHub</a>
       </p>
     </>
   );

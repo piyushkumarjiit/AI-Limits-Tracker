@@ -12,6 +12,13 @@ import { failureSnapshot, makeBucket } from './common';
 import { getRecipe } from './recipes';
 import { ProviderFetchResult, UsageProvider } from './UsageProvider';
 
+const UNSAFE_PATH_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Reads an own (non-inherited) property only — never walks the prototype chain. */
+function readOwnProperty(obj: object, key: string): any {
+  return Object.prototype.hasOwnProperty.call(obj, key) ? (obj as any)[key] : undefined;
+}
+
 /** Resolves a path like `a.b[0].c` or `a/b/0/c` against a parsed JSON value. */
 export function resolvePath(root: any, path: string | undefined): any {
   if (!path) return undefined;
@@ -21,8 +28,8 @@ export function resolvePath(root: any, path: string | undefined): any {
     .filter(Boolean);
   let cur = root;
   for (const p of parts) {
-    if (cur == null) return undefined;
-    cur = cur[p];
+    if (cur == null || typeof cur !== 'object' || UNSAFE_PATH_KEYS.has(p)) return undefined;
+    cur = readOwnProperty(cur, p);
   }
   return cur;
 }
@@ -124,7 +131,7 @@ export function autoDetectWindows(body: any, max = 4): QuotaBucket[] {
       }
       if ((typeof v === 'number' || typeof v === 'string') && RESET_KEYS.test(k)) reset = k;
     }
-    const mkLabel = label || 'Лимит';
+    const mkLabel = label || 'Limit';
     const resetIso = reset ? resolvePath(node, reset) : null;
     const fmt = reset && /window/i.test(reset) ? 'seconds_from_now' : undefined;
     if ((used && limit) || (remaining && limit)) {
@@ -218,10 +225,10 @@ export class RecipeProvider implements UsageProvider {
   async fetchUsage(accountId: string, credentials: AccountCredentials): Promise<ProviderFetchResult> {
     const recipe = this.recipeFor(credentials);
     if (!recipe) {
-      return { snapshot: failureSnapshot(accountId, this.type, 'not_configured', 'Нет рецепта для этого сервиса') };
+      return { snapshot: failureSnapshot(accountId, this.type, 'not_configured', 'No recipe for this service') };
     }
     if (!this.validateCredentials(credentials)) {
-      return { snapshot: failureSnapshot(accountId, this.type, 'not_configured', 'Аккаунт не подключён') };
+      return { snapshot: failureSnapshot(accountId, this.type, 'not_configured', 'Account not connected') };
     }
 
     const headers: Record<string, string> = {
@@ -245,18 +252,18 @@ export class RecipeProvider implements UsageProvider {
       });
 
       if (resp.status === 401 || resp.status === 403) {
-        return { snapshot: failureSnapshot(accountId, this.type, 'reauth_required', 'Сессия истекла — переподключите аккаунт') };
+        return { snapshot: failureSnapshot(accountId, this.type, 'reauth_required', 'Session expired — reconnect the account') };
       }
       if (resp.status === 429) {
-        return { snapshot: failureSnapshot(accountId, this.type, 'rate_limited', 'Слишком частые запросы — повторим позже') };
+        return { snapshot: failureSnapshot(accountId, this.type, 'rate_limited', 'Too many requests — will retry later') };
       }
       if (!resp.ok) {
-        return { snapshot: failureSnapshot(accountId, this.type, 'error', `Сервис вернул HTTP ${resp.status}`) };
+        return { snapshot: failureSnapshot(accountId, this.type, 'error', `Service returned HTTP ${resp.status}`) };
       }
 
       const body = await readJsonSafe(resp);
       if (!body) {
-        return { snapshot: failureSnapshot(accountId, this.type, 'error', 'Ответ не является JSON — проверьте URL в рецепте') };
+        return { snapshot: failureSnapshot(accountId, this.type, 'error', 'Response is not JSON — check the URL in the recipe') };
       }
 
       const snapshot = applyRecipe(accountId, this.type, recipe, body);
@@ -267,8 +274,8 @@ export class RecipeProvider implements UsageProvider {
             this.type,
             'error',
             recipe.needsVerification
-              ? 'Рецепт ещё не выверен под реальный ответ — пришлите cURL этого сервиса'
-              : 'Не удалось прочитать лимиты из ответа'
+              ? 'Recipe not yet verified against a real response — send the cURL for this service'
+              : 'Could not read limits from the response'
           ),
         };
       }
@@ -279,7 +286,7 @@ export class RecipeProvider implements UsageProvider {
           accountId,
           this.type,
           'error',
-          err?.name === 'AbortError' ? 'Сервис не ответил вовремя' : err?.message || 'Сбой сети'
+          err?.name === 'AbortError' ? 'Service did not respond in time' : err?.message || 'Network error'
         ),
       };
     }

@@ -46,26 +46,26 @@ const supportsOAuth = (p: ProviderType) => p === 'claude' || p === 'chatgpt';
 
 const MANUAL_HINTS: Partial<Record<ProviderType, string>> = {
   claude:
-    'Откройте claude.ai в браузере на компьютере → DevTools → Application → Cookies → скопируйте значение sessionKey. Или Network → любой запрос к /api → Copy as cURL.',
+    'Open claude.ai in a desktop browser → DevTools → Application → Cookies → copy the sessionKey value. Or go to Network → any request to /api → Copy as cURL.',
   chatgpt:
-    'Откройте chatgpt.com/api/auth/session в браузере и скопируйте accessToken, либо Network → запрос к backend-api → Copy as cURL.',
+    'Open chatgpt.com/api/auth/session in a browser and copy the accessToken, or go to Network → a backend-api request → Copy as cURL.',
   gemini:
-    'Откройте gemini.google.com на компьютере → DevTools → Network → любой запрос batchexecute → Copy as cURL. Для каждого Google-аккаунта нужен свой cURL (из отдельного профиля браузера).',
+    'Open gemini.google.com on a computer → DevTools → Network → any batchexecute request → Copy as cURL. Each Google account needs its own cURL (from a separate browser profile).',
   cursor:
-    'Откройте cursor.com/settings → DevTools → Network → запрос usage → Copy as cURL.',
+    'Open cursor.com/settings → DevTools → Network → a usage request → Copy as cURL.',
   copilot:
-    'Откройте github.com (с активным Copilot) → DevTools → Network → Copy as cURL запроса к Copilot, либо вставьте токен.',
+    'Open github.com (with Copilot active) → DevTools → Network → Copy as cURL for a Copilot request, or paste a token.',
   perplexity:
-    'Откройте perplexity.ai → DevTools → Network → запрос к rest/user → Copy as cURL.',
+    'Open perplexity.ai → DevTools → Network → a request to rest/user → Copy as cURL.',
   grok:
-    'Откройте grok.com → DevTools → Network → запрос rate-limits → Copy as cURL.',
-  mistral: 'Откройте chat.mistral.ai → DevTools → Network → Copy as cURL запроса с вашими лимитами.',
-  deepseek: 'Откройте chat.deepseek.com → DevTools → Network → Copy as cURL запроса профиля/лимитов.',
-  poe: 'Откройте poe.com → DevTools → Network → запрос gql_POST (settings) → Copy as cURL.',
+    'Open grok.com → DevTools → Network → a rate-limits request → Copy as cURL.',
+  mistral: 'Open chat.mistral.ai → DevTools → Network → Copy as cURL for a request that includes your limits.',
+  deepseek: 'Open chat.deepseek.com → DevTools → Network → Copy as cURL for a profile/limits request.',
+  poe: 'Open poe.com → DevTools → Network → a gql_POST (settings) request → Copy as cURL.',
   custom:
-    'Вставьте cURL запроса, который на сайте сервиса возвращает ваши лимиты (DevTools → Network → Copy as cURL). Приложение само найдёт в ответе проценты и время сброса.',
+    'Paste the cURL for a request that returns your limits on the service\'s website (DevTools → Network → Copy as cURL). The app will find the percentages and reset time in the response automatically.',
 };
-const DEFAULT_HINT = 'Вставьте cURL запроса сервиса, который возвращает ваши лимиты.';
+const DEFAULT_HINT = 'Paste the cURL for a service request that returns your limits.';
 
 export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, account, onClose, onConnected }) => {
   const connectAccount = useAppStore((s) => s.connectAccount);
@@ -116,7 +116,7 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
     }
     setPhase('success');
     const who = result.snapshot.email ? ` (${result.snapshot.email})` : '';
-    setMessage(`Аккаунт подключён${who}`);
+    setMessage(`Account connected${who}`);
     setTimeout(() => {
       onConnected?.(result.accountId);
       onClose();
@@ -128,27 +128,27 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
     const parsed = parseAuthCode(raw);
     if (!parsed) {
       setPhase('error');
-      setMessage('Не удалось прочитать код авторизации');
+      setMessage('Could not read the authorization code');
       return;
     }
     if (parsed.state && parsed.state !== pkce.state) {
       setPhase('error');
-      setMessage('Код относится к другой попытке входа. Начните заново.');
+      setMessage('This code belongs to a different sign-in attempt. Start over.');
       return;
     }
     handledRef.current = true;
     setPhase('exchanging');
-    setMessage('Получаем токены…');
+    setMessage('Getting tokens…');
     try {
       const creds =
         providerType === 'claude'
           ? await exchangeClaudeCode(parsed.code, parsed.state, pkce.verifier, pkce.state)
           : await exchangeChatGPTCode(parsed.code, pkce.verifier);
-      setMessage('Проверяем аккаунт и загружаем лимиты…');
+      setMessage('Verifying the account and loading limits…');
       await finish(creds);
     } catch (e: any) {
       setPhase('error');
-      setMessage(e?.message || 'Не удалось завершить вход');
+      setMessage(e?.message || 'Could not complete sign-in');
     }
   };
 
@@ -163,11 +163,11 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
       return;
     }
     setPhase('exchanging');
-    setMessage('Проверяем данные и загружаем лимиты…');
+    setMessage('Verifying credentials and loading limits…');
     await finish(parsed.credentials);
   };
 
-  const title = account ? `Переподключить: ${account.name}` : `Вход в ${PROVIDER_NAMES[providerType]}`;
+  const title = account ? `Reconnect: ${account.name}` : `Sign in to ${PROVIDER_NAMES[providerType]}`;
 
   const renderStatus = () => {
     if (phase === 'login' || !message) return null;
@@ -182,7 +182,7 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
         {phase === 'error' && (
           <TouchableOpacity onPress={reset} style={styles.retryBtn}>
             <RotateCcw size={13} color={Colors.text} />
-            <Text style={styles.retryText}>Заново</Text>
+            <Text style={styles.retryText}>Start over</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -194,9 +194,9 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
       <View style={styles.tip}>
         <ShieldCheck size={15} color={Colors.normal} />
         <Text style={styles.tipText}>
-          Чистая сессия: войдите в {account ? 'нужный' : 'любой'} аккаунт {PROVIDER_NAMES[providerType]}. Другие
-          подключённые аккаунты не затрагиваются.
-          {providerType === 'claude' ? ' После входа нажмите «Authorize».' : ''}
+          Clean session: sign in to {account ? 'the required' : 'any'} {PROVIDER_NAMES[providerType]} account. Other
+          connected accounts are not affected.
+          {providerType === 'claude' ? ' After signing in, tap "Authorize".' : ''}
         </Text>
       </View>
 
@@ -204,15 +204,15 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
         <View style={styles.codeBox}>
           {Platform.OS === 'web' && authorizeUrl && (
             <PrimaryButton
-              label="Открыть страницу входа"
+              label="Open sign-in page"
               onPress={() => Linking.openURL(authorizeUrl)}
               style={{ marginBottom: 10 }}
             />
           )}
           <Text style={styles.codeLabel}>
             {providerType === 'claude'
-              ? 'Если страница показала код — вставьте его сюда:'
-              : 'Вставьте адрес страницы, на которую вас перенаправило (localhost:1455/…):'}
+              ? 'If the page shows a code, paste it here:'
+              : 'Paste the URL of the page you were redirected to (localhost:1455/…):'}
           </Text>
           <View style={styles.codeRow}>
             <TextInput
@@ -275,7 +275,7 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
       {!showCodeInput && Platform.OS !== 'web' && (
         <TouchableOpacity style={styles.linkBtn} onPress={() => setShowCodeInput(true)}>
           <KeyRound size={13} color={Colors.textMuted} />
-          <Text style={styles.linkText}>Страница показала код? Вставить вручную</Text>
+          <Text style={styles.linkText}>Did the page show a code? Paste it manually</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -293,9 +293,9 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
         onChangeText={setManualText}
         placeholder={
           providerType === 'claude'
-            ? 'sk-ant-sid01-… или curl …'
+            ? 'sk-ant-sid01-… or curl …'
             : providerType === 'chatgpt'
-            ? 'eyJhbGciOi… или curl …'
+            ? 'eyJhbGciOi… or curl …'
             : "curl 'https://gemini.google.com/_/BardChatUi/…"
         }
         placeholderTextColor={Colors.textSubtle}
@@ -305,11 +305,11 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
         textAlignVertical="top"
       />
       <Text style={styles.manualNote}>
-        Данные хранятся только на этом устройстве (Keychain / Keystore) и отправляются лишь на серверы{' '}
+        Data is stored only on this device (Keychain / Keystore) and sent only to {' '}
         {PROVIDER_NAMES[providerType]}.
       </Text>
       <PrimaryButton
-        label="Подключить"
+        label="Connect"
         onPress={handleManualSave}
         disabled={!manualText.trim() || phase === 'exchanging'}
       />
@@ -339,8 +339,8 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
                 setMessage('');
               }}
               options={[
-                { key: 'oauth', label: 'Вход в аккаунт' },
-                { key: 'manual', label: 'Вручную (cURL / токен)' },
+                { key: 'oauth', label: 'Account sign-in' },
+                { key: 'manual', label: 'Manual (cURL / token)' },
               ]}
             />
           )}

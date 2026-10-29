@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import type { AccountCredentials, AccountEntity, AgentSession, AlertKind, AlertLogEntry, UsageSnapshot } from '../../src/models/types';
+import { dirname, resolve, sep } from 'node:path';
+import type { AccountCredentials, AccountEntity, AlertKind, AlertLogEntry, UsageSnapshot } from '../../src/models/types';
 import type { StatPoint } from '../../src/services/stats';
 
 export interface ServerAccount extends AccountEntity {
@@ -12,25 +12,32 @@ export interface ServerAccount extends AccountEntity {
 /** Credentials are encrypted at rest with AES-256-GCM; the key comes from APP_SECRET. */
 class Vault {
   private key: Buffer;
+  /** Pre-scrypt key (plain SHA-256); kept only to read records written by older versions. */
+  private legacyKey: Buffer;
   constructor(secret: string) {
-    this.key = createHash('sha256').update(`ai-limits-vault:${secret}`).digest();
+    this.key = scryptSync(secret, 'ai-limits-vault-v2', 32);
+    this.legacyKey = createHash('sha256').update(`ai-limits-vault:${secret}`).digest();
   }
   encrypt(value: unknown): string {
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', this.key, iv);
     const data = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
-    return [iv, cipher.getAuthTag(), data].map((b) => b.toString('base64')).join('.');
+    return 'v2.' + [iv, cipher.getAuthTag(), data].map((b) => b.toString('base64')).join('.');
   }
   decrypt<T>(payload: string | null): T | null {
     if (!payload) return null;
     try {
-      const [iv, tag, data] = payload.split('.').map((s) => Buffer.from(s, 'base64'));
-      const decipher = createDecipheriv('aes-256-gcm', this.key, iv);
+      const isV2 = payload.startsWith('v2.');
+      const [iv, tag, data] = (isV2 ? payload.slice(3) : payload).split('.').map((s) => Buffer.from(s, 'base64'));
+      const decipher = createDecipheriv('aes-256-gcm', isV2 ? this.key : this.legacyKey, iv, { authTagLength: 16 });
       decipher.setAuthTag(tag);
       return JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8'));
     } catch {
       return null;
     }
+  }
+  isLegacy(payload: string | null): boolean {
+    return Boolean(payload) && !payload!.startsWith('v2.');
   }
 }
 
@@ -38,7 +45,11 @@ export class Store {
   private db: DatabaseSync;
   private vault: Vault;
 
-  constructor(path: string, secret: string) {
+  constructor(baseDir: string, fileName: string, secret: string) {
+    const base = resolve(baseDir);
+    const path = resolve(base, fileName);
+    // Confine the database file to the data directory (no traversal, no null bytes)
+    if (`${baseDir}${fileName}`.includes('\0') || !path.startsWith(base + sep)) throw new Error('Invalid database path');
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.vault = new Vault(secret);
@@ -82,66 +93,7 @@ export class Store {
         armed0 INTEGER NOT NULL DEFAULT 1
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS agents (
-        id TEXT PRIMARY KEY,
-        source TEXT NOT NULL,
-        project TEXT NOT NULL,
-        cwd TEXT,
-        title TEXT,
-        status TEXT NOT NULL,
-        last_message TEXT,
-        model TEXT,
-        started_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_agents_updated ON agents(updated_at);
     `);
-  }
-
-  /* ---------------- Agent sessions ---------------- */
-
-  upsertAgent(a: AgentSession): void {
-    this.db
-      .prepare(
-        `INSERT INTO agents (id, source, project, cwd, title, status, last_message, model, started_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           source=excluded.source, project=excluded.project, cwd=excluded.cwd,
-           title=COALESCE(excluded.title, agents.title),
-           status=excluded.status,
-           last_message=COALESCE(excluded.last_message, agents.last_message),
-           model=COALESCE(excluded.model, agents.model),
-           updated_at=excluded.updated_at`
-      )
-      .run(a.id, a.source, a.project, a.cwd ?? null, a.title ?? null, a.status, a.lastMessage ?? null, a.model ?? null, a.startedAt, a.updatedAt);
-  }
-
-  listAgents(limit = 50): AgentSession[] {
-    return (this.db.prepare('SELECT * FROM agents ORDER BY updated_at DESC LIMIT ?').all(limit) as any[]).map((r) => ({
-      id: r.id,
-      source: r.source,
-      project: r.project,
-      cwd: r.cwd || undefined,
-      title: r.title || undefined,
-      status: r.status,
-      lastMessage: r.last_message || undefined,
-      model: r.model || undefined,
-      startedAt: r.started_at,
-      updatedAt: r.updated_at,
-    }));
-  }
-
-  getAgent(id: string): AgentSession | null {
-    const r = this.db.prepare('SELECT status, started_at FROM agents WHERE id = ?').get(id) as any;
-    return r ? ({ status: r.status, startedAt: r.started_at } as AgentSession) : null;
-  }
-
-  deleteAgent(id: string): void {
-    this.db.prepare('DELETE FROM agents WHERE id = ?').run(id);
-  }
-
-  pruneAgents(beforeIso: string): void {
-    this.db.prepare('DELETE FROM agents WHERE updated_at < ?').run(beforeIso);
   }
 
   private rowToAccount(r: any): ServerAccount {
@@ -208,7 +160,10 @@ export class Store {
 
   getCredentials(id: string): AccountCredentials | null {
     const r = this.db.prepare('SELECT credentials FROM accounts WHERE id = ?').get(id) as any;
-    return this.vault.decrypt<AccountCredentials>(r?.credentials ?? null);
+    const creds = this.vault.decrypt<AccountCredentials>(r?.credentials ?? null);
+    // Transparent migration: re-encrypt records written with the legacy key
+    if (creds && this.vault.isLegacy(r.credentials)) this.setCredentials(id, creds);
+    return creds;
   }
 
   setCredentials(id: string, creds: AccountCredentials): void {

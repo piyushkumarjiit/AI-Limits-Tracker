@@ -1,19 +1,18 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { NATIVE_PROVIDERS, type ProviderType, RECIPE_PROVIDERS } from '../../src/models/types';
 import { computeStats, forecastWindow } from '../../src/services/stats';
 import { notify } from './notify';
 import { Store } from './store';
 import { Tracker } from './tracker';
-import { RemoteHub, RemoteRoutes } from './remote';
 
 const PORT = Number(process.env.PORT) || 8795;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const APP_SECRET = process.env.APP_SECRET || '';
 const API_TOKEN = process.env.API_TOKEN || '';
-const DATA_DIR = process.env.DATA_DIR || resolve('data');
+const DATA_DIR = resolve(process.env.DATA_DIR || 'data');
 const WEB_DIR = resolve(process.env.WEB_DIR || 'public');
 const SESSION_DAYS = 180;
 
@@ -22,7 +21,7 @@ if (!ADMIN_PASSWORD || APP_SECRET.length < 16) {
   process.exit(1);
 }
 
-const store = new Store(join(DATA_DIR, 'tracker.db'), APP_SECRET);
+const store = new Store(DATA_DIR, 'tracker.db', APP_SECRET);
 const tracker = new Tracker(store);
 
 /* ---------------- Auth ---------------- */
@@ -31,10 +30,19 @@ function sign(value: string): string {
   return createHmac('sha256', APP_SECRET).update(value).digest('base64url');
 }
 
+/**
+ * Constant-time comparison of two secrets: both buffers are padded to a common
+ * length so `timingSafeEqual` always scans the same number of bytes.
+ */
 function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  const len = Math.max(ba.length, bb.length, 1);
+  const pa = Buffer.alloc(len);
+  const pb = Buffer.alloc(len);
+  ba.copy(pa);
+  bb.copy(pb);
+  return timingSafeEqual(pa, pb) && ba.length === bb.length;
 }
 
 function sessionCookie(): string {
@@ -42,11 +50,20 @@ function sessionCookie(): string {
   return `${issued}.${sign(issued)}`;
 }
 
-function parseCookies(req: IncomingMessage): Record<string, string> {
-  const out: Record<string, string> = {};
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function parseCookies(req: IncomingMessage): Map<string, string> {
+  const out = new Map<string, string>();
   for (const part of (req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i <= 0) continue;
+    const key = part.slice(0, i).trim();
+    if (UNSAFE_KEYS.has(key)) continue;
+    try {
+      out.set(key, decodeURIComponent(part.slice(i + 1).trim()));
+    } catch {
+      // ignore malformed cookie values
+    }
   }
   return out;
 }
@@ -54,11 +71,12 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
 function isAuthed(req: IncomingMessage): boolean {
   const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (API_TOKEN && bearer && safeEqual(bearer, API_TOKEN)) return true;
+  // NOTE: bearer attempts are not counted toward the login limiter; use a long random API_TOKEN.
   return isBrowserAuthed(req);
 }
 
 function isBrowserAuthed(req: IncomingMessage): boolean {
-  const raw = parseCookies(req).alt_session;
+  const raw = parseCookies(req).get('alt_session');
   if (!raw) return false;
   const [issued, sig] = raw.split('.');
   if (!issued || !sig || !safeEqual(sig, sign(issued))) return false;
@@ -95,7 +113,8 @@ async function readBody(req: IncomingMessage, max = 256 * 1024): Promise<any> {
   }
   if (!chunks.length) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    // Drop prototype-pollution keys at every depth
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'), (k, v) => (UNSAFE_KEYS.has(k) ? undefined : v));
   } catch {
     return {};
   }
@@ -113,13 +132,31 @@ const MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+/** True only if `target` resolves to a path strictly inside `base` (no null bytes). */
+function isInside(base: string, target: string): boolean {
+  if (target.includes('\0')) return false;
+  const b = resolve(base);
+  return resolve(target).startsWith(b + sep);
+}
+
 function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string) {
-  const rel = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
-  let file = join(WEB_DIR, rel);
-  if (!file.startsWith(WEB_DIR) || !existsSync(file) || statSync(file).isDirectory()) {
-    file = join(WEB_DIR, 'index.html'); // SPA fallback
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    res.writeHead(400).end('Bad request');
+    return;
   }
-  if (!existsSync(file)) {
+  if (decoded.includes('\0')) {
+    res.writeHead(400).end('Bad request');
+    return;
+  }
+  const rel = normalize(decoded).replace(/^([/\\])+/, '');
+  let file = resolve(WEB_DIR, rel);
+  if (!isInside(WEB_DIR, file) || !existsSync(file) || statSync(file).isDirectory()) {
+    file = resolve(WEB_DIR, 'index.html'); // SPA fallback
+  }
+  if (!isInside(WEB_DIR, file) || !existsSync(file)) {
     res.writeHead(404).end('Not found');
     return;
   }
@@ -135,30 +172,21 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string
 
 const ALL_PROVIDERS: ProviderType[] = [...NATIVE_PROVIDERS, ...RECIPE_PROVIDERS, 'custom'];
 
-const remote = new RemoteRoutes(new RemoteHub(store), {
-  secret: APP_SECRET,
-  hasSession: isBrowserAuthed,
-  verifyPassword: password => safeEqual(password, ADMIN_PASSWORD),
-  rateLimit: tooManyAttempts,
-  readBody,
-});
-
 /* ---------------- Routes ---------------- */
 
 async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   const path = url.pathname;
   const method = req.method || 'GET';
 
-  if (await remote.handle(req, res, url)) return;
-
   if (path === '/api/health') return send(res, 200, { ok: true });
 
   if (path === '/api/login' && method === 'POST') {
-    const ip = (req.headers['x-real-ip'] as string) || req.socket.remoteAddress || '';
-    if (tooManyAttempts(ip)) return send(res, 429, { error: 'Слишком много попыток, подождите 15 минут' });
+    // X-Real-IP is client-controlled unless a trusted reverse proxy sets it (TRUST_PROXY=1)
+    const ip = (process.env.TRUST_PROXY === '1' && (req.headers['x-real-ip'] as string)) || req.socket.remoteAddress || '';
+    if (tooManyAttempts(ip)) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
     const { password } = await readBody(req);
     if (typeof password !== 'string' || !safeEqual(password, ADMIN_PASSWORD)) {
-      return send(res, 401, { error: 'Неверный пароль' });
+      return send(res, 401, { error: 'Incorrect password' });
     }
     loginAttempts.delete(ip);
     return send(res, 200, { ok: true }, {
@@ -209,7 +237,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
 
   if (path === '/api/accounts/manual' && method === 'POST') {
     const { provider, input, accountId } = await readBody(req);
-    if (!ALL_PROVIDERS.includes(provider)) return send(res, 400, { error: 'Неизвестный сервис' });
+    if (!ALL_PROVIDERS.includes(provider)) return send(res, 400, { error: 'Unknown provider' });
     const result = await tracker.connectManual(provider, String(input || ''), accountId);
     return send(res, result.ok ? 200 : 400, result);
   }
@@ -273,45 +301,6 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     return send(res, 200, { stats, forecasts });
   }
 
-  if (path === '/api/agents/report' && method === 'POST') {
-    const b = await readBody(req);
-    const id = String(b.id || '').slice(0, 200);
-    const status = ['working', 'waiting', 'done', 'idle'].includes(b.status) ? b.status : 'idle';
-    if (!id) return send(res, 400, { error: 'id required' });
-    const now = new Date().toISOString();
-    const prev = store.getAgent(id);
-    const project = String(b.project || b.cwd || 'проект').split(/[/\\]/).filter(Boolean).pop() || 'проект';
-    store.upsertAgent({
-      id,
-      source: ['claude', 'codex', 'other'].includes(b.source) ? b.source : 'other',
-      project: project.slice(0, 80),
-      cwd: b.cwd ? String(b.cwd).slice(0, 300) : undefined,
-      title: b.title ? String(b.title).slice(0, 200) : undefined,
-      status,
-      lastMessage: b.lastMessage ? String(b.lastMessage).slice(0, 4000) : undefined,
-      model: b.model ? String(b.model).slice(0, 60) : undefined,
-      startedAt: prev?.startedAt || now,
-      updatedAt: now,
-    });
-    // Push once when an agent finishes or starts waiting for input (unless a silent sync)
-    if (!b.silent && (status === 'done' || status === 'waiting') && prev?.status !== status) {
-      const label = status === 'done' ? '✅ Агент закончил' : '⏳ Агент ждёт ввода';
-      const firstLine = (b.lastMessage ? String(b.lastMessage) : '').split('\n').find((l: string) => l.trim()) || '';
-      void notify(`${label}: ${project}`, firstLine.slice(0, 200));
-    }
-    return send(res, 200, { ok: true });
-  }
-
-  if (path === '/api/agents' && method === 'GET') {
-    store.pruneAgents(new Date(Date.now() - 7 * 86400 * 1000).toISOString());
-    return send(res, 200, { agents: store.listAgents(50) });
-  }
-  const am = /^\/api\/agents\/(.+)$/.exec(path);
-  if (am && method === 'DELETE') {
-    store.deleteAgent(decodeURIComponent(am[1]));
-    return send(res, 200, { ok: true });
-  }
-
   if (path === '/api/alerts' && method === 'GET') return send(res, 200, { alerts: store.alerts(100) });
   if (path === '/api/alerts' && method === 'DELETE') {
     store.clearAlerts();
@@ -321,7 +310,17 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   return send(res, 404, { error: 'not found' });
 }
 
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+  'Content-Security-Policy':
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+    "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+};
+
 const server = createServer(async (req, res) => {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   const url = new URL(req.url || '/', 'http://localhost');
   try {
     if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);

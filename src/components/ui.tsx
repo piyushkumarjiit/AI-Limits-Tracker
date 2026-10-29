@@ -107,20 +107,20 @@ export type DisplayStatus = { label: string; color: string; bg: string };
 
 export function accountStatus(account: AccountEntity, snapshot?: UsageSnapshot): DisplayStatus {
   const status = snapshot?.status || account.lastStatus;
-  if (!account.isActive) return { label: 'На паузе', color: Colors.textMuted, bg: Colors.cardHighlight };
+  if (!account.isActive) return { label: 'Paused', color: Colors.textMuted, bg: Colors.cardHighlight };
   switch (status) {
     case 'ok':
-      return { label: 'Активен', color: Colors.normal, bg: Colors.normalSoft };
+      return { label: 'Active', color: Colors.normal, bg: Colors.normalSoft };
     case 'reauth_required':
-      return { label: 'Нужен вход', color: Colors.exhausted, bg: Colors.exhaustedSoft };
+      return { label: 'Sign-in needed', color: Colors.exhausted, bg: Colors.exhaustedSoft };
     case 'rate_limited':
-      return { label: 'Пауза API', color: Colors.warning, bg: '#fdf3e1' };
+      return { label: 'API paused', color: Colors.warning, bg: '#fdf3e1' };
     case 'error':
-      return { label: 'Ошибка', color: Colors.exhausted, bg: Colors.exhaustedSoft };
+      return { label: 'Error', color: Colors.exhausted, bg: Colors.exhaustedSoft };
     case 'not_configured':
-      return { label: 'Не подключён', color: Colors.textMuted, bg: Colors.cardHighlight };
+      return { label: 'Not connected', color: Colors.textMuted, bg: Colors.cardHighlight };
     default:
-      return { label: 'Обновление…', color: Colors.textMuted, bg: Colors.cardHighlight };
+      return { label: 'Refreshing…', color: Colors.textMuted, bg: Colors.cardHighlight };
   }
 }
 
