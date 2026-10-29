@@ -138,7 +138,7 @@ extension/      Chrome MV3 extension            (extension/src)
 deploy/         systemd unit, nginx vhost, deploy script
 ```
 
-Run the test suite (44 tests — multi-account isolation, token refresh, parsing, honest statuses):
+Run the test suites (multi-account isolation, token refresh, parsing, honest statuses, plus the server's auth and HTTP security tests — `npm run test:security` runs only the latter):
 
 ```bash
 npm test
