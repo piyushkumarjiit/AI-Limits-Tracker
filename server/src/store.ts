@@ -29,7 +29,7 @@ class Vault {
     try {
       const isV2 = payload.startsWith('v2.');
       const [iv, tag, data] = (isV2 ? payload.slice(3) : payload).split('.').map((s) => Buffer.from(s, 'base64'));
-      const decipher = createDecipheriv('aes-256-gcm', isV2 ? this.key : this.legacyKey, iv);
+      const decipher = createDecipheriv('aes-256-gcm', isV2 ? this.key : this.legacyKey, iv, { authTagLength: 16 });
       decipher.setAuthTag(tag);
       return JSON.parse(Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8'));
     } catch {
