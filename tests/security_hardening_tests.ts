@@ -394,7 +394,7 @@ async function runAllTests() {
   });
 
   console.log('\nSuite 7: CSRF, content type and Origin');
-  await withApp({}, async ({ baseUrl }) => {
+  await withApp({}, async ({ baseUrl, port }) => {
     const cookie = await login(baseUrl);
 
     const noType = await fetch(`${baseUrl}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
@@ -418,6 +418,34 @@ async function runAllTests() {
       headers: { 'Content-Type': 'application/json', Origin: `http://${sameOriginHost}`, Cookie: cookie },
     });
     assert(sameOrigin.status === 200, 'CSRF: cookie POST from the same Origin is allowed', `got ${sameOrigin.status}`);
+
+    const withOrigin = (host: string, origin: string) =>
+      rawRequest(
+        port,
+        `POST /api/logout HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\n` +
+          `Cookie: ${cookie}\r\nOrigin: ${origin}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`
+      );
+
+    const samePort = await withOrigin('limits.example:8443', 'https://limits.example:8443');
+    assert(
+      /^HTTP\/1\.1 200/.test(samePort),
+      'CSRF: the same host and non-default port are accepted',
+      samePort.split('\r\n')[0]
+    );
+
+    const defaultPort = await withOrigin('limits.example:443', 'https://limits.example');
+    assert(
+      /^HTTP\/1\.1 200/.test(defaultPort),
+      'CSRF: an omitted Origin port means the scheme default',
+      defaultPort.split('\r\n')[0]
+    );
+
+    const crossPort = await withOrigin('limits.example:8443', 'https://limits.example:9443');
+    assert(
+      /^HTTP\/1\.1 403/.test(crossPort),
+      'CSRF: the same host on a different port is refused',
+      crossPort.split('\r\n')[0]
+    );
 
     const noOrigin = await fetch(`${baseUrl}/api/logout`, {
       method: 'POST',
@@ -482,6 +510,29 @@ async function runAllTests() {
     const noAllowlist = await rawGet(port, '/api/health', 'anything.example');
     assert(/^HTTP\/1\.1 200/.test(noAllowlist), 'Host allowlist: off by default', noAllowlist.split('\r\n')[0]);
   });
+
+  {
+    const base = {
+      adminPassword: ADMIN_PASSWORD,
+      appSecret: APP_SECRET,
+      apiToken: API_TOKEN,
+      secureCookies: false,
+      trustProxy: false,
+      webDir: '/nonexistent',
+    };
+    const rejects = (entry: string): boolean => {
+      try {
+        createApp({ ...base, allowedHosts: [entry] }, { store: null as any, tracker: fakeTracker() });
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    assert(rejects('::1'), 'Host allowlist: a bare IPv6 entry is rejected instead of silently ignored');
+    assert(rejects(':1455'), 'Host allowlist: a port-only entry is rejected instead of silently ignored');
+    assert(!rejects('tracker.example.com:1455'), 'Host allowlist: a hostname with a port is a valid entry');
+    assert(!rejects('[::1]:1455'), 'Host allowlist: a bracketed IPv6 entry with a port is valid');
+  }
 
   console.log('\nSuite 9: Login limiter behaviour over HTTP');
   await withApp({}, async ({ baseUrl }) => {

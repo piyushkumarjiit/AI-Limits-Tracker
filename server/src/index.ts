@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { createApp } from './app';
+import { createApp, hostnameOf } from './app';
 import { DEFAULT_SESSION_DAYS } from './auth';
 import { allowsWeakSecrets, validateConfig, validateConfigWarnings, validateFatalConfig } from './config';
 import { Store } from './store';
@@ -46,6 +46,13 @@ const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || '')
   .split(',')
   .map((h) => h.trim().toLowerCase())
   .filter(Boolean);
+
+for (const host of ALLOWED_HOSTS) {
+  if (!hostnameOf(host)) {
+    console.error(`Refusing to start: ALLOWED_HOSTS entry ${JSON.stringify(host)} is not a valid hostname.`);
+    process.exit(1);
+  }
+}
 
 const store = new Store(DATA_DIR, 'tracker.db', APP_SECRET);
 const tracker = new Tracker(store);
