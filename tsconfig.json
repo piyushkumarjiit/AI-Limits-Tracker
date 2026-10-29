@@ -24,6 +24,7 @@
     "extension",
     "landing",
     "integrations",
-    "tests/remote.test.ts"
+    "tests/remote.test.ts",
+    "tests/security_tests.ts"
   ]
 }
