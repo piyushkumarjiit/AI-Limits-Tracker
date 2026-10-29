@@ -3,9 +3,10 @@ services:
     image: ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
     build: .
     # HOST_PORT is the port on this host; the container always listens on 1455.
-    # Bound to loopback by default — reach it through an SSH tunnel or a reverse proxy.
+    # BIND_ADDR defaults to loopback — reach it through an SSH tunnel or a reverse
+    # proxy. Set BIND_ADDR=0.0.0.0 to expose it on the LAN (see COOKIE_SECURE).
     ports:
-      - "127.0.0.1:${HOST_PORT:-1455}:1455"
+      - "${BIND_ADDR:-127.0.0.1}:${HOST_PORT:-1455}:1455"
     # The container runs as UID 1000; ./data must be writable by it:
     #   mkdir -p data && sudo chown 1000:1000 data
     volumes:

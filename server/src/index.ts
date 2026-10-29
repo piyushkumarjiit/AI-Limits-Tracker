@@ -15,6 +15,13 @@ const API_TOKEN = process.env.API_TOKEN || '';
 const DATA_DIR = resolve(process.env.DATA_DIR || 'data');
 const WEB_DIR = resolve(process.env.WEB_DIR || 'public');
 const SESSION_DAYS = 180;
+/**
+ * Session cookies are `Secure` by default. Browsers drop such cookies when the
+ * panel is served over plain HTTP to a non-localhost address, so `COOKIE_SECURE=0`
+ * allows LAN access over HTTP — at the cost of sending the session in clear text.
+ */
+const SECURE_COOKIES = !/^(0|false|no)$/i.test(process.env.COOKIE_SECURE || '');
+const COOKIE_ATTRS = `Path=/; HttpOnly;${SECURE_COOKIES ? ' Secure;' : ''} SameSite=Lax`;
 
 if (!ADMIN_PASSWORD || APP_SECRET.length < 16) {
   console.error('ADMIN_PASSWORD and APP_SECRET (16+ chars) must be set. See .env.example');
@@ -190,12 +197,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     }
     loginAttempts.delete(ip);
     return send(res, 200, { ok: true }, {
-      'Set-Cookie': `alt_session=${sessionCookie()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}`,
+      'Set-Cookie': `alt_session=${sessionCookie()}; ${COOKIE_ATTRS}; Max-Age=${SESSION_DAYS * 86400}`,
     });
   }
 
   if (path === '/api/logout' && method === 'POST') {
-    return send(res, 200, { ok: true }, { 'Set-Cookie': 'alt_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0' });
+    return send(res, 200, { ok: true }, { 'Set-Cookie': `alt_session=; ${COOKIE_ATTRS}; Max-Age=0` });
   }
 
   if (!isAuthed(req)) return send(res, 401, { error: 'unauthorized' });
@@ -333,5 +340,8 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   console.log(`AI Limits Tracker server on :${PORT} (data: ${DATA_DIR}, web: ${WEB_DIR})`);
+  if (!SECURE_COOKIES) {
+    console.warn('COOKIE_SECURE is disabled: the session cookie is sent over plain HTTP. Use this only on a trusted network, or put an HTTPS proxy in front.');
+  }
   tracker.start();
 });

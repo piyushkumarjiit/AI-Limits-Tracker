@@ -76,6 +76,17 @@ ssh -L 1455:127.0.0.1:1455 you@your-node    # then open http://localhost:1455
 
 Using `localhost` rather than the node's LAN IP matters: the session cookie is `Secure`, and browsers silently drop `Secure` cookies served over plain HTTP to a LAN address. If you need direct LAN or internet access, put an HTTPS reverse proxy in front and set `TRUST_PROXY=1`.
 
+**Direct LAN access over HTTP** — for a trusted home/office network only:
+
+```bash
+BIND_ADDR=0.0.0.0   # publish on all interfaces
+COOKIE_SECURE=0     # allow the session cookie over plain HTTP
+docker compose up -d
+# open http://<node-ip>:1455
+```
+
+`COOKIE_SECURE=0` means the session cookie travels in clear text and anyone on the same network can read or replay it. The server logs a warning at startup while it is disabled. Prefer the SSH tunnel, or an HTTPS proxy, whenever the network is not fully trusted.
+
 The image is a two-stage build: Expo/TypeScript tooling stays in the build stage, and the runtime image contains only the compiled server bundle (zero runtime dependencies) and the web panel. It runs as a non-root user with a read-only root filesystem, all capabilities dropped and `no-new-privileges`. Only `/app/data` is writable — that is where the SQLite database lives.
 
 > If you do not create `data/` first, Docker creates it owned by root and the container cannot write to it. Run the `chown` line above, or point the volume at a directory your user owns.
