@@ -1,8 +1,8 @@
 # REFACTOR_STATUS
 Branch: refactor/harden-docker
-Last Completed Step: 2.4
-Next Immediate Step: 2.5 (user must run: npm install; then npm audit)
-Blockers: classifier blocks "npm install" (overrides added to package.json, lockfile not yet updated)
+Last Completed Step: 2.5
+Next Immediate Step: 3.1
+Blockers: none (deepmerge low-severity advisory accepted: no patched release, Expo dev tooling only)
 
 ## Phase 1
 - [x] 1.1 delete remote/agent files (done by user)
@@ -14,7 +14,7 @@ Blockers: classifier blocks "npm install" (overrides added to package.json, lock
 - [x] 2.2 prototype pollution
 - [x] 2.3 (assertSafeUrl in src/services/http.ts, used by isolatedFetch + notify) SSRF + escaping
 - [x] 2.4 (semgrep.yml; pages.yml already had permissions) workflow permissions
-- [ ] 2.5 dependabot / npm audit
+- [x] 2.5 dependabot / npm audit
 ## Phase 3
 - [ ] 3.1 encryption at rest
 - [ ] 3.2 auth/API hardening
