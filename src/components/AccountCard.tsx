@@ -70,7 +70,7 @@ export const AccountCard: React.FC<AccountCardProps> = ({ account, snapshot }) =
       <View style={styles.right}>
         {showReset && (
           <>
-            <Text style={styles.resetLabel}>Сброс через</Text>
+            <Text style={styles.resetLabel}>Resets in</Text>
             <View style={styles.countdownRow}>
               <Clock size={12} color={Colors.text} strokeWidth={2.4} />
               <Text style={styles.countdown}>{formatTimeRemaining(bucket?.resetsAt)}</Text>
@@ -78,7 +78,7 @@ export const AccountCard: React.FC<AccountCardProps> = ({ account, snapshot }) =
           </>
         )}
         {snapshot?.isStale ? (
-          <Text style={styles.stale}>данные от {formatClock(snapshot.fetchedAt)}</Text>
+          <Text style={styles.stale}>data from {formatClock(snapshot.fetchedAt)}</Text>
         ) : (
           <MiniBars values={bars} />
         )}

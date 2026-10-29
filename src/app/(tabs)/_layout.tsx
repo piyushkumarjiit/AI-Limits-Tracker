@@ -13,10 +13,10 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; color?: string;
 };
 
 const LABELS: Record<string, string> = {
-  index: 'Главная',
-  analytics: 'Аналитика',
-  accounts: 'Аккаунты',
-  settings: 'Настройки',
+  index: 'Home',
+  analytics: 'Analytics',
+  accounts: 'Accounts',
+  settings: 'Settings',
 };
 
 // Minimal shape of the props the tab navigator passes to a custom tab bar

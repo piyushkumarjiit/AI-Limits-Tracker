@@ -9,9 +9,7 @@
     "web": "expo start --web",
     "test": "tsx tests/run_tests.ts",
     "typecheck": "tsc --noEmit",
-    "typecheck:all": "tsc --noEmit && tsc -p server --noEmit && tsc -p web --noEmit && tsc -p extension --noEmit && tsc -p integrations --noEmit",
-    "test:remote": "tsx --test tests/remote.test.ts",
-    "build:remote": "node scripts/build.mjs remote",
+    "typecheck:all": "tsc --noEmit && tsc -p server --noEmit && tsc -p web --noEmit && tsc -p extension --noEmit",
     "build": "node scripts/build.mjs",
     "build:server": "node scripts/build.mjs server",
     "build:web": "node scripts/build.mjs web",
@@ -55,5 +53,13 @@
     "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
+  "overrides": {
+    "decode-uri-component": "^0.5.1",
+    "zod": "^4.6.7",
+    "node-forge": "^1.4.1",
+    "uuid": "^11.1.1"
+  },
+  "author": "Piyush Kumar <piyushkumar.jiit@gmail.com> (https://github.com/piyushkumarjiit)",
+  "license": "MIT",
   "private": true
 }

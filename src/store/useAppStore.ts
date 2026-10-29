@@ -80,7 +80,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isSyncing: false,
   lastSyncAllAt: null,
   refreshIntervalMin: 5,
-  userName: 'Рауан',
+  userName: 'Piyush',
 
   initializeStore: async () => {
     await initDatabase();
@@ -109,7 +109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       accounts,
       snapshots,
       refreshIntervalMin: interval ? Number(interval) || 5 : 5,
-      userName: userName ?? 'Рауан',
+      userName: userName ?? 'Piyush',
     });
 
     pruneHistory(new Date(Date.now() - 400 * 86400 * 1000).toISOString()).catch(() => {});
@@ -152,7 +152,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const snapshot = result.snapshot;
 
     if (snapshot.status === 'reauth_required' || snapshot.status === 'not_configured') {
-      return { ok: false, error: snapshot.errorMessage || 'Не удалось авторизоваться' };
+      return { ok: false, error: snapshot.errorMessage || 'Could not sign in' };
     }
 
     const email = normalizeEmail(snapshot.email || finalCreds.email);
@@ -163,7 +163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (duplicate) {
         return {
           ok: false,
-          error: `Этот аккаунт (${email}) уже подключён как «${duplicate.name}». Войдите в другой аккаунт.`,
+          error: `This account (${email}) is already connected as "${duplicate.name}". Sign in with a different account.`,
         };
       }
     }

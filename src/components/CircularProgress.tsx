@@ -21,7 +21,7 @@ export const CircularProgress: React.FC<CircularProgressProps> = ({
   remainingPercent,
   providerType,
   colorOverride,
-  sublabel = 'осталось',
+  sublabel = 'remaining',
   dimmed,
 }) => {
   const radius = (size - strokeWidth) / 2;
@@ -63,7 +63,7 @@ export const CircularProgress: React.FC<CircularProgressProps> = ({
         </Text>
         {size >= 60 && (
           <Text style={[styles.sublabel, big && { fontSize: 13, marginTop: 2 }]}>
-            {pct === null ? 'нет данных' : sublabel}
+            {pct === null ? 'no data' : sublabel}
           </Text>
         )}
       </View>

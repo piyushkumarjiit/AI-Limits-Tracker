@@ -107,7 +107,7 @@ export class Tracker {
   private async checkAlerts(account: ServerAccount, snapshot: UsageSnapshot, previousStatus: string) {
     if (snapshot.status === 'reauth_required') {
       if (previousStatus !== 'reauth_required') {
-        await this.alert(account, 'reauth', 'Требуется авторизация', `${account.name}: сессия истекла, войдите заново.`);
+        await this.alert(account, 'reauth', 'Authorization required', `${account.name}: session expired, please sign in again.`);
       }
       return;
     }
@@ -120,18 +120,18 @@ export class Tracker {
     const next = { ...st };
 
     if (used >= 100) {
-      if (st.armed0) await this.alert(account, 'exhausted', `Лимит исчерпан: ${account.name}`, `${b.label}: 0% осталось.`);
+      if (st.armed0) await this.alert(account, 'exhausted', `Limit exhausted: ${account.name}`, `${b.label}: 0% remaining.`);
       next.armed0 = false;
     } else if (!st.armed0) {
       next.armed0 = true;
-      await this.alert(account, 'restored', `Лимит восстановлен: ${account.name}`, `${b.label}: доступно ${left}%.`);
+      await this.alert(account, 'restored', `Limit restored: ${account.name}`, `${b.label}: ${left}% available.`);
     }
     if (used >= 90) {
-      if (used < 100 && st.armed10) await this.alert(account, 'low10', `Низкий лимит: ${account.name}`, `${b.label}: осталось ${left}%.`);
+      if (used < 100 && st.armed10) await this.alert(account, 'low10', `Low limit: ${account.name}`, `${b.label}: ${left}% remaining.`);
       next.armed10 = false;
     } else next.armed10 = true;
     if (used >= 80) {
-      if (used < 90 && st.armed20) await this.alert(account, 'low20', `Низкий лимит: ${account.name}`, `${b.label}: осталось ${left}%.`);
+      if (used < 90 && st.armed20) await this.alert(account, 'low20', `Low limit: ${account.name}`, `${b.label}: ${left}% remaining.`);
       next.armed20 = false;
     } else next.armed20 = true;
 
@@ -143,7 +143,7 @@ export class Tracker {
   /* ---------------- OAuth (Claude / ChatGPT) — keeps accounts alive for weeks ---------------- */
 
   startOAuth(provider: ProviderType, accountId?: string): { authorizeUrl: string; state: string } {
-    if (provider !== 'claude' && provider !== 'chatgpt') throw new Error('OAuth доступен только для Claude и ChatGPT');
+    if (provider !== 'claude' && provider !== 'chatgpt') throw new Error('OAuth is only available for Claude and ChatGPT');
     for (const [k, v] of this.pending) if (Date.now() - v.createdAt > 15 * 60 * 1000) this.pending.delete(k);
 
     const verifier = b64url(randomBytes(32));
@@ -157,10 +157,10 @@ export class Tracker {
 
   async finishOAuth(state: string, input: string): Promise<ConnectResult> {
     const parsed = parseAuthCode(input);
-    if (!parsed) return { ok: false, error: 'Не удалось прочитать код. Вставьте код со страницы или адрес из строки браузера.' };
+    if (!parsed) return { ok: false, error: 'Could not read the code. Paste the code from the page or the address from your browser bar.' };
     const pending = this.pending.get(parsed.state || state);
     if (!pending || (parsed.state && parsed.state !== state)) {
-      return { ok: false, error: 'Код относится к другой попытке входа. Начните вход заново.' };
+      return { ok: false, error: 'This code belongs to a different sign-in attempt. Start signing in again.' };
     }
     this.pending.delete(pending.state);
     try {
@@ -170,7 +170,7 @@ export class Tracker {
           : await exchangeChatGPTCode(parsed.code, pending.verifier);
       return await this.connect(pending.provider, creds, pending.accountId);
     } catch (e: any) {
-      return { ok: false, error: e?.message || 'Не удалось завершить вход' };
+      return { ok: false, error: e?.message || 'Could not complete sign-in' };
     }
   }
 
@@ -188,12 +188,12 @@ export class Tracker {
     const creds = result.updatedCredentials || credentials;
 
     if (snapshot.status === 'reauth_required' || snapshot.status === 'not_configured') {
-      return { ok: false, error: snapshot.errorMessage || 'Не удалось авторизоваться' };
+      return { ok: false, error: snapshot.errorMessage || 'Could not authorize' };
     }
     const email = (snapshot.email || creds.email || '').trim().toLowerCase() || undefined;
     if (email) {
       const dup = accounts.find((a) => a.providerType === provider && a.id !== existingId && a.email?.toLowerCase() === email);
-      if (dup) return { ok: false, error: `Аккаунт ${email} уже подключён как «${dup.name}».` };
+      if (dup) return { ok: false, error: `Account ${email} is already connected as "${dup.name}".` };
     }
 
     const existing = accounts.find((a) => a.id === existingId);

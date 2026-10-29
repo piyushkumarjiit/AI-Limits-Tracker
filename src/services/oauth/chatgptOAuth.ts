@@ -122,7 +122,7 @@ export async function exchangeChatGPTCode(code: string, verifier: string): Promi
 }
 
 export async function refreshChatGPTToken(creds: AccountCredentials): Promise<AccountCredentials> {
-  if (!creds.refreshToken) throw new Error('Нет refresh-токена');
+  if (!creds.refreshToken) throw new Error('No refresh token');
   const resp = await isolatedFetch(CHATGPT_OAUTH.tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

@@ -61,12 +61,12 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{ status: num
 
 async function readClaude(): Promise<Partial<TrackedAccount>> {
   const orgs = await fetchJson('https://claude.ai/api/organizations');
-  if (orgs.status === 401 || orgs.status === 403) return { status: 'reauth', lastError: 'Войдите в claude.ai в этом браузере' };
+  if (orgs.status === 401 || orgs.status === 403) return { status: 'reauth', lastError: 'Sign in to claude.ai in this browser' };
   if (!orgs.data) return { status: 'error', lastError: `Claude HTTP ${orgs.status}` };
   const list: any[] = Array.isArray(orgs.data) ? orgs.data : orgs.data.organizations || [];
   const org =
     list.find((o) => (o.capabilities || []).some((c: string) => /claude_(max|pro|team)/.test(c))) || list[0];
-  if (!org) return { status: 'reauth', lastError: 'Нет организации Claude' };
+  if (!org) return { status: 'reauth', lastError: 'No Claude organization found' };
   const caps: string[] = org.capabilities || [];
   let plan = caps.includes('claude_max') ? 'Max' : caps.includes('claude_team') ? 'Team' : caps.includes('claude_pro') ? 'Pro' : 'Free';
   const tier = String(org.rate_limit_tier || '');
@@ -74,7 +74,7 @@ async function readClaude(): Promise<Partial<TrackedAccount>> {
   else if (/5x/.test(tier)) plan = 'Max 5x';
 
   const usage = await fetchJson(`https://claude.ai/api/organizations/${org.uuid || org.id}/usage`);
-  if (usage.status === 401 || usage.status === 403) return { status: 'reauth', lastError: 'Сессия Claude истекла' };
+  if (usage.status === 401 || usage.status === 403) return { status: 'reauth', lastError: 'Claude session expired' };
   if (!usage.data) return { status: 'error', lastError: `Claude usage HTTP ${usage.status}` };
   const buckets = parseClaudeUsage(usage.data);
   return { status: 'ok', plan, email: org.billing_email || org.name, snapshot: snap('claude', plan, buckets, org.billing_email) };
@@ -82,13 +82,13 @@ async function readClaude(): Promise<Partial<TrackedAccount>> {
 
 async function readChatGPT(): Promise<Partial<TrackedAccount>> {
   const session = await fetchJson('https://chatgpt.com/api/auth/session');
-  if (session.status === 401 || !session.data?.accessToken) return { status: 'reauth', lastError: 'Войдите в chatgpt.com в этом браузере' };
+  if (session.status === 401 || !session.data?.accessToken) return { status: 'reauth', lastError: 'Sign in to chatgpt.com in this browser' };
   const token: string = session.data.accessToken;
   const email: string | undefined = session.data.user?.email;
   const usage = await fetchJson('https://chatgpt.com/backend-api/wham/usage', {
     headers: { Authorization: `Bearer ${token}`, originator: 'codex_cli_rs', 'OpenAI-Beta': 'responses=experimental' },
   });
-  if (usage.status === 401 || usage.status === 403) return { status: 'reauth', lastError: 'Нет доступа к лимитам ChatGPT' };
+  if (usage.status === 401 || usage.status === 403) return { status: 'reauth', lastError: 'No access to ChatGPT limits' };
   const parsed = parseChatGPTUsage(usage.data || {});
   const plan = parsed.plan || 'Plus';
   return { status: 'ok', plan, email, snapshot: snap('chatgpt', plan, parsed.buckets, email) };
@@ -96,7 +96,7 @@ async function readChatGPT(): Promise<Partial<TrackedAccount>> {
 
 async function readGemini(): Promise<Partial<TrackedAccount>> {
   // Gemini has no stable session-usage endpoint callable from an extension.
-  return { status: 'error', lastError: 'Gemini доступен только в приложении/на сервере (через cURL)' };
+  return { status: 'error', lastError: 'Gemini is only available in the app/server (via cURL)' };
 }
 
 function snap(provider: ProviderType, plan: string, buckets: QuotaBucket[], email?: string): UsageSnapshot {
@@ -111,7 +111,7 @@ export async function syncProvider(provider: ProviderType): Promise<TrackedAccou
     patch =
       provider === 'claude' ? await readClaude() : provider === 'chatgpt' ? await readChatGPT() : await readGemini();
   } catch (e: any) {
-    patch = { status: 'error', lastError: e?.message || 'Сбой запроса' };
+    patch = { status: 'error', lastError: e?.message || 'Request failed' };
   }
   const acc: TrackedAccount = {
     ...prev,
@@ -164,18 +164,18 @@ async function checkAlerts(provider: ProviderType, acc: TrackedAccount, s: Store
     chrome.notifications.create(`${provider}-${Date.now()}`, { type: 'basic', iconUrl: 'icons/128.png', title, message });
 
   if (used >= 100) {
-    if (armed.a0) notify(`Лимит исчерпан: ${name}`, `${b.label}: 0% осталось.`);
+    if (armed.a0) notify(`Limit exhausted: ${name}`, `${b.label}: 0% left.`);
     armed.a0 = false;
   } else {
-    if (!armed.a0) notify(`Лимит восстановлен: ${name}`, `${b.label}: доступно ${left}%.`);
+    if (!armed.a0) notify(`Limit restored: ${name}`, `${b.label}: available ${left}%.`);
     armed.a0 = true;
   }
   if (used >= 90) {
-    if (used < 100 && armed.a10) notify(`Низкий лимит: ${name}`, `${b.label}: осталось ${left}%.`);
+    if (used < 100 && armed.a10) notify(`Low limit: ${name}`, `${b.label}: left ${left}%.`);
     armed.a10 = false;
   } else armed.a10 = true;
   if (used >= 80) {
-    if (used < 90 && armed.a20) notify(`Низкий лимит: ${name}`, `${b.label}: осталось ${left}%.`);
+    if (used < 90 && armed.a20) notify(`Low limit: ${name}`, `${b.label}: left ${left}%.`);
     armed.a20 = false;
   } else armed.a20 = true;
   s.armed[provider] = armed;

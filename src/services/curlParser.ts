@@ -128,26 +128,26 @@ const RECIPE_SET = new Set(RECIPE_PROVIDERS as string[]);
 
 export function parseManualInput(input: string, providerType: ProviderType): ManualParseResult {
   const text = input.trim();
-  if (!text) return { ok: false, error: 'Поле пустое' };
+  if (!text) return { ok: false, error: 'Field is empty' };
   const isCurl = /^curl(\.exe)?\s/i.test(text) || /\s-H\s/.test(text);
 
   // --- Native providers (bespoke adapters) ---
   if (providerType === 'claude') {
     if (isCurl) {
       const parsed = parseCurlForProvider(text, providerType);
-      if (!parsed.sessionKey) return { ok: false, error: 'В cURL нет cookie sessionKey' };
+      if (!parsed.sessionKey) return { ok: false, error: 'No sessionKey cookie in cURL' };
       return { ok: true, credentials: { ...parsed, authType: 'cookie' } };
     }
     const fromCookie = /sessionKey=([^;\s]+)/.exec(text);
     const key = fromCookie ? fromCookie[1] : /^sk-ant-[\w-]+$/.test(text) ? text : null;
-    if (!key) return { ok: false, error: 'Ожидается sessionKey (sk-ant-sid…) или cURL' };
+    if (!key) return { ok: false, error: 'Expected a sessionKey (sk-ant-sid…) or cURL' };
     return { ok: true, credentials: { authType: 'cookie', sessionKey: key } };
   }
 
   if (providerType === 'chatgpt') {
     if (isCurl) {
       const parsed = parseCurlForProvider(text, providerType);
-      if (!parsed.accessToken && !parsed.cookies) return { ok: false, error: 'В cURL нет Authorization или cookie' };
+      if (!parsed.accessToken && !parsed.cookies) return { ok: false, error: 'No Authorization or cookie in cURL' };
       if (parsed.cookies?.includes('next-auth.session-token')) {
         const { accessToken, ...rest } = parsed;
         return { ok: true, credentials: { ...rest, authType: 'cookie' } };
@@ -157,30 +157,30 @@ export function parseManualInput(input: string, providerType: ProviderType): Man
     const bearer = text.replace(/^bearer\s+/i, '');
     if (/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(bearer)) return { ok: true, credentials: { authType: 'token', accessToken: bearer } };
     if (text.includes('=')) return { ok: true, credentials: { authType: 'cookie', cookies: text } };
-    return { ok: false, error: 'Ожидается access token (eyJ…), cookie или cURL' };
+    return { ok: false, error: 'Expected an access token (eyJ…), cookie, or cURL' };
   }
 
   if (providerType === 'gemini') {
     if (isCurl) {
       const parsed = parseCurlForProvider(text, providerType);
-      if (!parsed.cookies?.includes('PSID')) return { ok: false, error: 'В cURL нет cookie __Secure-1PSID' };
+      if (!parsed.cookies?.includes('PSID')) return { ok: false, error: 'No __Secure-1PSID cookie in cURL' };
       return { ok: true, credentials: { ...parsed, authType: 'cookie' } };
     }
     if (text.includes('PSID')) return { ok: true, credentials: { authType: 'cookie', cookies: text } };
-    return { ok: false, error: 'Ожидаются cookie Google (__Secure-1PSID…) или cURL' };
+    return { ok: false, error: 'Expected Google cookies (__Secure-1PSID…) or cURL' };
   }
 
   // --- Custom: build a recipe straight from the pasted cURL ---
   if (providerType === 'custom') {
-    if (!isCurl) return { ok: false, error: 'Вставьте cURL запроса, который возвращает ваши лимиты' };
+    if (!isCurl) return { ok: false, error: 'Paste the cURL of the request that returns your limits' };
     const url = extractUrl(text);
-    if (!url) return { ok: false, error: 'В cURL не найден URL' };
+    if (!url) return { ok: false, error: 'No URL found in cURL' };
     const cookies = extractCookies(text) || undefined;
     const auth = extractDelimitedHeaders(text, 'authorization');
     const bearer = auth && /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, '') : undefined;
     const isPost = /-X\s+POST|--data|--data-raw|-d\s/i.test(text);
     const bodyMatch = /(?:--data-raw|--data|-d)\s+'([^']*)'/.exec(text) || /(?:--data-raw|--data|-d)\s+"([^"]*)"/.exec(text);
-    if (!cookies && !bearer) return { ok: false, error: 'В cURL нет cookie или Authorization' };
+    if (!cookies && !bearer) return { ok: false, error: 'No cookie or Authorization in cURL' };
     return {
       ok: true,
       credentials: {
@@ -213,9 +213,9 @@ export function parseManualInput(input: string, providerType: ProviderType): Man
     } else if (text.includes('=')) {
       cookies = text;
     }
-    if (!cookies && !bearer) return { ok: false, error: 'Вставьте cURL этого сервиса (Network → Copy as cURL), cookie или токен' };
+    if (!cookies && !bearer) return { ok: false, error: 'Paste the cURL for this service (Network → Copy as cURL), a cookie, or a token' };
     return { ok: true, credentials: { authType: bearer ? 'token' : 'cookie', cookies, accessToken: bearer } };
   }
 
-  return { ok: false, error: 'Неизвестный сервис' };
+  return { ok: false, error: 'Unknown service' };
 }

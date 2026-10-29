@@ -26,12 +26,12 @@ export default function SettingsScreen() {
   useEffect(() => setName(userName), [userName]);
 
   const pickInterval = () =>
-    Alert.alert('Обновление данных', 'Как часто обновлять лимиты, пока приложение открыто', [
+    Alert.alert('Data refresh', 'How often to refresh limits while the app is open', [
       ...INTERVALS.map((m) => ({
-        text: `${m === refreshIntervalMin ? '✓ ' : ''}Каждые ${m} ${plural(m, ['минуту', 'минуты', 'минут'])}`,
+        text: `${m === refreshIntervalMin ? '✓ ' : ''}Every ${m} ${plural(m, ['minute', 'minutes', 'minutes'])}`,
         onPress: () => setRefreshInterval(m),
       })),
-      { text: 'Отмена', style: 'cancel' as const },
+      { text: 'Cancel', style: 'cancel' as const },
     ]);
 
   const exportData = async () => {
@@ -52,28 +52,28 @@ export default function SettingsScreen() {
       })),
     };
     try {
-      await Share.share({ message: JSON.stringify(payload, null, 2), title: 'AI Limits — экспорт' });
+      await Share.share({ message: JSON.stringify(payload, null, 2), title: 'AI Limits — export' });
     } catch {}
   };
 
   const deleteAll = () =>
-    Alert.alert('Удалить все аккаунты?', 'Токены, cookie и история всех аккаунтов будут удалены с устройства.', [
-      { text: 'Отмена', style: 'cancel' },
-      { text: 'Удалить всё', style: 'destructive', onPress: () => deleteAllAccounts() },
+    Alert.alert('Delete all accounts?', 'Tokens, cookies, and history for all accounts will be removed from this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete all', style: 'destructive', onPress: () => deleteAllAccounts() },
     ]);
 
   const privacy = () =>
     Alert.alert(
-      'Конфиденциальность',
-      'Токены и cookie хранятся только на этом устройстве в защищённом хранилище (Keychain / Keystore). ' +
-        'Запросы идут напрямую на серверы Anthropic, OpenAI и Google — без сторонних серверов. ' +
-        'Каждый аккаунт изолирован: его данные никогда не отправляются вместе с данными другого аккаунта.'
+      'Privacy',
+      'Tokens and cookies are stored only on this device in secure storage (Keychain / Keystore). ' +
+        'Requests go directly to Anthropic, OpenAI, and Google servers — with no third-party servers. ' +
+        'Each account is isolated: its data is never sent together with another account\'s data.'
     );
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <ScreenHeader large title="Настройки" subtitle={`Последнее обновление: ${formatRelative(lastSyncAllAt)}`} />
+        <ScreenHeader large title="Settings" subtitle={`Last refresh: ${formatRelative(lastSyncAllAt)}`} />
 
         <Card style={styles.nameCard}>
           <User size={18} color={Colors.textMuted} />
@@ -83,27 +83,27 @@ export default function SettingsScreen() {
             onChangeText={setName}
             onBlur={() => name !== userName && setUserName(name)}
             onSubmitEditing={() => setUserName(name)}
-            placeholder="Ваше имя для приветствия"
+            placeholder="Your name for the greeting"
             placeholderTextColor={Colors.textSubtle}
             returnKeyType="done"
           />
         </Card>
 
         <Card style={styles.menu}>
-          <MenuRow icon={<Palette size={18} color={Colors.textMuted} />} title="Внешний вид" value="Светлая тема" onPress={() => {}} />
+          <MenuRow icon={<Palette size={18} color={Colors.textMuted} />} title="Appearance" value="Light theme" onPress={() => {}} />
           <MenuRow
             icon={<RefreshCw size={18} color={Colors.textMuted} />}
-            title="Обновление данных"
-            value={`Каждые ${refreshIntervalMin} мин`}
+            title="Data refresh"
+            value={`Every ${refreshIntervalMin} min`}
             onPress={pickInterval}
           />
-          <MenuRow icon={<Bell size={18} color={Colors.textMuted} />} title="Уведомления" onPress={() => router.push('/notifications')} />
-          <MenuRow icon={<History size={18} color={Colors.textMuted} />} title="История использования" onPress={() => router.push('/history')} />
-          <MenuRow icon={<Shield size={18} color={Colors.textMuted} />} title="Конфиденциальность" onPress={privacy} />
-          <MenuRow icon={<Download size={18} color={Colors.textMuted} />} title="Экспорт данных" onPress={exportData} />
+          <MenuRow icon={<Bell size={18} color={Colors.textMuted} />} title="Notifications" onPress={() => router.push('/notifications')} />
+          <MenuRow icon={<History size={18} color={Colors.textMuted} />} title="Usage history" onPress={() => router.push('/history')} />
+          <MenuRow icon={<Shield size={18} color={Colors.textMuted} />} title="Privacy" onPress={privacy} />
+          <MenuRow icon={<Download size={18} color={Colors.textMuted} />} title="Export data" onPress={exportData} />
           <MenuRow
             icon={<Trash2 size={18} color={Colors.exhausted} />}
-            title="Удалить все аккаунты"
+            title="Delete all accounts"
             danger
             onPress={deleteAll}
             last
@@ -111,7 +111,7 @@ export default function SettingsScreen() {
         </Card>
 
         <Text style={styles.footer}>
-          AI Limits Tracker · {accounts.length} {plural(accounts.length, ['аккаунт', 'аккаунта', 'аккаунтов'])}
+          AI Limits Tracker · {accounts.length} {plural(accounts.length, ['account', 'accounts', 'accounts'])}
         </Text>
       </ScrollView>
     </SafeAreaView>
