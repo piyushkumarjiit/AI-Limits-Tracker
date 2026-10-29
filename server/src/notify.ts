@@ -27,5 +27,7 @@ export async function notify(title: string, body: string): Promise<void> {
 
 /** Escape MarkdownV2 special characters; the backslash itself must be escaped first. */
 function escapeMd(s: string): string {
-  return s.replaceAll('\\', '\\\\').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
 }
