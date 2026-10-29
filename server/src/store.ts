@@ -237,4 +237,13 @@ export class Store {
       .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(key, value);
   }
+
+  /** Flushes the write-ahead log into the database file (used on shutdown). */
+  checkpoint(): void {
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  }
+
+  close(): void {
+    this.db.close();
+  }
 }

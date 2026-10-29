@@ -3,10 +3,12 @@ import { NATIVE_PROVIDERS, type ProviderType, RECIPE_PROVIDERS } from '../../src
 import { computeStats, forecastWindow } from '../../src/services/stats';
 import {
   AuthConfig,
+  clientIp,
   createLoginLimiter,
   createSession,
   DEFAULT_SESSION_DAYS,
   isAuthed,
+  isBrowserAuthed,
   safeEqual,
   UNSAFE_KEYS,
 } from './auth';
@@ -25,6 +27,10 @@ export interface AppConfig {
   sessionDays?: number;
   /** Whether the Telegram alert channel is configured. */
   telegram?: boolean;
+  /** When set, requests whose Host is not listed are refused with 421. */
+  allowedHosts?: string[];
+  /** Maximum accepted size of the request line plus headers. Defaults to 8 KiB. */
+  maxHeaderSize?: number;
 }
 
 export interface AppDeps {
@@ -34,17 +40,45 @@ export interface AppDeps {
 
 /* ---------------- HTTP helpers ---------------- */
 
+/** Body exceeded the read limit; answered with 413. */
+export class BodyTooLargeError extends Error {
+  constructor() {
+    super('Body too large');
+    this.name = 'BodyTooLargeError';
+  }
+}
+
+/** Body was not valid JSON; answered with 400. */
+export class InvalidJsonError extends Error {
+  constructor() {
+    super('Invalid JSON body');
+    this.name = 'InvalidJsonError';
+  }
+}
+
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
 
-async function readBody(req: IncomingMessage, max = 256 * 1024): Promise<any> {
+const MAX_BODY_BYTES = 256 * 1024;
+
+/**
+ * Reads a JSON body. An empty body is `{}`; oversized bodies throw
+ * `BodyTooLargeError` (413) and malformed JSON throws `InvalidJsonError` (400),
+ * both answered by the server-wide catch.
+ */
+async function readBody(req: IncomingMessage, max = MAX_BODY_BYTES): Promise<any> {
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > max) {
+    req.resume(); // drain what the client is already sending
+    throw new BodyTooLargeError();
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > max) throw new Error('Body too large');
+    if (size > max) throw new BodyTooLargeError();
     chunks.push(c as Buffer);
   }
   if (!chunks.length) return {};
@@ -52,7 +86,24 @@ async function readBody(req: IncomingMessage, max = 256 * 1024): Promise<any> {
     // Drop prototype-pollution keys at every depth
     return JSON.parse(Buffer.concat(chunks).toString('utf8'), (k, v) => (UNSAFE_KEYS.has(k) ? undefined : v));
   } catch {
-    return {};
+    throw new InvalidJsonError();
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** True for `application/json`, with or without parameters such as charset. */
+function isJsonContentType(value: string | undefined): boolean {
+  return (value || '').split(';')[0].trim().toLowerCase() === 'application/json';
+}
+
+/** Host from the Origin header, or null when missing/invalid. */
+function originHost(origin: string | undefined): string | null {
+  if (!origin) return null;
+  try {
+    return new URL(origin).host.toLowerCase();
+  } catch {
+    return null;
   }
 }
 
@@ -67,7 +118,8 @@ async function handleApi(
   config: AppConfig,
   auth: AuthConfig,
   { store, tracker }: AppDeps,
-  limiter: ReturnType<typeof createLoginLimiter>
+  limiter: ReturnType<typeof createLoginLimiter>,
+  bearerLimiter: ReturnType<typeof createLoginLimiter>
 ) {
   const path = url.pathname;
   const method = req.method || 'GET';
@@ -75,11 +127,14 @@ async function handleApi(
   if (path === '/api/health') return send(res, 200, { ok: true });
 
   if (path === '/api/login' && method === 'POST') {
-    // X-Real-IP is client-controlled unless a trusted reverse proxy sets it (TRUST_PROXY=1)
-    const ip = (config.trustProxy && (req.headers['x-real-ip'] as string)) || req.socket.remoteAddress || '';
+    const ip = clientIp(req, config.trustProxy);
     if (limiter.tooManyAttempts(ip)) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
     const { password } = await readBody(req);
     if (typeof password !== 'string' || !safeEqual(password, config.adminPassword)) {
+      // Only failures count toward the throttle; back off exponentially (never log the password).
+      const failures = limiter.recordFailure(ip);
+      console.log(`login_failed ip=${ip} ts=${Math.floor(Date.now() / 1000)}`);
+      await sleep(limiter.delayMs(failures));
       return send(res, 401, { error: 'Incorrect password' });
     }
     limiter.reset(ip);
@@ -106,7 +161,19 @@ async function handleApi(
     return send(res, 200, { ok: true }, { 'Set-Cookie': cookie });
   }
 
-  if (!isAuthed(req, auth)) return send(res, 401, { error: 'unauthorized' });
+  if (!isAuthed(req, auth)) {
+    // Failed Bearer attempts are throttled per address as well, so a wrong token
+    // cannot be brute-forced. A valid token is never delayed or refused.
+    if (/^Bearer\s+/i.test(req.headers.authorization || '')) {
+      const ip = clientIp(req, config.trustProxy);
+      if (bearerLimiter.tooManyAttempts(ip)) {
+        return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
+      }
+      const failures = bearerLimiter.recordFailure(ip);
+      await sleep(bearerLimiter.delayMs(failures));
+    }
+    return send(res, 401, { error: 'unauthorized' });
+  }
 
   if (path === '/api/state' && method === 'GET') {
     return send(res, 200, {
@@ -222,10 +289,37 @@ const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'no-referrer',
+  // The web build ships one external stylesheet and no inline <style> blocks;
+  // React's inline style attributes are covered by style-src-attr.
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-    "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; " +
+    "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
+    "form-action 'self'; frame-ancestors 'none'",
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-origin',
 };
+
+/**
+ * Cross-site request checks for cookie-authenticated, state-changing API calls.
+ * Bearer-token callers are not subject to them (browsers never attach the token
+ * implicitly), and unauthenticated calls are answered with 401 by the API.
+ */
+function csrfError(req: IncomingMessage, auth: AuthConfig): { status: number; error: string } | null {
+  if (/^Bearer\s+/i.test(req.headers.authorization || '')) return null;
+  if (!isBrowserAuthed(req, auth)) return null;
+  if (!isJsonContentType(req.headers['content-type'])) {
+    return { status: 403, error: 'Content-Type must be application/json' };
+  }
+  const origin = req.headers.origin;
+  if (origin !== undefined) {
+    const host = originHost(origin);
+    if (!host || host !== (req.headers.host || '').toLowerCase()) {
+      return { status: 403, error: 'Cross-origin request refused' };
+    }
+  }
+  return null;
+}
 
 /**
  * Builds the HTTP server without side effects: it does not read the environment,
@@ -238,17 +332,49 @@ export function createApp(config: AppConfig, deps: AppDeps) {
     sessionDays: config.sessionDays ?? DEFAULT_SESSION_DAYS,
   };
   const limiter = createLoginLimiter();
+  const bearerLimiter = createLoginLimiter();
+  const allowedHosts = (config.allowedHosts || []).map((h) => h.trim().toLowerCase()).filter(Boolean);
 
-  const server = createServer(async (req, res) => {
+  const server = createServer({ maxHeaderSize: config.maxHeaderSize ?? 8192 }, async (req, res) => {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
-    const url = new URL(req.url || '/', 'http://localhost');
+    if (config.secureCookies) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
-      if (url.pathname.startsWith('/api/')) await handleApi(req, res, url, config, auth, deps, limiter);
+      if (allowedHosts.length && !allowedHosts.includes((req.headers.host || '').toLowerCase())) {
+        return send(res, 421, { error: 'misdirected request' });
+      }
+      let url: URL;
+      try {
+        url = new URL(req.url || '/', 'http://localhost');
+      } catch {
+        // A malformed request target must never take the process down.
+        return send(res, 400, { error: 'bad request' });
+      }
+      const method = req.method || 'GET';
+      if (url.pathname.startsWith('/api/') && method !== 'GET' && method !== 'HEAD') {
+        const csrf = csrfError(req, auth);
+        if (csrf) return send(res, csrf.status, { error: csrf.error });
+      }
+      if (url.pathname.startsWith('/api/')) await handleApi(req, res, url, config, auth, deps, limiter, bearerLimiter);
       else serveStatic(req, res, url.pathname, config.webDir);
     } catch (e: any) {
+      if (e instanceof BodyTooLargeError) {
+        if (!res.headersSent) send(res, 413, { error: 'payload too large' });
+        return;
+      }
+      if (e instanceof InvalidJsonError) {
+        if (!res.headersSent) send(res, 400, { error: 'bad request' });
+        return;
+      }
       console.error(e);
       if (!res.headersSent) send(res, 500, { error: 'internal error' });
     }
+  });
+
+  // Node's own parser rejects unparsable request lines/headers before the handler;
+  // answer those clients explicitly instead of leaving the socket hanging.
+  server.on('clientError', (_err, socket) => {
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    else socket.destroy();
   });
 
   return server;
