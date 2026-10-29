@@ -97,25 +97,63 @@ function isJsonContentType(value: string | undefined): boolean {
   return (value || '').split(';')[0].trim().toLowerCase() === 'application/json';
 }
 
-/** Host from the Origin header, or null when missing/invalid. */
-function originHost(origin: string | undefined): string | null {
-  if (!origin) return null;
-  try {
-    return new URL(origin).host.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-/** Hostname from a Host header or allowlist entry: lowercased, without the port or IPv6 brackets. */
-function hostnameOf(value: string): string {
+/**
+ * Splits a Host header or allowlist entry into a lowercased hostname and optional
+ * port; null when the value cannot be interpreted (for example a bare IPv6 address
+ * or a port without a hostname).
+ */
+function parseHost(value: string): { hostname: string; port: string } | null {
   const host = value.trim().toLowerCase();
+  if (!host) return null;
+  let hostname: string;
+  let rest: string;
   if (host.startsWith('[')) {
     const end = host.indexOf(']');
-    return end > 0 ? host.slice(1, end) : host;
+    if (end <= 1) return null;
+    hostname = host.slice(1, end);
+    rest = host.slice(end + 1);
+  } else {
+    const colon = host.indexOf(':');
+    if (colon === -1) {
+      hostname = host;
+      rest = '';
+    } else {
+      hostname = host.slice(0, colon);
+      rest = host.slice(colon);
+    }
   }
-  const colon = host.indexOf(':');
-  return colon === -1 ? host : host.slice(0, colon);
+  if (!hostname) return null;
+  if (!rest) return { hostname, port: '' };
+  if (!rest.startsWith(':') || !/^\d+$/.test(rest.slice(1))) return null;
+  return { hostname, port: rest.slice(1) };
+}
+
+/** Hostname from a Host header or allowlist entry, without port or IPv6 brackets. */
+export function hostnameOf(value: string): string | null {
+  return parseHost(value)?.hostname ?? null;
+}
+
+/**
+ * Same-origin test for the Origin header against the request Host header. Both
+ * sides are compared as hostname plus port, with an omitted port standing for the
+ * scheme's default so a port-forwarding proxy does not break same-origin calls.
+ */
+function sameOrigin(origin: string, hostHeader: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  const protocol = url.protocol.toLowerCase();
+  if (protocol !== 'http:' && protocol !== 'https:') return false;
+  const parts = parseHost(hostHeader);
+  if (!parts) return false;
+  const originHostname = url.hostname.replace(/^\[|\]$/g, '');
+  if (parts.hostname !== originHostname) return false;
+  const originPort = url.port || (protocol === 'https:' ? '443' : '80');
+  const hostPort = parts.port || (protocol === 'https:' ? '443' : '80');
+  return hostPort === originPort;
 }
 
 const ALL_PROVIDERS: ProviderType[] = [...NATIVE_PROVIDERS, ...RECIPE_PROVIDERS, 'custom'];
@@ -327,8 +365,7 @@ function csrfError(req: IncomingMessage, auth: AuthConfig): { status: number; er
   }
   const origin = req.headers.origin;
   if (origin !== undefined) {
-    const host = originHost(origin);
-    if (!host || host !== (req.headers.host || '').toLowerCase()) {
+    if (!sameOrigin(origin, req.headers.host || '')) {
       return { status: 403, error: 'Cross-origin request refused' };
     }
   }
@@ -347,7 +384,11 @@ export function createApp(config: AppConfig, deps: AppDeps) {
   };
   const limiter = createLoginLimiter();
   const bearerLimiter = createLoginLimiter();
-  const allowedHosts = (config.allowedHosts || []).map(hostnameOf).filter(Boolean);
+  const allowedHosts = (config.allowedHosts || []).map((entry) => {
+    const hostname = hostnameOf(entry);
+    if (!hostname) throw new Error(`Invalid ALLOWED_HOSTS entry: ${JSON.stringify(entry)}`);
+    return hostname;
+  });
 
   const server = createServer({ maxHeaderSize: config.maxHeaderSize ?? 8192 }, async (req, res) => {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
@@ -362,7 +403,8 @@ export function createApp(config: AppConfig, deps: AppDeps) {
       }
       const method = req.method || 'GET';
       const healthProbe = method === 'GET' && url.pathname === '/api/health';
-      if (allowedHosts.length && !healthProbe && !allowedHosts.includes(hostnameOf(req.headers.host || ''))) {
+      const requestHost = hostnameOf(req.headers.host || '');
+      if (allowedHosts.length && !healthProbe && (!requestHost || !allowedHosts.includes(requestHost))) {
         return send(res, 421, { error: 'misdirected request' });
       }
       if (url.pathname.startsWith('/api/') && method !== 'GET' && method !== 'HEAD') {
