@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AgentSession, AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
+import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES } from '../../src/constants/theme';
 import { formatTimeRemaining, greeting, MONTHS_SHORT, plural } from '../../src/utils/formatters';
 import { Account, api, ApiError } from './api';
 import { BarChart, Donut, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
-import RemotePage from './RemotePage';
 
 /* ---------------- Router ---------------- */
 
@@ -125,12 +124,6 @@ export default function App() {
     case 'stats':
       page = <StatsPage accounts={accounts} />;
       break;
-    case 'agents':
-      page = <AgentsPage />;
-      break;
-    case 'remote':
-      page = <RemotePage initialThreadId={param} />;
-      break;
     case 'accounts':
       page = <AccountsPage accounts={accounts} go={go} reload={load} syncing={syncing} onRefresh={refreshAll} />;
       break;
@@ -147,7 +140,7 @@ export default function App() {
       page = <HomePage state={state} go={go} syncing={syncing} onRefresh={refreshAll} />;
   }
 
-  const tab = !path ? 'home' : path === 'account' ? 'home' : path === 'remote' ? 'agents' : path;
+  const tab = !path ? 'home' : path === 'account' ? 'home' : path;
   return (
     <div className="shell">
       <nav className="sidebar">
@@ -155,7 +148,6 @@ export default function App() {
           <span className="brand-mark">◔</span> AI Limits
         </div>
         <NavItem icon="home" label="Главная" active={tab === 'home'} onClick={() => go('/')} />
-        <NavItem icon="terminal" label="Агенты" active={tab === 'agents'} onClick={() => go('/agents')} />
         <NavItem icon="chart" label="Статистика" active={tab === 'stats'} onClick={() => go('/stats')} />
         <NavItem icon="users" label="Аккаунты" active={tab === 'accounts'} onClick={() => go('/accounts')} />
         <NavItem icon="bell" label="Уведомления" active={tab === 'alerts'} onClick={() => go('/alerts')} />
@@ -167,7 +159,7 @@ export default function App() {
       <main className="main">{page}</main>
       <nav className="tabbar">
         <NavItem icon="home" label="Главная" active={tab === 'home'} onClick={() => go('/')} />
-        <NavItem icon="terminal" label="Агенты" active={tab === 'agents'} onClick={() => go('/agents')} />
+        <NavItem icon="chart" label="Статистика" active={tab === 'stats'} onClick={() => go('/stats')} />
         <div className="fab-slot">
           <button className="fab" aria-label="Добавить аккаунт" onClick={() => go('/add')}>
             <Icon name="plus" size={26} stroke={2.4} />
@@ -331,7 +323,6 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
         </div>
       </section>
 
-      <AgentsStrip go={go} />
 
       {accounts.length > 0 && (
         <div className="chips">
@@ -998,102 +989,6 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
         {items && !items.length && <Empty title="Уведомлений нет" text="Здесь появятся предупреждения о низком лимите, исчерпании, восстановлении и необходимости войти заново." />}
       </div>
     </>
-  );
-};
-
-/* ---------------- Agents ---------------- */
-
-const AGENT_STATUS: Record<string, { label: string; cls: string }> = {
-  working: { label: 'Идёт работа', cls: 'working' },
-  waiting: { label: 'Ждёт ввода', cls: 'waiting' },
-  done: { label: 'Готово', cls: 'done' },
-  idle: { label: 'Завершён', cls: 'idle' },
-};
-
-function agentIcon(source: string): string {
-  return source === 'claude' ? 'C' : source === 'codex' ? 'Co' : '•';
-}
-
-function useAgents(pollMs = 8000): [AgentSession[] | null, () => void] {
-  const [agents, setAgents] = useState<AgentSession[] | null>(null);
-  const load = useCallback(() => {
-    api.agents().then((r) => setAgents(r.agents)).catch(() => setAgents([]));
-  }, []);
-  useEffect(() => {
-    load();
-    const t = setInterval(() => document.visibilityState === 'visible' && load(), pollMs);
-    return () => clearInterval(t);
-  }, [load, pollMs]);
-  return [agents, load];
-}
-
-const AgentCard: React.FC<{ a: AgentSession; onRemove?: () => void; expanded?: boolean }> = ({ a, onRemove, expanded }) => {
-  const [open, setOpen] = useState(Boolean(expanded));
-  const st = AGENT_STATUS[a.status] || AGENT_STATUS.idle;
-  return (
-    <div className={`card agent-card ${st.cls}`}>
-      <div className="agent-head" onClick={() => setOpen((o) => !o)}>
-        <span className={`agent-badge ${a.source}`}>{agentIcon(a.source)}</span>
-        <div className="grow">
-          <b className="ellipsis">{a.project}</b>
-          <span className="muted small">{a.source === 'claude' ? 'Claude Code' : a.source === 'codex' ? 'Codex' : 'Агент'} · {relative(a.updatedAt)}</span>
-        </div>
-        <span className={`agent-status ${st.cls}`}>
-          {a.status === 'working' && <i className="pulse" />}
-          {st.label}
-        </span>
-      </div>
-      {a.lastMessage && (
-        <p className={`agent-msg ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)}>{a.lastMessage}</p>
-      )}
-      {a.source === 'codex' && <a className="btn remote-open" href={`#/remote/${encodeURIComponent(a.id.replace(/^codex:/, ''))}`}>Открыть чат Codex <Icon name="chevron" size={16} /></a>}
-      {onRemove && (
-        <button className="agent-remove" onClick={onRemove} aria-label="Убрать">×</button>
-      )}
-    </div>
-  );
-};
-
-const AgentsPage: React.FC = () => {
-  const [agents, reload] = useAgents(6000);
-  return (
-    <>
-      <Header
-        title="Агенты"
-        sub="Claude Code и Codex на твоих машинах"
-        right={<div className="row"><a className="btn dark" href="#/remote">Чат Codex</a><button className="icon-btn" onClick={reload} aria-label="Обновить"><Icon name="refresh" /></button></div>}
-      />
-      {!agents ? (
-        <div className="splash small"><div className="spinner" /></div>
-      ) : agents.length === 0 ? (
-        <Empty title="Пока нет агентов" text="Настройте хуки Claude Code и Codex, чтобы видеть здесь их статус и последнее сообщение прямо с телефона.">
-          <a className="btn dark" href="https://github.com/Rauan228/AI-Limits-Tracker/tree/main/integrations" target="_blank" rel="noopener"><Icon name="external" size={16} /> Как подключить</a>
-        </Empty>
-      ) : (
-        <div className="stack">
-          {agents.map((a) => (
-            <AgentCard key={a.id} a={a} expanded onRemove={async () => { await api.removeAgent(a.id); reload(); }} />
-          ))}
-        </div>
-      )}
-    </>
-  );
-};
-
-/** Compact strip on the Home page showing only active (working/waiting) agents. */
-const AgentsStrip: React.FC<{ go: (to: string) => void }> = ({ go }) => {
-  const [agents] = useAgents(8000);
-  const active = (agents || []).filter((a) => a.status === 'working' || a.status === 'waiting');
-  if (!agents || !agents.length) return null;
-  const show = active.length ? active : agents.slice(0, 2);
-  return (
-    <section className="agents-strip">
-      <div className="section-head">
-        <h2>Агенты {active.length > 0 && <span className="agents-count">{active.length} активны</span>}</h2>
-        <button className="link-btn" onClick={() => go('/agents')}>Все →</button>
-      </div>
-      {show.map((a) => <AgentCard key={a.id} a={a} />)}
-    </section>
   );
 };
 

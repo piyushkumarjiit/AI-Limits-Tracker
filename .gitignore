@@ -52,3 +52,4 @@ data/
 integrations/dist/
 integrations/*.config.json
 .local-remote/
+.claude/
