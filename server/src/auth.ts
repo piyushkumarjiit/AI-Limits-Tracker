@@ -25,6 +25,10 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(pa, pb) && ba.length === bb.length;
 }
 
+/**
+ * Session cookie (`alt_session`) format: `<issued-ms>.<base64url HMAC-SHA256(issued, APP_SECRET)>`.
+ * The signature is what binds the session to APP_SECRET; `verifySession` also enforces the age limit.
+ */
 export function createSession(secret: string): string {
   const issued = String(Date.now());
   return `${issued}.${sign(issued, secret)}`;
