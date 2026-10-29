@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { NATIVE_PROVIDERS, type ProviderType, RECIPE_PROVIDERS } from '../../src/models/types';
@@ -30,10 +30,11 @@ function sign(value: string): string {
   return createHmac('sha256', APP_SECRET).update(value).digest('base64url');
 }
 
+/** Constant-time comparison; hashing first hides the length of the secret too. */
 function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
 }
 
 function sessionCookie(): string {
@@ -62,6 +63,7 @@ function parseCookies(req: IncomingMessage): Map<string, string> {
 function isAuthed(req: IncomingMessage): boolean {
   const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (API_TOKEN && bearer && safeEqual(bearer, API_TOKEN)) return true;
+  // NOTE: bearer attempts are not counted toward the login limiter; use a long random API_TOKEN.
   return isBrowserAuthed(req);
 }
 
@@ -171,7 +173,8 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   if (path === '/api/health') return send(res, 200, { ok: true });
 
   if (path === '/api/login' && method === 'POST') {
-    const ip = (req.headers['x-real-ip'] as string) || req.socket.remoteAddress || '';
+    // X-Real-IP is client-controlled unless a trusted reverse proxy sets it (TRUST_PROXY=1)
+    const ip = (process.env.TRUST_PROXY === '1' && (req.headers['x-real-ip'] as string)) || req.socket.remoteAddress || '';
     if (tooManyAttempts(ip)) return send(res, 429, { error: 'Слишком много попыток, подождите 15 минут' });
     const { password } = await readBody(req);
     if (typeof password !== 'string' || !safeEqual(password, ADMIN_PASSWORD)) {
@@ -299,7 +302,17 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
   return send(res, 404, { error: 'not found' });
 }
 
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+  'Content-Security-Policy':
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+    "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+};
+
 const server = createServer(async (req, res) => {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   const url = new URL(req.url || '/', 'http://localhost');
   try {
     if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
