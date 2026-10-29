@@ -2,8 +2,10 @@ services:
   ai-limits-tracker:
     image: ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
     build: .
+    # HOST_PORT is the port on this host; the container always listens on 1455.
+    # Bound to loopback by default — reach it through an SSH tunnel or a reverse proxy.
     ports:
-      - "${PORT:-1455}:1455"
+      - "127.0.0.1:${HOST_PORT:-1455}:1455"
     # The container runs as UID 1000; ./data must be writable by it:
     #   mkdir -p data && sudo chown 1000:1000 data
     volumes:
@@ -11,6 +13,9 @@ services:
     env_file:
       - .env
     environment:
+      # Pinned so that a stray PORT in .env cannot make the app listen on a port
+      # that is not the one published above.
+      PORT: "1455"
       # Set TRUST_PROXY=1 only when a reverse proxy in front of the container sets X-Real-IP
       TRUST_PROXY: "${TRUST_PROXY:-0}"
     restart: unless-stopped
@@ -21,3 +26,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+      # Inside unprivileged LXC containers Docker cannot load its AppArmor profile;
+      # set APPARMOR_PROFILE=unconfined there.
+      - apparmor=${APPARMOR_PROFILE:-docker-default}
