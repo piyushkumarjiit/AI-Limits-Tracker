@@ -16,18 +16,18 @@ export default function AccountsScreen() {
 
   const openActions = (account: AccountEntity, index: number) => {
     const buttons: any[] = [];
-    if (index > 0) buttons.push({ text: 'Переместить выше', onPress: () => moveAccount(account.id, -1) });
-    if (index < accounts.length - 1) buttons.push({ text: 'Переместить ниже', onPress: () => moveAccount(account.id, 1) });
+    if (index > 0) buttons.push({ text: 'Move up', onPress: () => moveAccount(account.id, -1) });
+    if (index < accounts.length - 1) buttons.push({ text: 'Move down', onPress: () => moveAccount(account.id, 1) });
     buttons.push({
-      text: 'Удалить',
+      text: 'Delete',
       style: 'destructive',
       onPress: () =>
-        Alert.alert('Удалить аккаунт?', `«${account.name}» и его история будут удалены с устройства.`, [
-          { text: 'Отмена', style: 'cancel' },
-          { text: 'Удалить', style: 'destructive', onPress: () => deleteAccount(account.id) },
+        Alert.alert('Delete account?', `"${account.name}" and its history will be removed from this device.`, [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: () => deleteAccount(account.id) },
         ]),
     });
-    buttons.push({ text: 'Отмена', style: 'cancel' });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert(account.name, account.email, buttons);
   };
 
@@ -36,8 +36,8 @@ export default function AccountsScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <ScreenHeader
           large
-          title="Аккаунты"
-          subtitle="Управление всеми AI аккаунтами"
+          title="Accounts"
+          subtitle="Manage all your AI accounts"
           right={
             <TouchableOpacity onPress={refreshAll} hitSlop={10} disabled={isSyncing}>
               <RefreshCw size={20} color={isSyncing ? Colors.textSubtle : Colors.text} />
@@ -46,7 +46,7 @@ export default function AccountsScreen() {
         />
 
         <PrimaryButton
-          label="Добавить аккаунт"
+          label="Add account"
           icon={<Plus size={18} color="#fff" />}
           onPress={() => router.push('/create')}
           style={{ marginBottom: 16 }}
@@ -69,7 +69,7 @@ export default function AccountsScreen() {
                   {account.name}
                 </Text>
                 <Text style={styles.email} numberOfLines={1}>
-                  {account.email || `обновлено ${formatRelative(account.lastSyncAt)}`}
+                  {account.email || `updated ${formatRelative(account.lastSyncAt)}`}
                 </Text>
               </View>
               <StatusDot status={status} size="sm" />
@@ -81,10 +81,10 @@ export default function AccountsScreen() {
         })}
 
         {accounts.length === 0 && (
-          <EmptyState title="Нет аккаунтов" text="Нажмите «Добавить аккаунт», чтобы подключить первый сервис." />
+          <EmptyState title="No accounts" text='Tap "Add account" to connect your first service.' />
         )}
         {accounts.length > 1 && (
-          <Text style={styles.hint}>Удерживайте логотип или нажмите на стрелку, чтобы изменить порядок или удалить.</Text>
+          <Text style={styles.hint}>Press and hold the logo or tap the arrow to reorder or delete.</Text>
         )}
       </ScrollView>
     </SafeAreaView>

@@ -67,7 +67,7 @@ export const Ring: React.FC<{
   provider?: ProviderType;
   dim?: boolean;
   sub?: string;
-}> = ({ remaining, size = 72, stroke = 7, provider, dim, sub = 'осталось' }) => {
+}> = ({ remaining, size = 72, stroke = 7, provider, dim, sub = 'remaining' }) => {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const pct = remaining === null ? null : Math.max(0, Math.min(100, Math.round(remaining)));
@@ -94,7 +94,7 @@ export const Ring: React.FC<{
       </svg>
       <div className="ring-center">
         <b style={{ fontSize: Math.round(size * (size >= 120 ? 0.2 : 0.24)) }}>{pct === null ? '—' : `${pct}%`}</b>
-        {size >= 60 && <span style={{ fontSize: size >= 120 ? 13 : 9 }}>{pct === null ? 'нет данных' : sub}</span>}
+        {size >= 60 && <span style={{ fontSize: size >= 120 ? 13 : 9 }}>{pct === null ? 'no data' : sub}</span>}
       </div>
     </div>
   );
@@ -271,20 +271,20 @@ export const Donut: React.FC<{ segments: Array<{ value: number; color: string }>
 /* ---------- Status ---------- */
 
 export function statusOf(a: Account): { label: string; cls: string } {
-  if (!a.isActive) return { label: 'На паузе', cls: 'muted' };
+  if (!a.isActive) return { label: 'Paused', cls: 'muted' };
   switch (a.latestSnapshot?.status || a.lastStatus) {
     case 'ok':
-      return { label: 'Активен', cls: 'ok' };
+      return { label: 'Active', cls: 'ok' };
     case 'reauth_required':
-      return { label: 'Нужен вход', cls: 'bad' };
+      return { label: 'Sign-in required', cls: 'bad' };
     case 'rate_limited':
-      return { label: 'Пауза API', cls: 'warn' };
+      return { label: 'API paused', cls: 'warn' };
     case 'error':
-      return { label: 'Ошибка', cls: 'bad' };
+      return { label: 'Error', cls: 'bad' };
     case 'not_configured':
-      return { label: 'Не подключён', cls: 'muted' };
+      return { label: 'Not connected', cls: 'muted' };
     default:
-      return { label: 'Обновление…', cls: 'muted' };
+      return { label: 'Updating…', cls: 'muted' };
   }
 }
 

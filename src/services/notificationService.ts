@@ -106,8 +106,8 @@ export async function checkThresholdsAndNotify(
       await alert(
         account,
         'reauth',
-        'Требуется авторизация',
-        `${account.name}: сессия истекла, войдите в аккаунт заново.`
+        'Sign-in required',
+        `${account.name}: session expired, please sign in again.`
       );
     }
     return;
@@ -124,7 +124,7 @@ export async function checkThresholdsAndNotify(
 
   if (used >= 100) {
     if (settings.notifyAt0 && settings.isArmed0) {
-      await alert(account, 'exhausted', `Лимит исчерпан: ${account.name}`, `${bucket.label}: 0% осталось.`);
+      await alert(account, 'exhausted', `Limit exhausted: ${account.name}`, `${bucket.label}: 0% left.`);
     }
     if (settings.isArmed0) {
       next.isArmed0 = false;
@@ -134,13 +134,13 @@ export async function checkThresholdsAndNotify(
     next.isArmed0 = true;
     changed = true;
     if (settings.notifyOnRestore) {
-      await alert(account, 'restored', `Лимит восстановлен: ${account.name}`, `${bucket.label}: доступно ${left}%.`);
+      await alert(account, 'restored', `Limit restored: ${account.name}`, `${bucket.label}: ${left}% available.`);
     }
   }
 
   if (used >= 90) {
     if (used < 100 && settings.notifyAt10 && settings.isArmed10) {
-      await alert(account, 'low10', `Низкий лимит: ${account.name}`, `${bucket.label}: осталось менее 10% (${left}%).`);
+      await alert(account, 'low10', `Low limit: ${account.name}`, `${bucket.label}: less than 10% left (${left}%).`);
     }
     if (settings.isArmed10) {
       next.isArmed10 = false;
@@ -153,7 +153,7 @@ export async function checkThresholdsAndNotify(
 
   if (used >= 80) {
     if (used < 90 && settings.notifyAt20 && settings.isArmed20) {
-      await alert(account, 'low20', `Низкий лимит: ${account.name}`, `${bucket.label}: осталось менее 20% (${left}%).`);
+      await alert(account, 'low20', `Low limit: ${account.name}`, `${bucket.label}: less than 20% left (${left}%).`);
     }
     if (settings.isArmed20) {
       next.isArmed20 = false;

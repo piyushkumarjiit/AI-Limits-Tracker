@@ -12,33 +12,33 @@ import { useAppStore } from '../store/useAppStore';
 
 const GROUPS: Array<{ title: string; items: Array<{ type: ProviderType; note: string }> }> = [
   {
-    title: 'Основные',
+    title: 'Essentials',
     items: [
-      { type: 'claude', note: 'Сессия 5ч, неделя, Opus/Sonnet, доп. расход' },
-      { type: 'chatgpt', note: 'Лимиты Codex 5ч и неделя, кредиты' },
-      { type: 'gemini', note: 'Сессия и неделя (через cURL)' },
+      { type: 'claude', note: '5-hour session, weekly, Opus/Sonnet, extra usage' },
+      { type: 'chatgpt', note: 'Codex 5-hour and weekly limits, credits' },
+      { type: 'gemini', note: 'Session and weekly (via cURL)' },
     ],
   },
   {
-    title: 'Кодинг',
+    title: 'Coding',
     items: [
-      { type: 'cursor', note: 'Premium (fast) запросы' },
-      { type: 'copilot', note: 'Premium-запросы в месяц' },
+      { type: 'cursor', note: 'Premium (fast) requests' },
+      { type: 'copilot', note: 'Premium requests per month' },
     ],
   },
   {
-    title: 'Чат-ассистенты',
+    title: 'Chat assistants',
     items: [
-      { type: 'perplexity', note: 'Pro-запросы' },
-      { type: 'grok', note: 'Окно запросов' },
+      { type: 'perplexity', note: 'Pro requests' },
+      { type: 'grok', note: 'Request window' },
       { type: 'mistral', note: 'Le Chat' },
-      { type: 'deepseek', note: 'Лимиты аккаунта' },
+      { type: 'deepseek', note: 'Account limits' },
       { type: 'poe', note: 'Compute points' },
     ],
   },
   {
-    title: 'Любой другой сервис',
-    items: [{ type: 'custom', note: 'Вставьте cURL — лимиты определятся автоматически' }],
+    title: 'Any other service',
+    items: [{ type: 'custom', note: 'Paste a cURL request — limits are detected automatically' }],
   },
 ];
 
@@ -50,7 +50,7 @@ export default function AddAccountScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <ScreenHeader title="Добавить аккаунт" />
+        <ScreenHeader title="Add account" />
 
         {GROUPS.map((group) => (
           <View key={group.title}>
@@ -67,7 +67,7 @@ export default function AddAccountScreen() {
                   </View>
                   {existing > 0 && (
                     <View style={styles.badge}>
-                      <Text style={styles.badgeText}>+{existing === 1 ? '2-й' : `${existing + 1}-й`}</Text>
+                      <Text style={styles.badgeText}>+{existing === 1 ? '2nd' : `${existing + 1}th`}</Text>
                     </View>
                   )}
                   <ChevronRight size={20} color={Colors.textMuted} />
@@ -80,9 +80,9 @@ export default function AddAccountScreen() {
         <View style={styles.info}>
           <Info size={16} color={Colors.textMuted} />
           <Text style={styles.infoText}>
-            Можно подключить сколько угодно аккаунтов одного сервиса — например, два Claude и два ChatGPT. Каждый вход
-            открывается в чистой сессии и получает собственный токен, поэтому аккаунты не мешают друг другу и
-            обновляются в фоне независимо. Один и тот же аккаунт дважды подключить нельзя.
+            You can connect any number of accounts for the same service — for example, two Claude and two ChatGPT.
+            Each sign-in opens in a clean session and gets its own token, so accounts do not interfere with each
+            other and refresh independently in the background. The same account cannot be connected twice.
           </Text>
         </View>
       </ScrollView>

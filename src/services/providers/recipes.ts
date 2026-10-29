@@ -19,7 +19,7 @@ export const RECIPES: Partial<Record<ProviderType, ProviderRecipe>> = {
     windows: [
       {
         id: 'premium',
-        label: 'Premium (fast) запросы',
+        label: 'Premium (fast) requests',
         windowType: 'monthly_30d',
         usedPath: 'gpt-4.numRequests',
         limitPath: 'gpt-4.maxRequestUsage',
@@ -36,7 +36,7 @@ export const RECIPES: Partial<Record<ProviderType, ProviderRecipe>> = {
     windows: [
       {
         id: 'premium',
-        label: 'Premium-запросы',
+        label: 'Premium requests',
         windowType: 'monthly_30d',
         usedPath: 'quota_snapshots.premium_interactions.entitlement_used',
         limitPath: 'quota_snapshots.premium_interactions.entitlement',
@@ -53,7 +53,7 @@ export const RECIPES: Partial<Record<ProviderType, ProviderRecipe>> = {
     windows: [
       {
         id: 'pro',
-        label: 'Pro-запросы (день)',
+        label: 'Pro requests (daily)',
         windowType: 'monthly_30d',
         usedPath: 'pro_search_used_today',
         limitPath: 'pro_search_limit',
@@ -72,7 +72,7 @@ export const RECIPES: Partial<Record<ProviderType, ProviderRecipe>> = {
     windows: [
       {
         id: 'window',
-        label: 'Окно запросов',
+        label: 'Request window',
         windowType: 'sliding_window',
         remainingPath: 'remainingQueries',
         limitPath: 'totalQueries',
@@ -89,7 +89,7 @@ export const RECIPES: Partial<Record<ProviderType, ProviderRecipe>> = {
     auth: 'cookie',
     extraHeaders: { Origin: 'https://chat.mistral.ai', Referer: 'https://chat.mistral.ai/' },
     windows: [
-      { id: 'daily', label: 'Дневной лимит', windowType: 'sliding_window', usedPercentPath: 'used_percent' },
+      { id: 'daily', label: 'Daily limit', windowType: 'sliding_window', usedPercentPath: 'used_percent' },
     ],
     needsVerification: true,
   },
@@ -99,7 +99,7 @@ export const RECIPES: Partial<Record<ProviderType, ProviderRecipe>> = {
     usageUrl: 'https://chat.deepseek.com/api/v0/users/current',
     auth: 'bearer',
     windows: [
-      { id: 'window', label: 'Лимит', windowType: 'sliding_window', usedPercentPath: 'usage.used_percent' },
+      { id: 'window', label: 'Limit', windowType: 'sliding_window', usedPercentPath: 'usage.used_percent' },
     ],
     needsVerification: true,
   },

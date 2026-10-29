@@ -60,10 +60,10 @@ export default function HistoryScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <ScreenHeader title="История использования" />
+        <ScreenHeader title="Usage history" />
 
         {accounts.length === 0 ? (
-          <EmptyState title="Нет аккаунтов" text="История появится после подключения аккаунта." />
+          <EmptyState title="No accounts" text="History will appear after you connect an account." />
         ) : (
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -89,8 +89,8 @@ export default function HistoryScreen() {
               onChange={setMetric}
               style={{ marginBottom: 16 }}
               options={[
-                { key: 'session', label: 'Сессия (5ч)' },
-                { key: 'weekly', label: 'Неделя' },
+                { key: 'session', label: 'Session (5h)' },
+                { key: 'weekly', label: 'Weekly' },
               ]}
             />
 
@@ -111,10 +111,10 @@ export default function HistoryScreen() {
                   }
                 />
               ) : (
-                <Text style={styles.empty}>За последние 7 дней замеров нет.</Text>
+                <Text style={styles.empty}>No measurements in the last 7 days.</Text>
               )}
             </Card>
-            <Text style={styles.note}>% использования окна за 7 дней (максимум за каждые 2 часа)</Text>
+            <Text style={styles.note}>Window usage % over 7 days (maximum per 2 hours)</Text>
           </>
         )}
       </ScrollView>

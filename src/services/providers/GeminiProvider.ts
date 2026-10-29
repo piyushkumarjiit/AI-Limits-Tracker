@@ -25,8 +25,8 @@ const DEFAULT_BL = 'boq_assistant-bard-web-server_20260730.01_p1';
 const USAGE_RPC_ID = 'jSf9Qc';
 
 const BUCKET_LABELS: Record<number, { label: string; windowType: any }> = {
-  1: { label: 'Сессия', windowType: 'session_5h' },
-  2: { label: 'Неделя', windowType: 'weekly_7d' },
+  1: { label: 'Session', windowType: 'session_5h' },
+  2: { label: 'Weekly', windowType: 'weekly_7d' },
 };
 
 function calculateSeverity(utilization: number | null): LimitSeverity {
@@ -119,8 +119,8 @@ export class GeminiProvider implements UsageProvider {
           planName: '',
           status: credentials.webSessionActive ? 'reauth_required' : 'not_configured',
           errorMessage: credentials.webSessionActive
-            ? 'Нужны cookie Google (__Secure-1PSID) — переподключите через cURL'
-            : 'Аккаунт не подключён',
+            ? 'Google cookies (__Secure-1PSID) required — reconnect via cURL'
+            : 'Account not connected',
           fetchedAt: nowIso,
           buckets: [],
         },
@@ -151,7 +151,7 @@ export class GeminiProvider implements UsageProvider {
                 providerType: 'gemini',
                 planName: 'Gemini',
                 status: 'reauth_required',
-                errorMessage: 'Сессия Google Gemini истекла — обновите cookie',
+                errorMessage: 'Google Gemini session expired — refresh the cookies',
                 fetchedAt: nowIso,
                 buckets: [],
               },
@@ -177,7 +177,7 @@ export class GeminiProvider implements UsageProvider {
             providerType: 'gemini',
             planName: 'Gemini',
             status: 'reauth_required',
-            errorMessage: 'Не удалось получить токен сессии Gemini (at_token)',
+            errorMessage: 'Failed to get Gemini session token (at_token)',
             fetchedAt: nowIso,
             buckets: [],
           },
@@ -219,7 +219,7 @@ export class GeminiProvider implements UsageProvider {
             providerType: 'gemini',
             planName: 'Gemini',
             status: 'reauth_required',
-            errorMessage: 'Google отклонил авторизацию — обновите cURL/cookie',
+            errorMessage: 'Google rejected authorization — refresh the cURL/cookies',
             fetchedAt: nowIso,
             buckets: [],
           },
@@ -233,7 +233,7 @@ export class GeminiProvider implements UsageProvider {
             providerType: 'gemini',
             planName: 'Gemini',
             status: 'error',
-            errorMessage: `RPC ошибка Gemini (HTTP ${rpcResp.status})`,
+            errorMessage: `Gemini RPC error (HTTP ${rpcResp.status})`,
             fetchedAt: nowIso,
             buckets: [],
           },
@@ -299,7 +299,7 @@ export class GeminiProvider implements UsageProvider {
           providerType: 'gemini',
           planName: 'Google AI Pro',
           status: 'error',
-          errorMessage: err?.message || 'Сбой связи с Google Gemini',
+          errorMessage: err?.message || 'Failed to communicate with Google Gemini',
           fetchedAt: nowIso,
           buckets: [],
         },

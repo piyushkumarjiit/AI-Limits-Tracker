@@ -17,9 +17,9 @@ const BASE_HEADERS = {
 
 function windowLabel(seconds: number | undefined, fallback: string): string {
   if (!seconds) return fallback;
-  if (seconds <= 6 * 3600) return `Codex · ${Math.round(seconds / 3600)}ч`;
-  if (seconds >= 6 * 86400) return 'Codex · неделя';
-  return `Codex · ${Math.round(seconds / 86400)}д`;
+  if (seconds <= 6 * 3600) return `Codex · ${Math.round(seconds / 3600)}h`;
+  if (seconds >= 6 * 86400) return 'Codex · Weekly';
+  return `Codex · ${Math.round(seconds / 86400)}d`;
 }
 
 function parseWindow(id: string, fallbackLabel: string, w: any): QuotaBucket | null {
@@ -41,8 +41,8 @@ export function parseChatGPTUsage(body: any): { buckets: QuotaBucket[]; plan?: s
   const buckets: QuotaBucket[] = [];
   if (!body) return { buckets };
   const rl = body.rate_limit || body.rateLimits || {};
-  const primary = parseWindow('primary', 'Codex · 5ч', rl.primary_window || rl.primary);
-  const secondary = parseWindow('secondary', 'Codex · неделя', rl.secondary_window || rl.secondary);
+  const primary = parseWindow('primary', 'Codex · 5h', rl.primary_window || rl.primary);
+  const secondary = parseWindow('secondary', 'Codex · Weekly', rl.secondary_window || rl.secondary);
   if (primary) buckets.push(primary);
   if (secondary) buckets.push(secondary);
 
@@ -74,7 +74,7 @@ export class ChatGPTProvider implements UsageProvider {
   async fetchUsage(accountId: string, credentials: AccountCredentials): Promise<ProviderFetchResult> {
     if (!this.validateCredentials(credentials)) {
       return {
-        snapshot: failureSnapshot(accountId, 'chatgpt', 'not_configured', 'Аккаунт не подключён'),
+        snapshot: failureSnapshot(accountId, 'chatgpt', 'not_configured', 'Account not connected'),
       };
     }
 
@@ -89,7 +89,7 @@ export class ChatGPTProvider implements UsageProvider {
           changed = true;
         } catch {
           return {
-            snapshot: failureSnapshot(accountId, 'chatgpt', 'reauth_required', 'Сессия ChatGPT истекла — войдите заново'),
+            snapshot: failureSnapshot(accountId, 'chatgpt', 'reauth_required', 'ChatGPT session expired — sign in again'),
           };
         }
       }
@@ -105,7 +105,7 @@ export class ChatGPTProvider implements UsageProvider {
               accountId,
               'chatgpt',
               'reauth_required',
-              'Cookie ChatGPT устарели — переподключите аккаунт'
+              'ChatGPT cookies are outdated — reconnect the account'
             ),
           };
         }
@@ -142,19 +142,19 @@ export class ChatGPTProvider implements UsageProvider {
 
       if (resp.status === 401 || resp.status === 403) {
         return {
-          snapshot: failureSnapshot(accountId, 'chatgpt', 'reauth_required', 'Сессия ChatGPT истекла — войдите заново'),
+          snapshot: failureSnapshot(accountId, 'chatgpt', 'reauth_required', 'ChatGPT session expired — sign in again'),
           updatedCredentials: changed ? creds : undefined,
         };
       }
       if (resp.status === 429) {
         return {
-          snapshot: failureSnapshot(accountId, 'chatgpt', 'rate_limited', 'Слишком частые запросы — повторим позже'),
+          snapshot: failureSnapshot(accountId, 'chatgpt', 'rate_limited', 'Too many requests — will retry later'),
           updatedCredentials: changed ? creds : undefined,
         };
       }
       if (!resp.ok) {
         return {
-          snapshot: failureSnapshot(accountId, 'chatgpt', 'error', `ChatGPT вернул HTTP ${resp.status}`),
+          snapshot: failureSnapshot(accountId, 'chatgpt', 'error', `ChatGPT returned HTTP ${resp.status}`),
           updatedCredentials: changed ? creds : undefined,
         };
       }
@@ -189,7 +189,7 @@ export class ChatGPTProvider implements UsageProvider {
           accountId,
           'chatgpt',
           'error',
-          err?.name === 'AbortError' ? 'ChatGPT не ответил вовремя' : err?.message || 'Сбой соединения с ChatGPT'
+          err?.name === 'AbortError' ? 'ChatGPT did not respond in time' : err?.message || 'Connection to ChatGPT failed'
         ),
         updatedCredentials: changed ? creds : undefined,
       };

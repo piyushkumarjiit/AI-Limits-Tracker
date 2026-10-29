@@ -42,7 +42,7 @@ export default function NotificationsScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
       >
         <ScreenHeader
-          title="Уведомления"
+          title="Notifications"
           right={
             items.length ? (
               <TouchableOpacity
@@ -51,7 +51,7 @@ export default function NotificationsScreen() {
                   setItems([]);
                 }}
               >
-                <Text style={styles.clear}>Очистить</Text>
+                <Text style={styles.clear}>Clear</Text>
               </TouchableOpacity>
             ) : null
           }
@@ -75,8 +75,8 @@ export default function NotificationsScreen() {
 
         {!items.length && !loading && (
           <EmptyState
-            title="Уведомлений нет"
-            text="Здесь появятся предупреждения о низком лимите, исчерпании, восстановлении и необходимости войти заново."
+            title="No notifications"
+            text="Alerts about low limits, exhaustion, restoration, and required sign-in will appear here."
           />
         )}
       </ScrollView>

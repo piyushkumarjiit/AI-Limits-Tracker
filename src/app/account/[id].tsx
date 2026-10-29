@@ -96,7 +96,7 @@ export default function AccountDetailScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={{ padding: 18 }}>
-          <ScreenHeader title="Аккаунт не найден" />
+          <ScreenHeader title="Account not found" />
         </View>
       </SafeAreaView>
     );
@@ -116,10 +116,10 @@ export default function AccountDetailScreen() {
   };
 
   const confirmDelete = () =>
-    Alert.alert('Удалить аккаунт?', `«${account.name}», его токены и история будут удалены с устройства.`, [
-      { text: 'Отмена', style: 'cancel' },
+    Alert.alert('Delete account?', `"${account.name}", its tokens, and history will be removed from this device.`, [
+      { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Удалить',
+        text: 'Delete',
         style: 'destructive',
         onPress: async () => {
           await deleteAccount(account.id);
@@ -130,10 +130,10 @@ export default function AccountDetailScreen() {
 
   const openMenu = () =>
     Alert.alert(account.name, undefined, [
-      { text: 'Обновить сейчас', onPress: onRefresh },
-      { text: 'Переподключить', onPress: () => setLoginOpen(true) },
-      { text: 'Удалить', style: 'destructive', onPress: confirmDelete },
-      { text: 'Отмена', style: 'cancel' },
+      { text: 'Refresh now', onPress: onRefresh },
+      { text: 'Reconnect', onPress: () => setLoginOpen(true) },
+      { text: 'Delete', style: 'destructive', onPress: confirmDelete },
+      { text: 'Cancel', style: 'cancel' },
     ]);
 
   const toggleNotif = async (key: keyof NotificationSettings) => {
@@ -180,14 +180,14 @@ export default function AccountDetailScreen() {
           <View style={[styles.alert, needsLogin && { borderColor: Colors.exhausted }]}>
             <AlertTriangle size={16} color={needsLogin ? Colors.exhausted : Colors.warning} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.alertText}>{snapshot?.errorMessage || 'Ошибка обновления'}</Text>
+              <Text style={styles.alertText}>{snapshot?.errorMessage || 'Refresh error'}</Text>
               {snapshot?.isStale && (
-                <Text style={styles.alertSub}>Показаны данные от {formatClock(snapshot.fetchedAt)}</Text>
+                <Text style={styles.alertSub}>Showing data from {formatClock(snapshot.fetchedAt)}</Text>
               )}
             </View>
             {needsLogin && (
               <TouchableOpacity style={styles.alertBtn} onPress={() => setLoginOpen(true)}>
-                <Text style={styles.alertBtnText}>Войти</Text>
+                <Text style={styles.alertBtnText}>Sign in</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -198,10 +198,10 @@ export default function AccountDetailScreen() {
           onChange={setTab}
           style={{ marginBottom: 18 }}
           options={[
-            { key: 'overview', label: 'Обзор' },
-            { key: 'limits', label: 'Лимиты' },
-            { key: 'history', label: 'История' },
-            { key: 'settings', label: 'Настройки' },
+            { key: 'overview', label: 'Overview' },
+            { key: 'limits', label: 'Limits' },
+            { key: 'history', label: 'History' },
+            { key: 'settings', label: 'Settings' },
           ]}
         />
 
@@ -216,7 +216,7 @@ export default function AccountDetailScreen() {
                 dimmed={snapshot?.isStale}
               />
               {main && <Text style={styles.ringCaption}>{main.label}</Text>}
-              <Text style={styles.resetLabel}>Сброс через</Text>
+              <Text style={styles.resetLabel}>Resets in</Text>
               <View style={styles.resetRow}>
                 <Clock size={18} color={Colors.text} strokeWidth={2.4} />
                 <Text style={styles.resetValue}>{formatTimeRemaining(main?.resetsAt)}</Text>
@@ -238,13 +238,13 @@ export default function AccountDetailScreen() {
                   onChange={(v) => setRange(Number(v) as 7 | 30)}
                   style={{ width: 130, padding: 3 }}
                   options={[
-                    { key: '7', label: '7 дней' },
-                    { key: '30', label: '30 дней' },
+                    { key: '7', label: '7 days' },
+                    { key: '30', label: '30 days' },
                   ]}
                 />
               }
             >
-              Использование за {range} дней
+              Usage over {range} days
             </SectionTitle>
             <Card>
               {chart.values.some((v) => v !== null) ? (
@@ -257,11 +257,11 @@ export default function AccountDetailScreen() {
                 />
               ) : (
                 <Text style={styles.emptyChart}>
-                  График заполнится автоматически: каждое обновление сохраняет замер пиковой загрузки за день.
+                  The chart fills in automatically: each refresh saves the day's peak load measurement.
                 </Text>
               )}
             </Card>
-            <Text style={styles.updated}>Обновлено {formatRelative(account.lastSyncAt)}</Text>
+            <Text style={styles.updated}>Updated {formatRelative(account.lastSyncAt)}</Text>
           </>
         )}
 
@@ -274,7 +274,7 @@ export default function AccountDetailScreen() {
               <Card style={styles.limitCard}>
                 <View style={styles.limitHead}>
                   <Wallet size={16} color={Colors.textMuted} />
-                  <Text style={styles.limitTitle}>Баланс кредитов</Text>
+                  <Text style={styles.limitTitle}>Credit balance</Text>
                   <Text style={styles.limitValue}>
                     {snapshot.credits.balance} {snapshot.credits.currency}
                   </Text>
@@ -283,7 +283,7 @@ export default function AccountDetailScreen() {
             )}
             {!snapshot?.buckets?.length && (
               <Text style={styles.emptyChart}>
-                {needsLogin ? 'Войдите в аккаунт, чтобы увидеть лимиты.' : 'Сервис не вернул ни одного лимита.'}
+                {needsLogin ? 'Sign in to the account to see limits.' : 'The service did not return any limits.'}
               </Text>
             )}
           </>
@@ -292,7 +292,7 @@ export default function AccountDetailScreen() {
         {tab === 'history' && (
           <>
             <Card style={{ marginBottom: 14 }}>
-              <Text style={styles.cardLabel}>Сессионное окно, % использования</Text>
+              <Text style={styles.cardLabel}>Session window, usage %</Text>
               {history.length ? (
                 <LineChart
                   labels={[]}
@@ -301,7 +301,7 @@ export default function AccountDetailScreen() {
                   height={150}
                 />
               ) : (
-                <Text style={styles.emptyChart}>История пока пуста.</Text>
+                <Text style={styles.emptyChart}>History is empty for now.</Text>
               )}
             </Card>
             {[...history]
@@ -310,8 +310,8 @@ export default function AccountDetailScreen() {
               .map((p) => (
                 <View key={p.id} style={styles.historyRow}>
                   <Text style={styles.historyTime}>
-                    {new Date(p.fetchedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })},{' '}
-                    {new Date(p.fetchedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(p.fetchedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })},{' '}
+                    {new Date(p.fetchedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                   </Text>
                   <Text style={styles.historyVal}>{p.primaryUtilization ?? '—'}%</Text>
                   <Text style={[styles.historyVal, { color: Colors.textMuted }]}>
@@ -320,7 +320,7 @@ export default function AccountDetailScreen() {
                 </View>
               ))}
             {history.length > 0 && (
-              <Text style={styles.updated}>Колонки: сессия · неделя</Text>
+              <Text style={styles.updated}>Columns: session · weekly</Text>
             )}
           </>
         )}
@@ -328,24 +328,24 @@ export default function AccountDetailScreen() {
         {tab === 'settings' && (
           <>
             <Card style={{ marginBottom: 14 }}>
-              <Text style={styles.cardLabel}>Название</Text>
+              <Text style={styles.cardLabel}>Name</Text>
               <View style={styles.nameRow}>
                 <TextInput
                   style={styles.nameInput}
                   value={nameDraft}
                   onChangeText={setNameDraft}
-                  placeholder="Название аккаунта"
+                  placeholder="Account name"
                   placeholderTextColor={Colors.textSubtle}
                 />
                 {nameDraft.trim() && nameDraft !== account.name ? (
                   <TouchableOpacity style={styles.saveBtn} onPress={() => renameAccount(account.id, nameDraft)}>
-                    <Text style={styles.saveText}>Сохранить</Text>
+                    <Text style={styles.saveText}>Save</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
-              {account.email ? <Text style={styles.metaLine}>Аккаунт: {account.email}</Text> : null}
+              {account.email ? <Text style={styles.metaLine}>Account: {account.email}</Text> : null}
               <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Отслеживать</Text>
+                <Text style={styles.switchLabel}>Track</Text>
                 <Switch
                   value={account.isActive}
                   onValueChange={(v) => setAccountActive(account.id, v)}
@@ -356,24 +356,24 @@ export default function AccountDetailScreen() {
 
             {notif && (
               <Card style={{ marginBottom: 14 }}>
-                <Text style={styles.cardLabel}>Уведомления</Text>
-                <SwitchRow label="Осталось меньше 20%" value={notif.notifyAt20} onChange={() => toggleNotif('notifyAt20')} />
-                <SwitchRow label="Осталось меньше 10%" value={notif.notifyAt10} onChange={() => toggleNotif('notifyAt10')} />
-                <SwitchRow label="Лимит исчерпан" value={notif.notifyAt0} onChange={() => toggleNotif('notifyAt0')} />
-                <SwitchRow label="Лимит восстановлен" value={notif.notifyOnRestore} onChange={() => toggleNotif('notifyOnRestore')} />
-                <SwitchRow label="Требуется вход" value={notif.notifyOnReauth} onChange={() => toggleNotif('notifyOnReauth')} />
+                <Text style={styles.cardLabel}>Notifications</Text>
+                <SwitchRow label="Less than 20% remaining" value={notif.notifyAt20} onChange={() => toggleNotif('notifyAt20')} />
+                <SwitchRow label="Less than 10% remaining" value={notif.notifyAt10} onChange={() => toggleNotif('notifyAt10')} />
+                <SwitchRow label="Limit exhausted" value={notif.notifyAt0} onChange={() => toggleNotif('notifyAt0')} />
+                <SwitchRow label="Limit restored" value={notif.notifyOnRestore} onChange={() => toggleNotif('notifyOnRestore')} />
+                <SwitchRow label="Sign-in required" value={notif.notifyOnReauth} onChange={() => toggleNotif('notifyOnReauth')} />
               </Card>
             )}
 
             <PrimaryButton
-              label="Переподключить аккаунт"
+              label="Reconnect account"
               variant="light"
               icon={<LogIn size={18} color={Colors.text} />}
               onPress={() => setLoginOpen(true)}
               style={{ marginBottom: 10 }}
             />
             <PrimaryButton
-              label="Удалить аккаунт"
+              label="Delete account"
               variant="danger"
               icon={<Trash2 size={18} color={Colors.exhausted} />}
               onPress={confirmDelete}
@@ -417,7 +417,7 @@ const BucketTile: React.FC<{ bucket: QuotaBucket }> = ({ bucket }) => (
         : bucket.remainingPercent === null
         ? '—'
         : `${Math.round(bucket.remainingPercent)}%`}
-      <Text style={styles.tileSuffix}>{bucket.details?.limit ? ` / $${bucket.details.limit}` : ' ост.'}</Text>
+      <Text style={styles.tileSuffix}>{bucket.details?.limit ? ` / $${bucket.details.limit}` : ' left'}</Text>
     </Text>
   </View>
 );
@@ -431,21 +431,21 @@ const LimitRow: React.FC<{ bucket: QuotaBucket }> = ({ bucket }) => {
       <View style={styles.limitHead}>
         {bucketIcon(bucket)}
         <Text style={styles.limitTitle}>{bucket.label}</Text>
-        <Text style={styles.limitValue}>{used === null ? '—' : `${Math.round(used)}% исп.`}</Text>
+        <Text style={styles.limitValue}>{used === null ? '—' : `${Math.round(used)}% used`}</Text>
       </View>
       <View style={styles.limitTrack}>
         <View style={[styles.limitFill, { width: `${Math.min(100, used ?? 0)}%`, backgroundColor: color }]} />
       </View>
       <Text style={styles.limitMeta}>
         {bucket.details?.used
-          ? `Потрачено $${bucket.details.used} из $${bucket.details.limit}`
+          ? `Spent $${bucket.details.used} of $${bucket.details.limit}`
           : bucket.resetsAt
-          ? `Сброс через ${formatTimeRemaining(bucket.resetsAt)} · ${new Date(bucket.resetsAt).toLocaleString('ru-RU', {
+          ? `Resets in ${formatTimeRemaining(bucket.resetsAt)} · ${new Date(bucket.resetsAt).toLocaleString('en-US', {
               weekday: 'short',
               hour: '2-digit',
               minute: '2-digit',
             })}`
-          : 'Время сброса не сообщается'}
+          : 'Reset time not reported'}
       </Text>
     </Card>
   );

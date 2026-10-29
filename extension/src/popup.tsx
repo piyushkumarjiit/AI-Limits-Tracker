@@ -46,7 +46,7 @@ function App() {
     <div className="popup">
       <header>
         <div className="brand"><span>◔</span> AI Limits</div>
-        <button className={`refresh ${busy ? 'spin' : ''}`} onClick={refresh} aria-label="Обновить">↻</button>
+        <button className={`refresh ${busy ? 'spin' : ''}`} onClick={refresh} aria-label="Refresh">↻</button>
       </header>
 
       <div className="list">
@@ -60,15 +60,15 @@ function App() {
               <div className="meta">
                 <b>{PROVIDER_NAMES[p]}</b>
                 {!enabled ? (
-                  <span className="muted">Выключен</span>
+                  <span className="muted">Off</span>
                 ) : acc?.status === 'ok' ? (
-                  <span className="muted">{[acc.plan, acc.email].filter(Boolean).join(' · ') || 'Активен'}</span>
+                  <span className="muted">{[acc.plan, acc.email].filter(Boolean).join(' · ') || 'Active'}</span>
                 ) : acc?.status === 'reauth' ? (
-                  <span className="warn">Войдите в {p === 'claude' ? 'claude.ai' : p === 'chatgpt' ? 'chatgpt.com' : 'сервис'}</span>
+                  <span className="warn">Sign in to {p === 'claude' ? 'claude.ai' : p === 'chatgpt' ? 'chatgpt.com' : 'the service'}</span>
                 ) : acc?.status === 'error' ? (
                   <span className="muted">{acc.lastError}</span>
                 ) : (
-                  <span className="muted">Проверяем…</span>
+                  <span className="muted">Checking…</span>
                 )}
               </div>
               {enabled && acc?.status === 'ok' && b ? (
@@ -88,8 +88,8 @@ function App() {
       </div>
 
       <footer>
-        <span>Один аккаунт на профиль браузера</span>
-        <a href={PANEL_URL} target="_blank" rel="noopener">Нужно больше? Веб-панель →</a>
+        <span>One account per browser profile</span>
+        <a href={PANEL_URL} target="_blank" rel="noopener">Need more? Open the web panel →</a>
       </footer>
     </div>
   );

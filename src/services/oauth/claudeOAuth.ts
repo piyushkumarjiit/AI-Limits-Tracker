@@ -43,7 +43,7 @@ export function isClaudeCallbackUrl(url: string): boolean {
 }
 
 async function postToken(body: Record<string, string>): Promise<any> {
-  let lastError = 'Сервер авторизации Claude недоступен';
+  let lastError = 'Claude authorization server unavailable';
   for (const url of CLAUDE_OAUTH.tokenUrls) {
     try {
       const resp = await isolatedFetch(url, {
@@ -55,7 +55,7 @@ async function postToken(body: Record<string, string>): Promise<any> {
       if (resp.ok && data?.access_token) return data;
       if (resp.status === 400 || resp.status === 401) {
         throw new Error(
-          data?.error_description || data?.error?.message || data?.error || 'Код авторизации отклонён'
+          data?.error_description || data?.error?.message || data?.error || 'Authorization code rejected'
         );
       }
       lastError = `HTTP ${resp.status}`;
@@ -100,7 +100,7 @@ export async function exchangeClaudeCode(
 }
 
 export async function refreshClaudeToken(creds: AccountCredentials): Promise<AccountCredentials> {
-  if (!creds.refreshToken) throw new Error('Нет refresh-токена');
+  if (!creds.refreshToken) throw new Error('No refresh token');
   const data = await postToken({
     grant_type: 'refresh_token',
     refresh_token: creds.refreshToken,

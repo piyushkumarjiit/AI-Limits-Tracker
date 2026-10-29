@@ -1,7 +1,7 @@
 # REFACTOR_STATUS
 Branch: refactor/harden-docker
-Last Completed Step: 3.3
-Next Immediate Step: 4.1
+Last Completed Step: 4.3
+Next Immediate Step: 5.1
 Blockers: none (deepmerge low-severity advisory accepted: no patched release, Expo dev tooling only)
 
 ## Phase 1
@@ -20,9 +20,9 @@ Blockers: none (deepmerge low-severity advisory accepted: no patched release, Ex
 - [x] 3.2 (security headers, hashed timing-safe compare, TRUST_PROXY gate for X-Real-IP) auth/API hardening
 - [x] 3.3 (curlParser is regex-only, no exec/eval) curlParser audit
 ## Phase 4
-- [ ] 4.1 find Cyrillic
-- [ ] 4.2 translate
-- [ ] 4.3 verify
+- [x] 4.1 find Cyrillic
+- [x] 4.2 translate
+- [x] 4.3 (zero Cyrillic repo-wide; typecheck:all, 3 builds, 59/59 tests green) verify
 ## Phase 5
 - [ ] 5.1 .dockerignore
 - [ ] 5.2 Dockerfile

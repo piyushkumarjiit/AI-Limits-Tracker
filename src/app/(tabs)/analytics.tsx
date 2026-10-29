@@ -116,8 +116,8 @@ export default function AnalyticsScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <ScreenHeader
           large
-          title="Аналитика"
-          subtitle="Использование по всем аккаунтам"
+          title="Analytics"
+          subtitle="Usage across all accounts"
           right={
             <TouchableOpacity onPress={() => router.push('/history')} hitSlop={10}>
               <History size={21} color={Colors.text} />
@@ -130,39 +130,39 @@ export default function AnalyticsScreen() {
           onChange={setRange}
           style={{ marginBottom: 16 }}
           options={[
-            { key: '7', label: '7Д' },
-            { key: '30', label: '30Д' },
-            { key: '90', label: '3М' },
-            { key: '365', label: '1Г' },
+            { key: '7', label: '7D' },
+            { key: '30', label: '30D' },
+            { key: '90', label: '3M' },
+            { key: '365', label: '1Y' },
           ]}
         />
 
         {accounts.length === 0 ? (
-          <EmptyState title="Нет данных" text="Добавьте аккаунт — статистика начнёт собираться с первого обновления." />
+          <EmptyState title="No data" text="Add an account — statistics will start collecting from the first refresh." />
         ) : (
           <>
             <View style={styles.tiles}>
               <Card style={styles.tile}>
-                <Text style={styles.tileLabel}>Средняя загрузка</Text>
+                <Text style={styles.tileLabel}>Average load</Text>
                 <Text style={styles.tileValue}>{data.avg === null ? '—' : `${data.avg}%`}</Text>
                 <MiniLine values={data.avgLine} />
               </Card>
               <Card style={styles.tile}>
-                <Text style={styles.tileLabel}>Пиковая загрузка</Text>
+                <Text style={styles.tileLabel}>Peak load</Text>
                 <Text style={styles.tileValue}>{data.peak === null ? '—' : `${data.peak}%`}</Text>
                 <MiniBars values={data.peakBars.slice(-12)} color="#6b6962" height={30} />
               </Card>
             </View>
 
-            <SectionTitle>Распределение использования</SectionTitle>
+            <SectionTitle>Usage distribution</SectionTitle>
             <Card style={styles.distCard}>
               <Donut
                 segments={distribution.items.map((x) => ({ value: x.used, color: x.color }))}
                 centerValue={`${distribution.avg}%`}
-                centerLabel="в среднем"
+                centerLabel="on average"
               />
               <View style={styles.legend}>
-                {distribution.items.length === 0 && <Text style={styles.legendEmpty}>Нет текущих данных</Text>}
+                {distribution.items.length === 0 && <Text style={styles.legendEmpty}>No current data</Text>}
                 {distribution.items.map((x) => (
                   <View key={x.account.id} style={styles.legendRow}>
                     <View style={[styles.legendDot, { backgroundColor: x.color }]} />
@@ -175,16 +175,16 @@ export default function AnalyticsScreen() {
               </View>
             </Card>
 
-            <SectionTitle>Пиковая загрузка по {range === '7' ? 'дням' : 'периодам'}</SectionTitle>
+            <SectionTitle>Peak load by {range === '7' ? 'day' : 'period'}</SectionTitle>
             <Card>
               {data.series.length ? (
                 <BarChart labels={data.labels} series={data.series} stacked height={150} />
               ) : (
-                <Text style={styles.legendEmpty}>Замеров за период пока нет.</Text>
+                <Text style={styles.legendEmpty}>No measurements for this period yet.</Text>
               )}
             </Card>
             <Text style={styles.footnote}>
-              Сумма пиковых % сессионного окна всех аккаунтов · замеров: {data.measurements}
+              Sum of peak session-window % across all accounts · measurements: {data.measurements}
             </Text>
           </>
         )}
