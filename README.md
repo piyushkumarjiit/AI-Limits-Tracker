@@ -68,6 +68,25 @@ docker compose up -d                 # builds locally, or pulls ghcr.io/piyushku
 # open http://localhost:1455
 ```
 
+The panel is published on `127.0.0.1:${HOST_PORT:-1455}` only. Set `HOST_PORT` in `.env` if 1455 is already taken on the host; the container always listens on 1455 internally, so nothing else needs to change. Reach it from your laptop through an SSH tunnel:
+
+```bash
+ssh -L 1455:127.0.0.1:1455 you@your-node    # then open http://localhost:1455
+```
+
+Using `localhost` rather than the node's LAN IP matters: the session cookie is `Secure`, and browsers silently drop `Secure` cookies served over plain HTTP to a LAN address. If you need direct LAN or internet access, put an HTTPS reverse proxy in front and set `TRUST_PROXY=1`.
+
+**Direct LAN access over HTTP** — for a trusted home/office network only:
+
+```bash
+BIND_ADDR=0.0.0.0   # publish on all interfaces
+COOKIE_SECURE=0     # allow the session cookie over plain HTTP
+docker compose up -d
+# open http://<node-ip>:1455
+```
+
+`COOKIE_SECURE=0` means the session cookie travels in clear text and anyone on the same network can read or replay it. The server logs a warning at startup while it is disabled. Prefer the SSH tunnel, or an HTTPS proxy, whenever the network is not fully trusted.
+
 The image is a two-stage build: Expo/TypeScript tooling stays in the build stage, and the runtime image contains only the compiled server bundle (zero runtime dependencies) and the web panel. It runs as a non-root user with a read-only root filesystem, all capabilities dropped and `no-new-privileges`. Only `/app/data` is writable — that is where the SQLite database lives.
 
 > If you do not create `data/` first, Docker creates it owned by root and the container cannot write to it. Run the `chown` line above, or point the volume at a directory your user owns.
@@ -83,6 +102,21 @@ docker compose up -d --no-build
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` by [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) on every push to `main` and on `v*` tags.
+
+**Running inside an LXC container** — Docker works in an unprivileged LXC only with nesting enabled, and the container cannot load Docker's AppArmor profile:
+
+```bash
+# on the Proxmox host (or set lxc.apparmor.profile: unconfined in the LXC config)
+pct set <VMID> --features nesting=1,keyctl=1 && pct stop <VMID> && pct start <VMID>
+```
+
+```bash
+# inside the LXC
+echo 'APPARMOR_PROFILE=unconfined' >> .env    # avoids "apparmor_parser: Access denied"
+docker compose up -d
+```
+
+If `docker compose up` reports `Bind for 127.0.0.1:1455 failed: port is already allocated`, another service owns that port (1455 is also the usual ChatGPT/Codex OAuth callback port). Set `HOST_PORT=1456` in `.env` and recreate the container.
 
 **Deploy to a VPS with systemd + nginx instead** — systemd unit, nginx vhost and a one-shot script are in [`deploy/`](deploy/). When a reverse proxy sits in front of the app, set `TRUST_PROXY=1` so rate limiting uses the real client IP:
 
