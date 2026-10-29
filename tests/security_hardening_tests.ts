@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, type AppConfig } from '../server/src/app';
 import { clientIp, createLoginLimiter } from '../server/src/auth';
-import { allowsWeakSecrets, validateConfig, validateConfigWarnings } from '../server/src/config';
+import { allowsWeakSecrets, validateConfig, validateConfigWarnings, validateFatalConfig } from '../server/src/config';
 import { Store } from '../server/src/store';
 import type { Tracker } from '../server/src/tracker';
 
@@ -140,6 +140,46 @@ function rawGet(port: number, path: string, host: string): Promise<string> {
   return rawRequest(port, `GET ${path} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`);
 }
 
+/**
+ * A login request that sends its headers (including Content-Length) but holds the
+ * body until `send()` is called, so many handlers can be parked at the body read
+ * before any of them records a failed attempt.
+ */
+function heldBodyRequest(port: number, body: string) {
+  const socket = connect(port, '127.0.0.1');
+  let data = '';
+  let settled = false;
+  let resolveResponse: (value: string) => void = () => {};
+  const response = new Promise<string>((resolve) => {
+    resolveResponse = resolve;
+  });
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    socket.destroy();
+    resolveResponse(data);
+  };
+  socket.setEncoding('utf8');
+  const connected = new Promise<void>((resolve, reject) => {
+    socket.once('connect', () => {
+      socket.write(
+        'POST /api/login HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n' +
+          `Content-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n`
+      );
+      resolve();
+    });
+    socket.once('error', reject);
+  });
+  socket.on('data', (chunk) => {
+    data += chunk;
+  });
+  socket.on('end', done);
+  socket.on('error', done);
+  socket.on('close', done);
+  socket.setTimeout(5000, done);
+  return { connected, send: () => socket.write(body), response };
+}
+
 function fakeReq(headers: Record<string, string> = {}, remoteAddress = '10.0.0.1'): any {
   return { headers, socket: { remoteAddress } };
 }
@@ -213,6 +253,34 @@ async function runAllTests() {
 
     assert(allowsWeakSecrets({ ALLOW_WEAK_SECRETS: '1' }), 'Config: ALLOW_WEAK_SECRETS=1 is detected');
     assert(!allowsWeakSecrets({}), 'Config: weak-secret escape hatch is off by default');
+
+    const hatch = { ALLOW_WEAK_SECRETS: '1' };
+    assert(
+      validateConfig({ ...strong, ADMIN_PASSWORD: '', ...hatch }).some((e) => e.includes('ADMIN_PASSWORD')),
+      'Config: ALLOW_WEAK_SECRETS=1 cannot downgrade an empty ADMIN_PASSWORD'
+    );
+    assert(
+      validateFatalConfig({ ...strong, ADMIN_PASSWORD: '', ...hatch }).some((e) => e.includes('ADMIN_PASSWORD')),
+      'Config: an empty ADMIN_PASSWORD stays fatal under ALLOW_WEAK_SECRETS=1'
+    );
+    assert(
+      validateConfig({ ...strong, APP_SECRET: '', ...hatch }).some((e) => e.includes('APP_SECRET')),
+      'Config: ALLOW_WEAK_SECRETS=1 cannot downgrade an empty APP_SECRET'
+    );
+    assert(
+      validateFatalConfig({ ...strong, APP_SECRET: '', ...hatch }).some((e) => e.includes('APP_SECRET')),
+      'Config: an empty APP_SECRET stays fatal under ALLOW_WEAK_SECRETS=1'
+    );
+    const weakButPresent = { ...strong, ADMIN_PASSWORD: 'change-me', APP_SECRET: 'short-secret', ...hatch };
+    assert(
+      validateConfig(weakButPresent).some((e) => e.includes('ADMIN_PASSWORD')) &&
+        validateConfig(weakButPresent).some((e) => e.includes('APP_SECRET')),
+      'Config: weak non-empty secrets are still reported for the escape hatch to downgrade'
+    );
+    assert(
+      validateFatalConfig(weakButPresent).length === 0,
+      'Config: ALLOW_WEAK_SECRETS=1 may downgrade weak non-empty secrets to warnings'
+    );
   }
 
   console.log('\nSuite 2: Client address resolution');
@@ -249,7 +317,8 @@ async function runAllTests() {
     const global = createLoginLimiter({ maxPerIp: 100, windowMs: 1000, maxGlobal: 2 });
     global.recordFailure('a');
     global.recordFailure('b');
-    assert(global.tooManyAttempts('c'), 'Limiter: the global ceiling refuses a never-seen address');
+    assert(!global.tooManyAttempts('c'), 'Limiter: the global ceiling does not refuse a never-seen address');
+    assert(global.globalExceeded(), 'Limiter: the global ceiling is reported for failed attempts');
 
     const capped = createLoginLimiter({ maxPerIp: 1, windowMs: 60_000, maxGlobal: 100, maxEntries: 2 });
     capped.recordFailure('old');
@@ -430,7 +499,52 @@ async function runAllTests() {
     assert(!logged.some((line) => line.includes('wrong-password')), 'Login: the attempted password is never logged');
   });
 
-  console.log('\nSuite 10: Bearer token limiter');
+  console.log('\nSuite 10: Login limiter is not bypassable with delayed bodies');
+  await withApp({}, async ({ port }) => {
+    const body = JSON.stringify({ password: 'wrong-password' });
+    const held = Array.from({ length: 20 }, () => heldBodyRequest(port, body));
+    await Promise.all(held.map((h) => h.connected));
+    // Give the server time to run the pre-check for every held request.
+    await new Promise((r) => setTimeout(r, 200));
+    for (const h of held) h.send();
+    const responses = await Promise.all(held.map((h) => h.response));
+    const statuses = responses.map((r) => Number(/^HTTP\/1\.1 (\d{3})/.exec(r)?.[1]));
+    const accepted = statuses.filter((s) => s === 401).length;
+    const refused = statuses.filter((s) => s === 429).length;
+    assert(accepted === 10, 'Login: a burst of held bodies gets at most 10 password guesses', statuses.join(','));
+    assert(refused === 10, 'Login: the rest of the held-body burst is refused with 429', statuses.join(','));
+  });
+
+  console.log('\nSuite 11: Global failure ceiling backstops only failed attempts');
+  await withApp({ trustProxy: true }, async ({ baseUrl }) => {
+    const attempt = (ip: string, password: string) =>
+      fetch(`${baseUrl}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Real-IP': ip },
+        body: JSON.stringify({ password }),
+      });
+
+    // 60 failures from 60 distinct addresses trip the documented global ceiling.
+    const burst = await Promise.all(
+      Array.from({ length: 60 }, (_, i) => attempt(`198.51.100.${i + 1}`, 'wrong-password'))
+    );
+    await Promise.all(burst.map((r) => r.text()));
+    assert(
+      burst.every((r) => r.status === 401),
+      'Global ceiling: the first 60 failures are still answered 401',
+      burst.map((r) => r.status).join(',')
+    );
+
+    const correct = await attempt('203.0.113.200', ADMIN_PASSWORD);
+    await correct.text();
+    assert(correct.status === 200, 'Global ceiling: a correct password still succeeds during an active ceiling', `got ${correct.status}`);
+
+    const wrong = await attempt('203.0.113.201', 'wrong-password');
+    await wrong.text();
+    assert(wrong.status === 429, 'Global ceiling: a wrong password is still refused during an active ceiling', `got ${wrong.status}`);
+  });
+
+  console.log('\nSuite 12: Bearer token limiter');
   await withApp({}, async ({ baseUrl }) => {
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {
@@ -446,7 +560,7 @@ async function runAllTests() {
     assert(good.status === 200, 'Bearer: a valid token still works', `got ${good.status}`);
   });
 
-  console.log('\nSuite 11: Response headers');
+  console.log('\nSuite 13: Response headers');
   await withApp({}, async ({ baseUrl }) => {
     const res = await fetch(`${baseUrl}/api/health`);
     await res.text();

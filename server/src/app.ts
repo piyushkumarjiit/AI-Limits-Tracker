@@ -130,11 +130,14 @@ async function handleApi(
     const ip = clientIp(req, config.trustProxy);
     if (limiter.tooManyAttempts(ip)) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
     const { password } = await readBody(req);
+    if (limiter.tooManyAttempts(ip)) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
     if (typeof password !== 'string' || !safeEqual(password, config.adminPassword)) {
       // Only failures count toward the throttle; back off exponentially (never log the password).
+      const globalExceeded = limiter.globalExceeded();
       const failures = limiter.recordFailure(ip);
       console.log(`login_failed ip=${ip} ts=${Math.floor(Date.now() / 1000)}`);
       await sleep(limiter.delayMs(failures));
+      if (globalExceeded) return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
       return send(res, 401, { error: 'Incorrect password' });
     }
     limiter.reset(ip);
@@ -166,7 +169,7 @@ async function handleApi(
     // cannot be brute-forced. A valid token is never delayed or refused.
     if (/^Bearer\s+/i.test(req.headers.authorization || '')) {
       const ip = clientIp(req, config.trustProxy);
-      if (bearerLimiter.tooManyAttempts(ip)) {
+      if (bearerLimiter.tooManyAttempts(ip) || bearerLimiter.globalExceeded()) {
         return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
       }
       const failures = bearerLimiter.recordFailure(ip);

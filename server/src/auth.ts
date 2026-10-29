@@ -112,8 +112,10 @@ export interface LoginLimiterOptions {
 }
 
 export interface LoginLimiter {
-  /** True when this address (or the whole instance) must be refused. Does not count as a failure. */
+  /** True when this address is at its own failure ceiling. Does not count as a failure. */
   tooManyAttempts(ip: string): boolean;
+  /** True when the instance-wide failure ceiling for the current window is reached. */
+  globalExceeded(): boolean;
   /** Records a failed attempt and returns the new consecutive-failure count. */
   recordFailure(ip: string): number;
   /** Clears the per-address window after a successful login. */
@@ -124,7 +126,6 @@ export interface LoginLimiter {
 
 interface Rec {
   count: number;
-  first: number;
   last: number;
 }
 
@@ -132,9 +133,11 @@ const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
 /**
  * Failure-only throttle: 10 failed attempts per address inside 15 minutes, plus a
- * global 60-failure ceiling so rotating spoofed addresses still hits a wall.
- * Successful logins reset the address; expired records are pruned on every call
- * and the map is capped so it cannot grow without bound.
+ * global 60-failure ceiling so rotating spoofed addresses still hits a wall. The
+ * per-address ceiling is checked before a password is verified; the global ceiling
+ * is consulted only for attempts that already failed, so a valid login is never
+ * refused by it. Successful logins reset the address; expired records are pruned
+ * on every call and the map is capped so it cannot grow without bound.
  */
 export function createLoginLimiter(opts: LoginLimiterOptions = {}): LoginLimiter {
   const maxPerIp = opts.maxPerIp ?? 10;
@@ -161,9 +164,13 @@ export function createLoginLimiter(opts: LoginLimiterOptions = {}): LoginLimiter
   function tooManyAttempts(ip: string): boolean {
     const now = Date.now();
     prune(now);
-    if (globalCount >= maxGlobal) return true;
     const rec = attempts.get(ip);
     return Boolean(rec && rec.count >= maxPerIp);
+  }
+
+  function globalExceeded(): boolean {
+    prune(Date.now());
+    return globalCount >= maxGlobal;
   }
 
   function recordFailure(ip: string): number {
@@ -177,7 +184,7 @@ export function createLoginLimiter(opts: LoginLimiterOptions = {}): LoginLimiter
         if (oldest.done) break;
         attempts.delete(oldest.value);
       }
-      rec = { count: 0, first: now, last: now };
+      rec = { count: 0, last: now };
       attempts.set(ip, rec);
     }
     rec.count++;
@@ -195,5 +202,5 @@ export function createLoginLimiter(opts: LoginLimiterOptions = {}): LoginLimiter
     return Math.min(maxDelayMs, baseDelayMs * 2 ** (failures - 1));
   }
 
-  return { tooManyAttempts, recordFailure, reset, delayMs };
+  return { tooManyAttempts, globalExceeded, recordFailure, reset, delayMs };
 }
