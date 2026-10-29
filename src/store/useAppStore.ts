@@ -80,7 +80,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isSyncing: false,
   lastSyncAllAt: null,
   refreshIntervalMin: 5,
-  userName: 'Rauan',
+  userName: 'Piyush',
 
   initializeStore: async () => {
     await initDatabase();
@@ -109,7 +109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       accounts,
       snapshots,
       refreshIntervalMin: interval ? Number(interval) || 5 : 5,
-      userName: userName ?? 'Rauan',
+      userName: userName ?? 'Piyush',
     });
 
     pruneHistory(new Date(Date.now() - 400 * 86400 * 1000).toISOString()).catch(() => {});
