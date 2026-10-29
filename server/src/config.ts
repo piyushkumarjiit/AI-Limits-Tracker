@@ -16,6 +16,9 @@ const MIN_API_TOKEN_LENGTH = 24;
 
 const HINT = 'Generate one with: openssl rand -hex 32';
 
+const EMPTY_ADMIN_PASSWORD = `ADMIN_PASSWORD is empty. Set the web panel password. ${HINT}`;
+const EMPTY_APP_SECRET = `APP_SECRET is empty. ${HINT}`;
+
 export type Env = Record<string, string | undefined>;
 
 function isPlaceholderPassword(value: string): boolean {
@@ -29,9 +32,20 @@ function isLowEntropy(value: string): boolean {
 }
 
 /**
+ * Problems that must stop startup even when `ALLOW_WEAK_SECRETS=1` is set: a
+ * missing password or session secret can never be downgraded to a warning.
+ */
+export function validateFatalConfig(env: Env): string[] {
+  const fatal: string[] = [];
+  if (!(env.ADMIN_PASSWORD ?? '')) fatal.push(EMPTY_ADMIN_PASSWORD);
+  if (!(env.APP_SECRET ?? '')) fatal.push(EMPTY_APP_SECRET);
+  return fatal;
+}
+
+/**
  * Every problem that must stop startup. `ALLOW_WEAK_SECRETS=1` downgrades these
- * to warnings (see `validateConfigWarnings`) for operators who know what they
- * are doing.
+ * to warnings for operators who know what they are doing, except the empty
+ * secrets reported by `validateFatalConfig`, which stay fatal.
  */
 export function validateConfig(env: Env): string[] {
   const errors: string[] = [];
@@ -40,13 +54,13 @@ export function validateConfig(env: Env): string[] {
   const apiToken = env.API_TOKEN ?? '';
 
   if (!adminPassword) {
-    errors.push(`ADMIN_PASSWORD is empty. Set the web panel password. ${HINT}`);
+    errors.push(EMPTY_ADMIN_PASSWORD);
   } else if (isPlaceholderPassword(adminPassword)) {
     errors.push(`ADMIN_PASSWORD is a known placeholder. Choose a unique password. ${HINT}`);
   }
 
   if (!appSecret) {
-    errors.push(`APP_SECRET is empty. ${HINT}`);
+    errors.push(EMPTY_APP_SECRET);
   } else if (appSecret.trim().toLowerCase().startsWith('change-me')) {
     errors.push(`APP_SECRET is still the placeholder from the example file. ${HINT}`);
   } else if (appSecret.length < MIN_SECRET_LENGTH) {

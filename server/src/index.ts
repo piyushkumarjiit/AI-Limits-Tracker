@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { createApp } from './app';
 import { DEFAULT_SESSION_DAYS } from './auth';
-import { allowsWeakSecrets, validateConfig, validateConfigWarnings } from './config';
+import { allowsWeakSecrets, validateConfig, validateConfigWarnings, validateFatalConfig } from './config';
 import { Store } from './store';
 import { Tracker } from './tracker';
 
@@ -19,17 +19,21 @@ const warnings = validateConfigWarnings(process.env);
 for (const warning of warnings) console.warn(`[config] warning: ${warning}`);
 
 const errors = validateConfig(process.env);
-if (errors.length) {
-  if (allowsWeakSecrets(process.env)) {
-    console.warn('[config] ALLOW_WEAK_SECRETS=1: STARTING WITH UNSAFE SECRETS - anyone who guesses them owns this panel.');
-    for (const error of errors) console.warn(`[config] warning: ${error}`);
+const fatal = validateFatalConfig(process.env);
+if (fatal.length || (errors.length && !allowsWeakSecrets(process.env))) {
+  console.error('Refusing to start: the configuration is unsafe.');
+  for (const error of errors) console.error(`  - ${error}`);
+  console.error('Generate strong values with: openssl rand -hex 32');
+  if (fatal.length) {
+    console.error('ADMIN_PASSWORD and APP_SECRET must be set; ALLOW_WEAK_SECRETS=1 cannot override this.');
   } else {
-    console.error('Refusing to start: the configuration is unsafe.');
-    for (const error of errors) console.error(`  - ${error}`);
-    console.error('Generate strong values with: openssl rand -hex 32');
     console.error('To start anyway, set ALLOW_WEAK_SECRETS=1 (not recommended).');
-    process.exit(1);
   }
+  process.exit(1);
+}
+if (errors.length) {
+  console.warn('[config] ALLOW_WEAK_SECRETS=1: STARTING WITH UNSAFE SECRETS - anyone who guesses them owns this panel.');
+  for (const error of errors) console.warn(`[config] warning: ${error}`);
 }
 
 const PORT = Number(process.env.PORT) || 8795;
