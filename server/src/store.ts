@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import type { AccountCredentials, AccountEntity, AlertKind, AlertLogEntry, UsageSnapshot } from '../../src/models/types';
 import type { StatPoint } from '../../src/services/stats';
 
@@ -38,7 +38,11 @@ export class Store {
   private db: DatabaseSync;
   private vault: Vault;
 
-  constructor(path: string, secret: string) {
+  constructor(baseDir: string, fileName: string, secret: string) {
+    const base = resolve(baseDir);
+    const path = resolve(base, fileName);
+    // Confine the database file to the data directory (no traversal, no null bytes)
+    if (`${baseDir}${fileName}`.includes('\0') || !path.startsWith(base + sep)) throw new Error('Invalid database path');
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.vault = new Vault(secret);
