@@ -7,7 +7,9 @@ import { Tracker } from './tracker';
 
 // Last line of defence: a rejected promise or a stray throw must be logged, never
 // allowed to take the whole panel (and everyone's sessions) offline. Error objects
-// carry stack traces and messages only; secrets are never part of them.
+// carry stack traces and messages only; secrets are never part of them. The exit
+// code is still set to 1 so a startup failure (nothing left keeping the event loop
+// alive) ends the process with a failure status instead of a clean exit.
 process.on('unhandledRejection', (reason) => {
   console.error('unhandledRejection:', reason);
   process.exitCode = 1;
