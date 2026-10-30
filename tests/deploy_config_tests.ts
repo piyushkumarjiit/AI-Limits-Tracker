@@ -16,7 +16,7 @@ function assert(cond: boolean, name: string, info?: string) {
 function run(cmd: string, args: string[], env: Record<string, string> = {}, input?: string) {
   return spawnSync(cmd, args, { cwd: root, encoding: 'utf8', env: { ...process.env, ...env }, input, timeout: 600_000 });
 }
-const hasDocker = run('docker', ['compose', 'version']).status === 0;
+const hasDocker = run('docker', ['info']).status === 0;
 const project = `ait-caddy-test-${process.pid}`;
 
 console.log('Deploy config tests');
@@ -102,23 +102,22 @@ if (!hasDocker) {
   assert(!!dapp && !d.services?.['caddy-public'] && !d.services?.['caddy-internal'], 'direct: caddy off, original service name kept', d.error);
   assert(dapp?.environment?.TRUST_PROXY === '0' && dapp?.environment?.PORT === '1455' && dapp?.ports?.length === 1, 'direct: TRUST_PROXY=0, fixed container port, host port published');
 
-  // The built image: base digests resolve, then its own metadata is inspected.
+  // The built image: the build pulls every base it references, then the bases must be pinned and the metadata inspected.
+  const tag = `${project}-image:test`;
+  const built = run('docker', ['build', '--quiet', '-t', tag, '.']);
+  assert(built.status === 0, 'image builds from the Dockerfile', built.stderr.slice(-400));
   const froms = (readFileSync(join(root, 'Dockerfile'), 'utf8').match(/^FROM\s+(\S+)/gm) ?? []).map((l) => l.split(/\s+/)[1]);
-  const resolved = froms.length > 0 && froms.every((img) => run('docker', ['image', 'inspect', img]).status === 0);
-  assert(resolved, 'every Dockerfile base image resolves as pinned', froms.join(' '));
-  if (resolved) {
-    const tag = `${project}-image:test`;
-    const built = run('docker', ['build', '--quiet', '-t', tag, '.']);
-    assert(built.status === 0, 'image builds from the Dockerfile', built.stderr.slice(-400));
-    if (built.status === 0) {
-      const insp = run('docker', ['image', 'inspect', tag, '--format', '{{json .Config}}']);
-      const c = insp.status === 0 ? JSON.parse(insp.stdout) : {};
-      assert(c.Labels?.['org.opencontainers.image.source']?.includes('AI-Limits-Tracker'), 'image carries OCI source label', JSON.stringify(c.Labels));
-      assert(!!c.Labels?.['org.opencontainers.image.licenses'], 'image carries OCI license label');
-      assert(c.User === 'node', 'image runs as the unprivileged node user', String(c.User));
-      assert((c.Healthcheck?.Test ?? []).join(' ').includes('/api/health'), 'image healthcheck probes /api/health', JSON.stringify(c.Healthcheck));
-      run('docker', ['image', 'rm', '-f', tag]);
-    }
+  assert(froms.length > 0 && froms.every((img) => /^[\w.\-/]+:[\w.-]+@sha256:[0-9a-f]{64}$/.test(img)), 'every Dockerfile base image is pinned by tag and digest', froms.join(' '));
+  const exists = run('docker', ['image', 'inspect', tag, '--format', '{{.Id}}']);
+  assert(built.status === 0 && exists.status === 0 && exists.stdout.trim().length > 0, 'built image exists', exists.stderr.slice(-200));
+  if (built.status === 0) {
+    const insp = run('docker', ['image', 'inspect', tag, '--format', '{{json .Config}}']);
+    const c = insp.status === 0 ? JSON.parse(insp.stdout) : {};
+    assert(c.Labels?.['org.opencontainers.image.source']?.includes('AI-Limits-Tracker'), 'image carries OCI source label', JSON.stringify(c.Labels));
+    assert(!!c.Labels?.['org.opencontainers.image.licenses'], 'image carries OCI license label');
+    assert(c.User === 'node', 'image runs as the unprivileged node user', String(c.User));
+    assert((c.Healthcheck?.Test ?? []).join(' ').includes('/api/health'), 'image healthcheck probes /api/health', JSON.stringify(c.Healthcheck));
+    run('docker', ['image', 'rm', '-f', tag]);
   }
 }
 
