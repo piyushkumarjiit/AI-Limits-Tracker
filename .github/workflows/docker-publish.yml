@@ -8,14 +8,87 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  # Tests, typecheck and dependency audit must pass before anything is published.
+  checks:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Scans every platform that publish ships, since each variant resolves its own base layers.
+  scan:
+    needs: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
     steps:
       # Actions are pinned to commit SHAs (immutable); the trailing comment is the release tag.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # Build locally (not pushed) so the image can be scanned before it is published.
+      - name: Build image for scanning
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          tags: ait-scan:${{ github.sha }}-${{ matrix.arch }}
+          cache-from: type=gha
+
+      # Fails on fixed HIGH/CRITICAL vulnerabilities; unfixed ones are ignored.
+      # skip-dirs excludes only the Node toolchain bundled with the node:22-alpine
+      # base image (npm, corepack and the yarn distribution), which is not part of
+      # our runtime application surface. Application code and its dependencies
+      # under /app are still scanned, so any fixable HIGH/CRITICAL finding there
+      # fails the gate. The real fix is to update the node base image; track that
+      # separately rather than widening these exclusions.
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ait-scan:${{ github.sha }}-${{ matrix.arch }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: "1"
+          format: table
+          skip-dirs: usr/local/lib/node_modules/npm,usr/local/lib/node_modules/corepack,usr/local/lib/node_modules/yarn,opt/yarn-v1.22.22
+
+  publish:
+    needs: [checks, scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+      id-token: write # keyless cosign signing and attestations (OIDC)
+      attestations: write # provenance and SBOM attestations
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      # Actions are pinned to commit SHAs (immutable); the trailing comment is the release tag.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -31,13 +104,14 @@ jobs:
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -47,3 +121,35 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Keyless signing with the workflow's OIDC identity; signs the digest, not a mutable tag.
+      - name: Sign image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
