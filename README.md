@@ -161,7 +161,8 @@ npm run typecheck:all
 
 - **CI** (`.github/workflows/ci.yml`, on pull requests and pushes to `main`): `npm ci`, `npm run typecheck:all`, `npm test`, and `npm audit --omit=dev --audit-level=high` (fails on high/critical advisories). Superseded runs are cancelled.
 - **Semgrep** scans every PR and push to `main`.
-- **Image publish** (`docker-publish.yml`) runs the CI workflow first and only publishes if it passes. It builds the image, scans it with Trivy (fails on fixed HIGH/CRITICAL findings; unfixed ones are ignored), pushes a multi-arch image, attaches build provenance and SBOM attestations, and signs it with keyless cosign.
+- **Image publish** (`docker-publish.yml`) runs the CI workflow first and only publishes if it passes. It builds and scans every published platform (`linux/amd64` and `linux/arm64`) with Trivy (fails on fixed HIGH/CRITICAL findings; unfixed ones are ignored), then pushes a multi-arch image, attaches build provenance and SBOM attestations, and signs it with keyless cosign.
+- The Semgrep workflow runs independently on pull requests and pushes to `main`; it does not gate publishing.
 - **Dependabot** opens weekly grouped updates for npm (root and `server`), GitHub Actions and Docker. Actions are pinned to commit SHAs.
 
 ## A note on account safety
