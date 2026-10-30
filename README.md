@@ -105,7 +105,7 @@ Paste it into **Add account**. For a second account of the same service, export 
 
 ## Security notes
 
-- The server requires `ADMIN_PASSWORD` and `APP_SECRET`. Generate each with `openssl rand -hex 32`; the server refuses to start on weak values.
+- The server requires `ADMIN_PASSWORD` and `APP_SECRET`. Generate each with `openssl rand -hex 32`; the server refuses to start when either is missing or still an example placeholder, and rejects a short or predictable `APP_SECRET`.
 - `API_TOKEN` is optional: a long-lived bearer token for scripts that cannot log in through the form.
 - `SESSION_DAYS` sets the session cookie lifetime (default 30 days). `POST /api/sessions/revoke-all` ends every existing session at once.
 - `ALLOWED_HOSTS` limits which `Host` headers are accepted. Set `TRUST_PROXY=1` when a reverse proxy sits in front so rate limiting sees real client IPs.
