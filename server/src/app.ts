@@ -190,7 +190,8 @@ async function handleApi(
     if (typeof password !== 'string' || !safeEqual(password, config.adminPassword)) {
       // Only failures count toward the throttle; back off exponentially (never log the password).
       const failures = limiter.recordFailure(ip);
-      console.log(`login_failed ip=${ip} ts=${Math.floor(Date.now() / 1000)}`);
+      const ipForLog = ip.replace(/[\r\n]/g, '');
+      console.log(`login_failed ip=${ipForLog} ts=${Math.floor(Date.now() / 1000)}`);
       await sleep(limiter.delayMs(failures));
       return send(res, 401, { error: 'Incorrect password' });
     }
