@@ -1,7 +1,13 @@
 import { resolve } from 'node:path';
 import { createApp, hostnameOf } from './app';
 import { DEFAULT_SESSION_DAYS } from './auth';
-import { allowsWeakSecrets, validateConfig, validateConfigWarnings, validateFatalConfig } from './config';
+import {
+  allowsWeakSecrets,
+  resolveSessionDays,
+  validateConfig,
+  validateConfigWarnings,
+  validateFatalConfig,
+} from './config';
 import { Store } from './store';
 import { Tracker } from './tracker';
 
@@ -29,7 +35,7 @@ if (fatal.length || (errors.length && !allowsWeakSecrets(process.env))) {
   for (const error of errors) console.error(`  - ${error}`);
   console.error('Generate strong values with: openssl rand -hex 32');
   if (fatal.length) {
-    console.error('ADMIN_PASSWORD and APP_SECRET must be set; ALLOW_WEAK_SECRETS=1 cannot override this.');
+    console.error('The problems listed above are fatal; ALLOW_WEAK_SECRETS=1 cannot override them.');
   } else {
     console.error('To start anyway, set ALLOW_WEAK_SECRETS=1 (not recommended).');
   }
@@ -44,6 +50,7 @@ const PORT = Number(process.env.PORT) || 8795;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const APP_SECRET = process.env.APP_SECRET || '';
 const API_TOKEN = process.env.API_TOKEN || '';
+const SESSION_DAYS = resolveSessionDays(process.env, DEFAULT_SESSION_DAYS);
 const DATA_DIR = resolve(process.env.DATA_DIR || 'data');
 const WEB_DIR = resolve(process.env.WEB_DIR || 'public');
 const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || '')
@@ -69,7 +76,7 @@ const server = createApp(
     secureCookies: true,
     trustProxy: process.env.TRUST_PROXY === '1',
     webDir: WEB_DIR,
-    sessionDays: DEFAULT_SESSION_DAYS,
+    sessionDays: SESSION_DAYS,
     telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID),
     allowedHosts: ALLOWED_HOSTS,
     maxHeaderSize: 8192,

@@ -14,7 +14,7 @@ const API_TOKEN = 'test-api-token-abc123';
 
 /**
  * Independent oracle for the documented alt_session token contract:
- * `<issued>.<base64url(HMAC-SHA256(issued, APP_SECRET))>`. Derived here with
+ * `<epoch>.<issued>.<base64url(HMAC-SHA256(epoch.issued, APP_SECRET))>`. Derived here with
  * node:crypto rather than the server's own sign(), so a mis-keyed or
  * secret-dropping implementation is rejected.
  */
@@ -131,7 +131,7 @@ async function runAllTests() {
     assert(/alt_session=/.test(rawCookie), 'Login: sets alt_session cookie');
     assert(/HttpOnly/i.test(rawCookie), 'Login: cookie is HttpOnly', rawCookie);
     assert(/SameSite=Lax/i.test(rawCookie), 'Login: cookie is SameSite=Lax', rawCookie);
-    assert(/Max-Age=15552000/.test(rawCookie), 'Login: session lives 180 days by default', rawCookie);
+    assert(/Max-Age=2592000/.test(rawCookie), 'Login: session lives 30 days by default', rawCookie);
   });
 
   console.log('\nSuite 1b: Login limiter');
@@ -215,15 +215,15 @@ async function runAllTests() {
   await withApp({}, async ({ baseUrl }) => {
     const issued = String(Date.now());
 
-    const knownVector = `${issued}.${independentSign(issued, APP_SECRET)}`;
+    const knownVector = `0.${issued}.${independentSign(`0.${issued}`, APP_SECRET)}`;
     const accepted = await fetch(`${baseUrl}/api/state`, { headers: { Cookie: `alt_session=${knownVector}` } });
     assert(
       accepted.status === 200,
-      '/api/state: cookie built from an independent HMAC-SHA256(issued, APP_SECRET) is 200',
+      '/api/state: cookie built from an independent HMAC-SHA256(epoch.issued, APP_SECRET) is 200',
       `got ${accepted.status}`
     );
 
-    const foreignSecret = `${issued}.${independentSign(issued, 'a-different-app-secret-0123456789')}`;
+    const foreignSecret = `0.${issued}.${independentSign(`0.${issued}`, 'a-different-app-secret-0123456789')}`;
     const foreignRes = await fetch(`${baseUrl}/api/state`, { headers: { Cookie: `alt_session=${foreignSecret}` } });
     assert(
       foreignRes.status === 401,

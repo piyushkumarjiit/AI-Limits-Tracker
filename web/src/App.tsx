@@ -5,6 +5,7 @@ import { bindingBucket, headlineBucket } from '../../src/services/providers/comm
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES } from '../../src/constants/theme';
 import { formatTimeRemaining, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
 import { Account, api, ApiError } from './api';
+import { isInsecurePage } from './session';
 import { BarChart, Donut, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
 
 /* ---------------- Router ---------------- */
@@ -156,7 +157,10 @@ export default function App() {
           <Icon name="plus" size={18} /> Add account
         </button>
       </nav>
-      <main className="main">{page}</main>
+      <main className="main">
+        <InsecureBanner />
+        {page}
+      </main>
       <nav className="tabbar">
         <NavItem icon="home" label="Home" active={tab === 'home'} onClick={() => go('/')} />
         <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
@@ -204,6 +208,22 @@ const Header: React.FC<{ title: string; sub?: string; back?: boolean; right?: Re
   </header>
 );
 
+/* ---------------- Insecure connection notice ---------------- */
+
+/** Shown on every page, cannot be dismissed: the connection really is unencrypted. */
+const InsecureBanner: React.FC = () => {
+  if (!isInsecurePage()) return null;
+  return (
+    <div className="insecure-banner" role="alert">
+      <span aria-hidden="true">⚠️</span>
+      <div>
+        <b>This connection is not encrypted.</b>
+        You are using plain HTTP, so your password and session cookie can be read by anyone on the network. Serve this panel over HTTPS.
+      </div>
+    </div>
+  );
+};
+
 /* ---------------- Login ---------------- */
 
 const Login: React.FC<{ onDone: () => void }> = ({ onDone }) => {
@@ -225,6 +245,9 @@ const Login: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   };
   return (
     <div className="login">
+      <div className="login-notice">
+        <InsecureBanner />
+      </div>
       <form className="card login-card" onSubmit={submit}>
         <div className="login-logos">
           <Logo type="claude" size={40} />

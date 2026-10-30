@@ -13,6 +13,9 @@ const MIN_SECRET_LENGTH = 16;
 const RECOMMENDED_SECRET_LENGTH = 32;
 /** Minimum length for an explicitly configured API_TOKEN. */
 const MIN_API_TOKEN_LENGTH = 24;
+/** Bounds for an explicitly configured SESSION_DAYS value. */
+const MIN_SESSION_DAYS = 1;
+const MAX_SESSION_DAYS = 365;
 
 const HINT = 'Generate one with: openssl rand -hex 32';
 
@@ -33,19 +36,48 @@ function isLowEntropy(value: string): boolean {
 
 /**
  * Problems that must stop startup even when `ALLOW_WEAK_SECRETS=1` is set: a
- * missing password or session secret can never be downgraded to a warning.
+ * missing password or session secret and an out-of-range SESSION_DAYS can never
+ * be downgraded to a warning.
  */
 export function validateFatalConfig(env: Env): string[] {
   const fatal: string[] = [];
   if (!(env.ADMIN_PASSWORD ?? '')) fatal.push(EMPTY_ADMIN_PASSWORD);
   if (!(env.APP_SECRET ?? '')) fatal.push(EMPTY_APP_SECRET);
+  const sessionDays = sessionDaysProblem(env);
+  if (sessionDays) fatal.push(sessionDays);
   return fatal;
 }
 
 /**
+ * Problem with an explicitly configured SESSION_DAYS, or null when it is absent or
+ * a whole number of days between 1 and 365.
+ */
+export function sessionDaysProblem(env: Env): string | null {
+  const raw = (env.SESSION_DAYS ?? '').trim();
+  if (!raw) return null;
+  const hint = `SESSION_DAYS must be a whole number of days between ${MIN_SESSION_DAYS} and ${MAX_SESSION_DAYS}.`;
+  if (!/^\d+$/.test(raw)) return `${hint} Got ${JSON.stringify(raw)}.`;
+  const days = Number(raw);
+  if (days < MIN_SESSION_DAYS || days > MAX_SESSION_DAYS) return `${hint} Got ${raw}.`;
+  return null;
+}
+
+/**
+ * Session lifetime in days: SESSION_DAYS when it is valid, otherwise a fatal
+ * configuration problem. `index.ts` validates before this is called.
+ */
+export function resolveSessionDays(env: Env, fallback: number): number {
+  const problem = sessionDaysProblem(env);
+  if (problem) throw new Error(problem);
+  const raw = (env.SESSION_DAYS ?? '').trim();
+  return raw ? Number(raw) : fallback;
+}
+
+/**
  * Every problem that must stop startup. `ALLOW_WEAK_SECRETS=1` downgrades these
- * to warnings for operators who know what they are doing, except the empty
- * secrets reported by `validateFatalConfig`, which stay fatal.
+ * to warnings for operators who know what they are doing, except the problems
+ * reported by `validateFatalConfig` (empty secrets, invalid SESSION_DAYS), which
+ * stay fatal.
  */
 export function validateConfig(env: Env): string[] {
   const errors: string[] = [];
@@ -72,6 +104,9 @@ export function validateConfig(env: Env): string[] {
   if (apiToken && apiToken.length < MIN_API_TOKEN_LENGTH) {
     errors.push(`API_TOKEN must be at least ${MIN_API_TOKEN_LENGTH} characters. ${HINT}`);
   }
+
+  const sessionDays = sessionDaysProblem(env);
+  if (sessionDays) errors.push(sessionDays);
 
   return errors;
 }
