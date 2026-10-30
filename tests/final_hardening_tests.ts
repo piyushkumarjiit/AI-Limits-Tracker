@@ -343,10 +343,158 @@ async function testRedirects() {
   }
 }
 
+/* ---------------- SSRF: extended IPv6 ranges ---------------- */
+
+function testIPv6ReservedRanges() {
+  console.log('\n[4] SSRF guard: IPv6 reserved and IPv4-embedding ranges');
+
+  const blocked = [
+    'https://[ff00::]/',
+    'https://[ff02::1]/',
+    'https://[2001:db8::1]/',
+    'https://[64:ff9b::a9fe:a9fe]/',
+    'https://[64:ff9b::7f00:1]/',
+    'https://[2002:a9fe:a9fe::1]/',
+    'https://[2002:7f00:1::]/',
+    'https://[2002:0a00:1::]/',
+  ];
+  for (const url of blocked) throws(() => assertSafeUrl(url), `IPv6 guard: blocks ${url}`);
+
+  for (const url of ['https://[64:ff9b::808:808]/', 'https://[2002:808:808::1]/']) {
+    try {
+      assertSafeUrl(url);
+      assert(true, `IPv6 guard: allows ${url}`);
+    } catch (e: any) {
+      assert(false, `IPv6 guard: allows ${url}`, e?.message);
+    }
+  }
+
+  assert(
+    isBlockedAddress('ff02::1') &&
+      isBlockedAddress('2001:db8::1') &&
+      isBlockedAddress('64:ff9b::a9fe:a9fe') &&
+      isBlockedAddress('2002:a9fe:a9fe::1'),
+    'Address guard: multicast, documentation and embedded-private IPv6 are blocked'
+  );
+  assert(
+    !isBlockedAddress('64:ff9b::808:808') && !isBlockedAddress('2002:808:808::1'),
+    'Address guard: public IPv4 embedded in IPv6 passes'
+  );
+}
+
+/* ---------------- SSRF: redirect credentials ---------------- */
+
+async function testRedirectCredentials() {
+  console.log('\n[5] SSRF guard: redirects do not forward credentials');
+
+  const realFetch = globalThis.fetch;
+  const seen: Array<Record<string, string>> = [];
+  let routes: Record<string, Route> = {};
+
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input);
+    seen.push(init?.headers ? { ...(init.headers as Record<string, string>) } : {});
+    const route = routes[url];
+    if (!route) return new Response('unexpected ' + url, { status: 500 });
+    const headers: Record<string, string> = {};
+    if (route.location) headers.location = route.location;
+    return new Response(route.body ?? null, { status: route.status, headers });
+  }) as unknown as typeof fetch;
+
+  setHostResolver(null);
+  const headers = {
+    Accept: 'application/json',
+    Authorization: 'Bearer secret-token',
+    Cookie: 'sessionKey=secret-cookie',
+    'proxy-authorization': 'Basic secret-proxy',
+    Host: 'example.com',
+  };
+  try {
+    routes = {
+      'https://example.com/start': { status: 302, location: 'https://other.example/next' },
+      'https://other.example/next': { status: 200, body: 'ok' },
+    };
+    seen.length = 0;
+    await isolatedFetch('https://example.com/start', { headers });
+    assert(
+      seen[0]?.Authorization === 'Bearer secret-token' && seen[0]?.Cookie === 'sessionKey=secret-cookie',
+      'Redirect credentials: the first hop carries the supplied credentials'
+    );
+    const second = seen[1] ?? {};
+    const forwarded = Object.keys(second).filter((k) =>
+      ['authorization', 'cookie', 'proxy-authorization', 'host'].includes(k.toLowerCase())
+    );
+    assert(
+      forwarded.length === 0,
+      'Redirect credentials: a cross-origin hop drops authorization, cookie, proxy-authorization and host',
+      JSON.stringify(second)
+    );
+    assert(
+      second.Accept === 'application/json',
+      'Redirect credentials: ordinary headers survive a cross-origin hop',
+      JSON.stringify(second)
+    );
+
+    routes = {
+      'https://example.com/same': { status: 302, location: '/same-next' },
+      'https://example.com/same-next': { status: 200, body: 'ok' },
+    };
+    seen.length = 0;
+    await isolatedFetch('https://example.com/same', { headers });
+    assert(
+      seen[1]?.Authorization === 'Bearer secret-token' && seen[1]?.Cookie === 'sessionKey=secret-cookie',
+      'Redirect credentials: a same-origin hop keeps the credentials'
+    );
+  } finally {
+    setHostResolver(null);
+    globalThis.fetch = realFetch;
+  }
+}
+
+/* ---------------- SSRF: DNS timeout ---------------- */
+
+async function testDnsAbort() {
+  console.log('\n[6] SSRF guard: DNS lookup honours the request timeout');
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response('ok', { status: 200 })) as unknown as typeof fetch;
+  // A resolver that never settles models a blackholed system resolver.
+  setHostResolver(() => new Promise<string[]>(() => {}));
+  const started = Date.now();
+  try {
+    let guardFired = false;
+    const outcome = await Promise.race([
+      isolatedFetch('https://blackhole.example/x', { timeoutMs: 50 }).then(
+        () => 'resolved',
+        (e: any) => String(e?.message || e)
+      ),
+      new Promise<string>((resolve) =>
+        setTimeout(() => {
+          guardFired = true;
+          resolve('hung');
+        }, 2000)
+      ),
+    ]);
+    assert(
+      !guardFired,
+      'DNS: a lookup that never settles is aborted by the request timeout',
+      outcome
+    );
+    assert(/timed out/i.test(outcome), 'DNS: the aborted lookup reports a timeout', outcome);
+    assert(
+      Date.now() - started < 2000,
+      'DNS: the abort fires near the request timeout rather than hanging'
+    );
+  } finally {
+    setHostResolver(null);
+    globalThis.fetch = realFetch;
+  }
+}
+
 /* ---------------- SSRF: response cap ---------------- */
 
 async function testResponseCap() {
-  console.log('\n[4] SSRF guard: response body cap');
+  console.log('\n[7] SSRF guard: response body cap');
 
   setMaxResponseBytes(1024);
   try {
@@ -388,7 +536,7 @@ async function testResponseCap() {
 /* ---------------- Server wiring ---------------- */
 
 async function testServerWiring() {
-  console.log('\n[5] Server wiring: resolver installed at startup');
+  console.log('\n[8] Server wiring: resolver installed at startup');
 
   assert(SERVER_RESPONSE_BYTES === 1024 * 1024, 'Server: the outbound response cap is 1 MB');
 
@@ -412,7 +560,7 @@ async function testServerWiring() {
 /* ---------------- Error hygiene ---------------- */
 
 async function testErrorHygiene() {
-  console.log('\n[6] Error hygiene: oauth/start');
+  console.log('\n[9] Error hygiene: oauth/start');
 
   const tracker = fakeTracker({
     startOAuth: () => {
@@ -461,7 +609,7 @@ async function testErrorHygiene() {
 /* ---------------- Database permissions ---------------- */
 
 function testDatabasePermissions() {
-  console.log('\n[7] Database: file modes');
+  console.log('\n[10] Database: file modes');
 
   const root = mkdtempSync(join(tmpdir(), 'alt-perm-'));
   try {
@@ -511,6 +659,9 @@ async function runAllTests() {
   testSafeUrl();
   await testDnsGuard();
   await testRedirects();
+  testIPv6ReservedRanges();
+  await testRedirectCredentials();
+  await testDnsAbort();
   await testResponseCap();
   await testServerWiring();
   await testErrorHygiene();
