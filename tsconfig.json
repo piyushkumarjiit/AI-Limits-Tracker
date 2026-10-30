@@ -26,6 +26,7 @@
     "integrations",
     "tests/remote.test.ts",
     "tests/security_tests.ts",
-    "tests/security_hardening_tests.ts"
+    "tests/security_hardening_tests.ts",
+    "tests/session_hardening_tests.ts"
   ]
 }

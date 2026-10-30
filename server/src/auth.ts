@@ -2,8 +2,17 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { IncomingMessage } from 'node:http';
 import { isIP } from 'node:net';
 
-/** Session lifetime: 180 days. */
-export const DEFAULT_SESSION_DAYS = 180;
+/** Session lifetime: 30 days. */
+export const DEFAULT_SESSION_DAYS = 30;
+
+/** Settings key holding the current session epoch; absent means 0. */
+export const SESSION_EPOCH_KEY = 'session_epoch';
+
+/** Reads the current session epoch from a value read out of the settings table. */
+export function parseSessionEpoch(raw: string | null | undefined): number {
+  const n = Number(raw);
+  return raw !== null && raw !== undefined && Number.isSafeInteger(n) && n >= 0 ? n : 0;
+}
 
 export const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -27,18 +36,31 @@ export function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Session cookie (`alt_session`) format: `<issued-ms>.<base64url HMAC-SHA256(issued, APP_SECRET)>`.
- * The signature is what binds the session to APP_SECRET; `verifySession` also enforces the age limit.
+ * Session cookie (`alt_session`) format: `<epoch>.<issued-ms>.<base64url HMAC-SHA256(epoch.issued, APP_SECRET)>`.
+ * The signature binds the session to APP_SECRET and covers the epoch the cookie was
+ * issued under; `verifySession` also enforces the age limit and rejects a cookie whose
+ * epoch no longer matches the current one (so a revoke-all ends every older session).
+ * The earlier two-part `<issued>.<sig>` format is rejected outright.
  */
-export function createSession(secret: string): string {
+export function createSession(secret: string, epoch: number): string {
   const issued = String(Date.now());
-  return `${issued}.${sign(issued, secret)}`;
+  const payload = `${epoch}.${issued}`;
+  return `${payload}.${sign(payload, secret)}`;
 }
 
-export function verifySession(raw: string | undefined, secret: string, sessionDays: number): boolean {
+export function verifySession(
+  raw: string | undefined,
+  secret: string,
+  sessionDays: number,
+  currentEpoch: number
+): boolean {
   if (!raw) return false;
-  const [issued, sig] = raw.split('.');
-  if (!issued || !sig || !safeEqual(sig, sign(issued, secret))) return false;
+  const parts = raw.split('.');
+  if (parts.length !== 3) return false;
+  const [epoch, issued, sig] = parts;
+  if (!epoch || !issued || !sig || !/^\d+$/.test(epoch)) return false;
+  if (!safeEqual(sig, sign(`${epoch}.${issued}`, secret))) return false;
+  if (Number(epoch) !== currentEpoch) return false;
   const age = Date.now() - Number(issued);
   return age >= 0 && age < sessionDays * 86400 * 1000;
 }
@@ -63,6 +85,8 @@ export interface AuthConfig {
   appSecret: string;
   apiToken: string;
   sessionDays: number;
+  /** Current session epoch; cookies issued under any other epoch are refused. */
+  sessionEpoch: () => number;
 }
 
 export function isAuthed(req: IncomingMessage, config: AuthConfig): boolean {
@@ -73,7 +97,12 @@ export function isAuthed(req: IncomingMessage, config: AuthConfig): boolean {
 }
 
 export function isBrowserAuthed(req: IncomingMessage, config: AuthConfig): boolean {
-  return verifySession(parseCookies(req).get('alt_session'), config.appSecret, config.sessionDays);
+  return verifySession(
+    parseCookies(req).get('alt_session'),
+    config.appSecret,
+    config.sessionDays,
+    config.sessionEpoch()
+  );
 }
 
 /**
