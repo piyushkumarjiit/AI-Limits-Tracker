@@ -156,10 +156,10 @@ export function setHostResolver(fn: HostResolver | null): void {
  * not detected; closing that would need a custom connection agent.
  */
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new Error('Request timed out'));
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(new Error('Request timed out'));
     signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
     promise.then(
       (value) => {
         signal.removeEventListener('abort', onAbort);
