@@ -36,7 +36,8 @@ function isLowEntropy(value: string): boolean {
 
 /**
  * Problems that must stop startup even when `ALLOW_WEAK_SECRETS=1` is set: a
- * missing password or session secret can never be downgraded to a warning.
+ * missing password or session secret and an out-of-range SESSION_DAYS can never
+ * be downgraded to a warning.
  */
 export function validateFatalConfig(env: Env): string[] {
   const fatal: string[] = [];

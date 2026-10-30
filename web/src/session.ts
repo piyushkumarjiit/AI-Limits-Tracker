@@ -8,7 +8,8 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
  */
 export function isInsecureContext(protocol: string, hostname: string): boolean {
   if (protocol !== 'http:') return false;
-  return !LOOPBACK_HOSTS.has(String(hostname || '').trim().toLowerCase());
+  const host = String(hostname || '').trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  return !LOOPBACK_HOSTS.has(host);
 }
 
 /** True for the current page. */

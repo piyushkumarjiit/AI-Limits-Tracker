@@ -359,6 +359,10 @@ async function runAllTests() {
     assert(!isInsecureContext('http:', 'localhost'), 'Banner: loopback localhost is not flagged');
     assert(!isInsecureContext('http:', '127.0.0.1'), 'Banner: loopback 127.0.0.1 is not flagged');
     assert(!isInsecureContext('http:', '::1'), 'Banner: loopback ::1 is not flagged');
+    assert(
+      !isInsecureContext('http:', new URL('http://[::1]:8795/').hostname),
+      'Banner: the browser-serialized IPv6 loopback [::1] is not flagged'
+    );
     assert(!isInsecureContext('https:', 'example.com'), 'Banner: HTTPS is never flagged');
     assert(!isInsecureContext('https:', 'localhost'), 'Banner: HTTPS on loopback is never flagged');
   }
