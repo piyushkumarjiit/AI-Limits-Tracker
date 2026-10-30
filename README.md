@@ -102,9 +102,13 @@ The image is a two-stage build: Expo/TypeScript tooling stays in the build stage
 **Offline / air-gapped transfer** — build once, then move the image:
 
 ```bash
-# Caddy modes need the Caddy image too (run `docker pull caddy:2.10-alpine` first if you only built);
-# direct mode needs the app image alone.
+# Direct mode: the app image alone.
+docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest | gzip > ai-limits-tracker.tar.gz
+
+# Caddy modes (public/internal): pull Caddy if you only built the app, then save both.
+docker pull caddy:2.10-alpine
 docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest caddy:2.10-alpine | gzip > ai-limits-tracker.tar.gz
+
 scp ai-limits-tracker.tar.gz user@node:/tmp/
 # on the target node:
 gunzip -c /tmp/ai-limits-tracker.tar.gz | docker load
