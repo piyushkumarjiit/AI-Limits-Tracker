@@ -157,6 +157,14 @@ npm test
 npm run typecheck:all
 ```
 
+### What CI enforces
+
+- **CI** (`.github/workflows/ci.yml`, on pull requests and pushes to `main`): `npm ci`, `npm run typecheck:all`, `npm test`, and `npm audit --omit=dev --audit-level=high` (fails on high/critical advisories). Superseded runs are cancelled.
+- **Semgrep** scans every PR and push to `main`.
+- **Image publish** (`docker-publish.yml`) runs the CI workflow first and only publishes if it passes. It builds and scans every published platform (`linux/amd64` and `linux/arm64`) with Trivy (fails on fixed HIGH/CRITICAL findings; unfixed ones are ignored), then pushes a multi-arch image, attaches build provenance and SBOM attestations, and signs it with keyless cosign. The scan skips the Node toolchain bundled with the `node:22-alpine` base image (`/usr/local/lib/node_modules/npm`, `/usr/local/lib/node_modules/corepack`, `/usr/local/lib/node_modules/yarn` and `/opt/yarn-v1.22.22`) because it is not part of the runtime application surface; application files under `/app` are still scanned. Updating the node base image is the real fix for those toolchain advisories and should be tracked separately.
+- The Semgrep workflow runs independently on pull requests and pushes to `main`; it does not gate publishing.
+- **Dependabot** opens weekly grouped updates for npm (root and `server`), GitHub Actions and Docker. Actions are pinned to commit SHAs.
+
 ## A note on account safety
 
 This tool only **reads** your usage — it never generates anything, so it puts no load on your quota. It polls every few minutes (configurable). Using automated access to these services is a grey area under their terms; the risk is low but not zero. Keep the poll interval reasonable and secure the device that holds your tokens. You use it at your own responsibility.
