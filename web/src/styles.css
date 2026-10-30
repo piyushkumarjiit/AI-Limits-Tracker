@@ -158,6 +158,8 @@ button.card:active { transform: scale(0.985); background: #f7f6f2; }
 .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--track); border-top-color: var(--ink); animation: spin 0.8s linear infinite; }
 
 .login { min-height: 100vh; display: grid; place-items: center; padding: 18px; }
+.login-notice { width: min(380px, 100%); }
+.login-notice .insecure-banner { margin-bottom: 0; }
 .login-card { max-width: 380px; display: flex; flex-direction: column; gap: 14px; padding: 28px; text-align: center; }
 .login-card h1 { font-size: 24px; letter-spacing: -0.6px; }
 .login-logos { display: flex; justify-content: center; gap: 10px; }
@@ -199,6 +201,8 @@ button.card:active { transform: scale(0.985); background: #f7f6f2; }
 
 .identity { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
 .acc-title { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.insecure-banner { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--bad); background: var(--bad-soft); color: #991b1b; margin-bottom: 14px; font-size: 13px; line-height: 1.45; }
+.insecure-banner b { display: block; margin-bottom: 2px; }
 .alert-box { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--warn); background: var(--card); margin-bottom: 14px; font-size: 13px; }
 .alert-box.bad { border-color: var(--bad); }
 .alert-box .grow { display: flex; flex-direction: column; gap: 2px; }

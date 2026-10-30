@@ -9,7 +9,9 @@ import {
   DEFAULT_SESSION_DAYS,
   isAuthed,
   isBrowserAuthed,
+  parseSessionEpoch,
   safeEqual,
+  SESSION_EPOCH_KEY,
   UNSAFE_KEYS,
 } from './auth';
 import { serveStatic } from './static';
@@ -23,7 +25,7 @@ export interface AppConfig {
   secureCookies: boolean;
   trustProxy: boolean;
   webDir: string;
-  /** Session lifetime in days. Defaults to 180. */
+  /** Session lifetime in days. Defaults to 30. */
   sessionDays?: number;
   /** Whether the Telegram alert channel is configured. */
   telegram?: boolean;
@@ -158,6 +160,29 @@ function sameOrigin(origin: string, hostHeader: string): boolean {
 
 const ALL_PROVIDERS: ProviderType[] = [...NATIVE_PROVIDERS, ...RECIPE_PROVIDERS, 'custom'];
 
+/** Current session epoch, read from the settings table (absent means 0). */
+function readSessionEpoch(store: Store): number {
+  return parseSessionEpoch(store.getSetting(SESSION_EPOCH_KEY));
+}
+
+/** Ends every previously issued session by moving the epoch forward. */
+function bumpSessionEpoch(store: Store): number {
+  const next = readSessionEpoch(store) + 1;
+  store.setSetting(SESSION_EPOCH_KEY, String(next));
+  return next;
+}
+
+function clearedSessionCookie(config: AppConfig): string {
+  return [
+    'alt_session=',
+    'Path=/',
+    'HttpOnly',
+    ...(config.secureCookies ? ['Secure'] : []),
+    'SameSite=Lax',
+    'Max-Age=0',
+  ].join('; ');
+}
+
 /* ---------------- Routes ---------------- */
 
 async function handleApi(
@@ -197,24 +222,12 @@ async function handleApi(
     }
     limiter.reset(ip);
     const cookie = [
-      `alt_session=${createSession(auth.appSecret)}`,
+      `alt_session=${createSession(auth.appSecret, auth.sessionEpoch())}`,
       'Path=/',
       'HttpOnly',
       ...(config.secureCookies ? ['Secure'] : []),
       'SameSite=Lax',
       `Max-Age=${auth.sessionDays * 86400}`,
-    ].join('; ');
-    return send(res, 200, { ok: true }, { 'Set-Cookie': cookie });
-  }
-
-  if (path === '/api/logout' && method === 'POST') {
-    const cookie = [
-      'alt_session=',
-      'Path=/',
-      'HttpOnly',
-      ...(config.secureCookies ? ['Secure'] : []),
-      'SameSite=Lax',
-      'Max-Age=0',
     ].join('; ');
     return send(res, 200, { ok: true }, { 'Set-Cookie': cookie });
   }
@@ -233,6 +246,17 @@ async function handleApi(
     }
   } else if (!isAuthed(req, auth)) {
     return send(res, 401, { error: 'unauthorized' });
+  }
+
+  if (path === '/api/logout' && method === 'POST') {
+    return send(res, 200, { ok: true }, { 'Set-Cookie': clearedSessionCookie(config) });
+  }
+
+  if (path === '/api/sessions/revoke-all' && method === 'POST') {
+    // Every cookie issued under an older epoch stops verifying at once, including
+    // the caller's own; the response also clears it so the browser forgets it.
+    bumpSessionEpoch(store);
+    return send(res, 200, { ok: true }, { 'Set-Cookie': clearedSessionCookie(config) });
   }
 
   if (path === '/api/state' && method === 'GET') {
@@ -389,6 +413,7 @@ export function createApp(config: AppConfig, deps: AppDeps) {
     appSecret: config.appSecret,
     apiToken: config.apiToken,
     sessionDays: config.sessionDays ?? DEFAULT_SESSION_DAYS,
+    sessionEpoch: () => readSessionEpoch(deps.store),
   };
   const limiter = createLoginLimiter();
   const bearerLimiter = createLoginLimiter();
