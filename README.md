@@ -87,11 +87,11 @@ docker compose --profile internal cp caddy-internal:/data/caddy/pki/authorities/
 
 Import `caddy-root.crt` into the device's trust store (Windows: *certmgr* → Trusted Root Certification Authorities; macOS: Keychain Access → System → Always Trust; Debian/Ubuntu: copy to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`; Firefox keeps its own store under Settings → Certificates). Keep `caddy_data` — it holds the CA key; recreating it issues a new root you must trust again.
 
-**Mode 3 — Caddy off (`--profile direct`).** Starts only the app, published on `${PORT:-1455}` as before, with `TRUST_PROXY` taken from `.env` (default `0`). Put your own TLS-terminating reverse proxy in front (see [`deploy/nginx.conf`](deploy/nginx.conf)) and set `TRUST_PROXY=1` only if it sets `X-Real-IP`. Without HTTPS only `http://localhost` works.
+**Mode 3 — Caddy off (`--profile direct`).** Starts only the app, published on `${PORT:-1455}` as before, with `TRUST_PROXY` taken from `.env` (default `0`). Put your own TLS-terminating reverse proxy in front; [`deploy/nginx.conf`](deploy/nginx.conf) is the systemd deployment's vhost, so for direct mode change its `proxy_pass` to the published port (`http://127.0.0.1:1455` by default). Set `TRUST_PROXY=1` only if your proxy sets `X-Real-IP`. Without HTTPS only `http://localhost` works.
 
 **Docker inside an LXC container.** The LXC needs nesting enabled on the host (Proxmox: Options → Features → *nesting*; or `lxc config set <name> security.nesting true`), otherwise Docker cannot start containers. Caddy binds 80/443 inside the Docker network namespace, so no extra LXC privileges are needed beyond that.
 
-Host ports are configurable with `HTTP_PORT`, `HTTPS_PORT` (Caddy) and `PORT` (direct mode).
+Host ports are configurable with `HTTP_PORT`, `HTTPS_PORT` (Caddy) and `PORT` (direct mode). In public mode leave `HTTP_PORT` and `HTTPS_PORT` at 80/443: Let's Encrypt validates and renews on those ports.
 
 The image is a two-stage build: Expo/TypeScript tooling stays in the build stage, and the runtime image contains only the compiled server bundle (zero runtime dependencies) and the web panel. It runs as a non-root user with a read-only root filesystem, all capabilities dropped and `no-new-privileges`. Only `/app/data` is writable — that is where the SQLite database lives.
 
@@ -100,11 +100,13 @@ The image is a two-stage build: Expo/TypeScript tooling stays in the build stage
 **Offline / air-gapped transfer** — build once, then move the image:
 
 ```bash
-docker save ai-limits-tracker:latest | gzip > ai-limits-tracker.tar.gz
+# Caddy modes need the Caddy image too (run `docker pull caddy:2.10-alpine` first if you only built);
+# direct mode needs the app image alone.
+docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest caddy:2.10-alpine | gzip > ai-limits-tracker.tar.gz
 scp ai-limits-tracker.tar.gz user@node:/tmp/
 # on the target node:
 gunzip -c /tmp/ai-limits-tracker.tar.gz | docker load
-docker compose up -d --no-build
+docker compose --profile public up -d --no-build   # use --profile internal or direct instead as needed
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` by [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) on every push to `main` and on `v*` tags.
@@ -172,10 +174,10 @@ src/app/        mobile app screens (Expo Router)
 server/         self-hosted Node server + API  (server/src)
 web/            web panel — React PWA           (web/src)
 extension/      Chrome MV3 extension            (extension/src)
-deploy/         systemd unit, nginx vhost, deploy script
+deploy/         systemd unit, nginx vhost, deploy script, Caddyfiles for the Docker profiles
 ```
 
-Run the test suites (multi-account isolation, token refresh, parsing, honest statuses, plus the server's auth and HTTP security tests — `npm run test:security` runs only the latter):
+Run the test suites (multi-account isolation, token refresh, parsing, honest statuses, the server's auth and HTTP security tests, and the Docker deploy-config checks — `npm run test:security` runs only the last two):
 
 ```bash
 npm test
