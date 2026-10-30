@@ -3,7 +3,7 @@
 {$SITE_ADDRESS} {
 	encode zstd gzip
 
-	reverse_proxy ai-limits-tracker:1455 {
+	reverse_proxy ai-limits-tracker-web:1455 {
 		# Overwrite anything the client sent: the app trusts these headers (TRUST_PROXY=1).
 		header_up X-Real-IP {remote_host}
 		header_up X-Forwarded-Proto {scheme}

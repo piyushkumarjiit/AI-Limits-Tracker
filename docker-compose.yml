@@ -4,8 +4,9 @@
 #   docker compose --profile internal up -d   # Caddy + internal CA   (SITE_ADDRESS = LAN IP / name)
 #   docker compose --profile direct   up -d   # Caddy off: app port published (own reverse proxy)
 #
-# (Or set COMPOSE_PROFILES=public|internal|direct in .env and run `docker compose up -d`.)
 # The panel's login cookie is Secure, so any non-localhost deployment needs HTTPS.
+# Pick one profile. COMPOSE_PROFILES in the environment is additive and must not be
+# mixed with --profile: both would start, and both modes bind host 80/443 and ./data.
 
 x-app-base: &app-base
   image: ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
@@ -34,15 +35,19 @@ x-app-base: &app-base
 
 services:
   # Caddy modes: reachable only through Caddy, never published to the host.
-  ai-limits-tracker:
+  # New name: direct mode keeps `ai-limits-tracker` so existing deployments are
+  # not orphaned by a rename.
+  ai-limits-tracker-web:
     <<: *app-base
     profiles: ["public", "internal"]
     environment:
       # Caddy sets X-Real-IP / X-Forwarded-Proto, so trust them.
       TRUST_PROXY: "1"
+      # Listen port is fixed inside the container; PORT only moves the host port.
+      PORT: "1455"
 
   # Caddy off: original behaviour, app port published on the host.
-  ai-limits-tracker-direct:
+  ai-limits-tracker:
     <<: *app-base
     profiles: ["direct"]
     ports:
@@ -50,13 +55,14 @@ services:
     environment:
       # Set TRUST_PROXY=1 only when your own reverse proxy sets X-Real-IP.
       TRUST_PROXY: "${TRUST_PROXY:-0}"
+      PORT: "1455"
 
   caddy-public:
     &caddy-base
     image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     profiles: ["public"]
     depends_on:
-      - ai-limits-tracker
+      - ai-limits-tracker-web
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
