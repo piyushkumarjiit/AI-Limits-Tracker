@@ -91,6 +91,12 @@ if (!hasDocker) {
     assert(!j.services?.['ai-limits-tracker'], `${p}: only one app service runs (direct mode's name not selected)`);
     assert(!app.ports, `${p}: app port not published`);
     assert(app.environment?.TRUST_PROXY === '1' && app.environment?.PORT === '1455', `${p}: TRUST_PROXY=1, fixed container port`);
+    const caddyfile = (caddy.volumes ?? []).filter((v: any) => v.target === '/etc/caddy/Caddyfile');
+    assert(
+      caddyfile.length === 1 && caddyfile[0].type === 'bind' && caddyfile[0].source?.endsWith(`/deploy/caddy/Caddyfile.${p}`),
+      `${p}: caddy mounts the ${p} Caddyfile`,
+      JSON.stringify(caddyfile),
+    );
     assert(caddy.ports.length >= 2, `${p}: caddy publishes 80/443`);
     assert(caddy.read_only === true && caddy.cap_drop?.includes('ALL') && caddy.cap_add?.includes('NET_BIND_SERVICE'), `${p}: caddy hardened`);
     assert(caddy.security_opt?.includes('no-new-privileges:true') && !!caddy.mem_limit && !!caddy.pids_limit && !!caddy.logging?.options?.['max-size'], `${p}: caddy limits`);
