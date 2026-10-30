@@ -1,0 +1,12 @@
+# LAN / LXC without a public domain: certificates come from Caddy's own internal CA.
+# SITE_ADDRESS may be a LAN IP or a local name (e.g. 192.168.1.20, tracker.lan, localhost).
+{$SITE_ADDRESS} {
+	tls internal
+	encode zstd gzip
+
+	reverse_proxy ai-limits-tracker:1455 {
+		# Overwrite anything the client sent: the app trusts these headers (TRUST_PROXY=1).
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
