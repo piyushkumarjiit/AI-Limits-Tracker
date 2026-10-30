@@ -269,7 +269,11 @@ async function runAllTests() {
       rejected = true;
     }
     assert(rejected, 'Body over 256 KB is rejected', `got status ${status}`);
-    assert(status === 0 || status === 500, 'Body over 256 KB is a server error, not a login attempt', `got ${status}`);
+    assert(
+      status === 0 || status === 413 || status === 500,
+      'Body over 256 KB is a server error, not a login attempt',
+      `got ${status}`
+    );
   });
 
   console.log('\n========================================');

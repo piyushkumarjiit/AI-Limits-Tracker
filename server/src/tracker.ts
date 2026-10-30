@@ -49,6 +49,12 @@ export class Tracker {
     this.store.pruneHistory(Date.now() - 400 * 86400 * 1000);
   }
 
+  /** Stops the polling timer (shutdown); in-flight syncs are left to finish or be cut by the hard timeout. */
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
   async syncAll(): Promise<void> {
     const accounts = this.store.listAccounts().filter((a) => a.isActive);
     await Promise.allSettled(accounts.map((a) => this.sync(a.id)));
