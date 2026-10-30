@@ -103,6 +103,18 @@ The server reads your limits using a session you export from your browser — no
 
 Paste it into **Add account**. For a second account of the same service, export from a second browser profile / incognito window.
 
+## Security notes
+
+- The server requires `ADMIN_PASSWORD` and `APP_SECRET`. Generate each with `openssl rand -hex 32`; the server refuses to start when either is missing or still an example placeholder, and rejects a short or predictable `APP_SECRET`.
+- `API_TOKEN` is optional: a long-lived bearer token for scripts that cannot log in through the form.
+- `SESSION_DAYS` sets the session cookie lifetime (default 30 days). `POST /api/sessions/revoke-all` ends every existing session at once.
+- `ALLOWED_HOSTS` limits which `Host` headers are accepted. Set `TRUST_PROXY=1` when a reverse proxy sits in front so rate limiting sees real client IPs.
+- Run the panel behind HTTPS only — terminate TLS at a proxy in front of it — and do not expose it on a network you do not trust.
+- The database directory is created with mode `0700` and the database files with `0600`; keep them owned by the user that runs the server.
+- Client-facing errors are short and fixed; the exceptions behind them are logged on the server, never returned.
+- Outbound requests are restricted to `https`, checked against private and reserved addresses (including redirects), and capped at 1 MB.
+- Restarting the process clears the in-memory login throttle.
+
 ## Mobile app
 
 ```bash

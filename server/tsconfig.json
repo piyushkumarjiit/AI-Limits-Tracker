@@ -9,5 +9,5 @@
     "types": ["node"],
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["src/**/*.ts", "../tests/security_tests.ts", "../tests/security_hardening_tests.ts"]
+  "include": ["src/**/*.ts", "../tests/security_tests.ts", "../tests/security_hardening_tests.ts", "../tests/final_hardening_tests.ts"]
 }
