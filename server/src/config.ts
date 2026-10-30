@@ -75,8 +75,9 @@ export function resolveSessionDays(env: Env, fallback: number): number {
 
 /**
  * Every problem that must stop startup. `ALLOW_WEAK_SECRETS=1` downgrades these
- * to warnings for operators who know what they are doing, except the empty
- * secrets reported by `validateFatalConfig`, which stay fatal.
+ * to warnings for operators who know what they are doing, except the problems
+ * reported by `validateFatalConfig` (empty secrets, invalid SESSION_DAYS), which
+ * stay fatal.
  */
 export function validateConfig(env: Env): string[] {
   const errors: string[] = [];
