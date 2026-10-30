@@ -681,6 +681,33 @@ async function testGeminiOversizedPage() {
   }
 }
 
+async function testGeminiFetchFailure() {
+  console.log('\n[12] Gemini: app page fetch failure surfaces an error');
+
+  const realFetch = globalThis.fetch;
+  setHostResolver(null);
+  globalThis.fetch = (async () => {
+    throw new Error('Host could not be resolved');
+  }) as unknown as typeof fetch;
+  try {
+    const credentials: AccountCredentials = { cookies: '__Secure-1PSID=secret' };
+    const result = await new GeminiProvider().fetchUsage('gemini-acct', credentials);
+    assert(
+      result.snapshot.status === 'error',
+      'Gemini: an app page fetch failure is reported as an error, not reauth_required',
+      result.snapshot.status
+    );
+    assert(
+      /could not be resolved/i.test(result.snapshot.errorMessage ?? ''),
+      'Gemini: the app page fetch failure message is surfaced',
+      result.snapshot.errorMessage
+    );
+  } finally {
+    setHostResolver(null);
+    globalThis.fetch = realFetch;
+  }
+}
+
 /* ---------------- Runner ---------------- */
 
 async function runAllTests() {
@@ -699,6 +726,7 @@ async function runAllTests() {
   await testErrorHygiene();
   testDatabasePermissions();
   await testGeminiOversizedPage();
+  await testGeminiFetchFailure();
 
   console.log('\n========================================');
   console.log(`SUMMARY: Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`);

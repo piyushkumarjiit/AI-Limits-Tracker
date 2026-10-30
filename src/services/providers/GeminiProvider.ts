@@ -140,37 +140,32 @@ export class GeminiProvider implements UsageProvider {
     try {
       // 1. If atToken is missing, fetch gemini app page to extract SNlM0e
       if (!atToken) {
-        let pageResp: Response | undefined;
-        try {
-          pageResp = await isolatedFetch('https://gemini.google.com/app', {
-            headers: reqHeaders,
-          });
-        } catch {}
-        if (pageResp) {
-          if (pageResp.status === 401 || pageResp.status === 403 || pageResp.redirected) {
-            return {
-              snapshot: {
-                accountId,
-                providerType: 'gemini',
-                planName: 'Gemini',
-                status: 'reauth_required',
-                errorMessage: 'Google Gemini session expired — refresh the cookies',
-                fetchedAt: nowIso,
-                buckets: [],
-              },
-            };
-          }
-
-          const html = await readTextSafe(pageResp);
-          const atMatch = /"SNlM0e"\s*:\s*"([^"]+)"/.exec(html) || /"(AFWLbD[^"]+)"/.exec(html);
-          if (atMatch) atToken = atMatch[1];
-
-          const blMatch = /"cfb2h"\s*:\s*"([^"]+)"/.exec(html);
-          if (blMatch) bl = blMatch[1];
-
-          const sidMatch = /"FdrFJe"\s*:\s*"(-?\d+)"/.exec(html);
-          if (sidMatch) sid = sidMatch[1];
+        const pageResp = await isolatedFetch('https://gemini.google.com/app', {
+          headers: reqHeaders,
+        });
+        if (pageResp.status === 401 || pageResp.status === 403 || pageResp.redirected) {
+          return {
+            snapshot: {
+              accountId,
+              providerType: 'gemini',
+              planName: 'Gemini',
+              status: 'reauth_required',
+              errorMessage: 'Google Gemini session expired — refresh the cookies',
+              fetchedAt: nowIso,
+              buckets: [],
+            },
+          };
         }
+
+        const html = await readTextSafe(pageResp);
+        const atMatch = /"SNlM0e"\s*:\s*"([^"]+)"/.exec(html) || /"(AFWLbD[^"]+)"/.exec(html);
+        if (atMatch) atToken = atMatch[1];
+
+        const blMatch = /"cfb2h"\s*:\s*"([^"]+)"/.exec(html);
+        if (blMatch) bl = blMatch[1];
+
+        const sidMatch = /"FdrFJe"\s*:\s*"(-?\d+)"/.exec(html);
+        if (sidMatch) sid = sidMatch[1];
       }
 
       if (!atToken) {
