@@ -20,8 +20,54 @@ jobs:
     permissions:
       contents: read
 
-  publish:
+  # Scans every platform that publish ships, since each variant resolves its own base layers.
+  scan:
     needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
+    steps:
+      # Actions are pinned to commit SHAs (immutable); the trailing comment is the release tag.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # Build locally (not pushed) so the image can be scanned before it is published.
+      - name: Build image for scanning
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          tags: ait-scan:${{ github.sha }}-${{ matrix.arch }}
+          cache-from: type=gha
+
+      # Fails on fixed HIGH/CRITICAL vulnerabilities; unfixed ones are ignored.
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ait-scan:${{ github.sha }}-${{ matrix.arch }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: "1"
+          format: table
+
+  publish:
+    needs: [checks, scan]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -56,29 +102,6 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
-
-      # Build locally (not pushed) so the image can be scanned before it is published.
-      - name: Build image for scanning
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: ait-scan:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Fails on fixed HIGH/CRITICAL vulnerabilities; unfixed ones are ignored.
-      - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
-        with:
-          image-ref: ait-scan:${{ github.sha }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          vuln-type: os,library
-          exit-code: "1"
-          format: table
 
       - name: Build and push
         id: push
