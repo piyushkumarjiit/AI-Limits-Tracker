@@ -71,6 +71,8 @@ docker compose --profile direct   up -d   # mode 3: Caddy off, your own reverse 
 
 You must pick one profile: a plain `docker compose up -d` starts nothing. Select it with `--profile`; `COMPOSE_PROFILES` in the environment is additive and must not be mixed with it (both modes would start and collide on host 80/443 and `./data`). Images build locally or are pulled from `ghcr.io/piyushkumarjiit/ai-limits-tracker:latest`.
 
+Switching modes, or upgrading from the earlier single-service compose file: stop the old stack first with `docker compose --profile <old-mode> down` (or `docker compose down --remove-orphans` right after upgrading). Otherwise the previous mode's app container keeps running and polling alongside the new one, both writing `./data`, and a leftover Caddy container keeps host 80/443 so the new one fails with "port is already allocated".
+
 #### Why HTTPS is required
 
 The panel's login cookie is always marked `Secure`. Over plain `http://` on any address other than `localhost`, the browser silently drops it, so login cannot persist (and a non-Secure cookie would travel in clear text anyway). Any real Docker deployment therefore needs TLS in front of the app. The bundled [Caddy](https://caddyserver.com/) service provides it; its config is in [`deploy/caddy/`](deploy/caddy/).
@@ -87,7 +89,7 @@ docker compose --profile internal cp caddy-internal:/data/caddy/pki/authorities/
 
 Import `caddy-root.crt` into the device's trust store (Windows: *certmgr* → Trusted Root Certification Authorities; macOS: Keychain Access → System → Always Trust; Debian/Ubuntu: copy to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`; Firefox keeps its own store under Settings → Certificates). Keep `caddy_data` — it holds the CA key; recreating it issues a new root you must trust again.
 
-**Mode 3 — Caddy off (`--profile direct`).** Starts only the app, published on `${PORT:-1455}` as before, with `TRUST_PROXY` taken from `.env` (default `0`). Put your own TLS-terminating reverse proxy in front; [`deploy/nginx.conf`](deploy/nginx.conf) is the systemd deployment's vhost, so for direct mode change its `proxy_pass` to the published port (`http://127.0.0.1:1455` by default). Set `TRUST_PROXY=1` only if your proxy sets `X-Real-IP`. Without HTTPS only `http://localhost` works.
+**Mode 3 — Caddy off (`--profile direct`).** Starts only the app, published on `${PORT:-1455}` as before, with `TRUST_PROXY` taken from `.env` (default `0`). Put your own TLS-terminating reverse proxy in front; [`deploy/nginx.conf`](deploy/nginx.conf) is the systemd deployment's vhost, so for direct mode change its `proxy_pass` to the published port (`http://127.0.0.1:1455` by default). Set `TRUST_PROXY=1` only if your proxy sets `X-Real-IP`. Without HTTPS only `http://localhost` works. If you are coming from one of the Caddy modes, stop it first (`docker compose --profile <old-mode> down`) so it releases `./data` and host 80/443.
 
 **Docker inside an LXC container.** The LXC needs nesting enabled on the host (Proxmox: Options → Features → *nesting*; or `lxc config set <name> security.nesting true`), otherwise Docker cannot start containers. Caddy binds 80/443 inside the Docker network namespace, so no extra LXC privileges are needed beyond that.
 
