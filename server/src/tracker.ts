@@ -175,8 +175,10 @@ export class Tracker {
           ? await exchangeClaudeCode(parsed.code, parsed.state, pending.verifier, pending.state)
           : await exchangeChatGPTCode(parsed.code, pending.verifier);
       return await this.connect(pending.provider, creds, pending.accountId);
-    } catch (e: any) {
-      return { ok: false, error: e?.message || 'Could not complete sign-in' };
+    } catch (e) {
+      // The exchange error can carry internal detail; keep it in the log only.
+      console.error('oauth/finish failed:', e);
+      return { ok: false, error: 'Could not complete sign-in. Please try again.' };
     }
   }
 

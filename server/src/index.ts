@@ -8,8 +8,12 @@ import {
   validateConfigWarnings,
   validateFatalConfig,
 } from './config';
+import { installServerNetworking } from './net';
 import { Store } from './store';
 import { Tracker } from './tracker';
+
+// Server-only SSRF guard: resolve hostnames and cap outbound response bodies.
+installServerNetworking();
 
 // Last line of defence: a rejected promise or a stray throw must be logged, never
 // allowed to take the whole panel (and everyone's sessions) offline. Error objects

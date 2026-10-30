@@ -283,8 +283,10 @@ async function handleApi(
     const { provider, accountId } = await readBody(req);
     try {
       return send(res, 200, tracker.startOAuth(provider, accountId));
-    } catch (e: any) {
-      return send(res, 400, { error: e.message });
+    } catch (e) {
+      // Exception text is for the log, not the client.
+      console.error('oauth/start failed:', e);
+      return send(res, 400, { error: 'Could not start sign-in' });
     }
   }
 

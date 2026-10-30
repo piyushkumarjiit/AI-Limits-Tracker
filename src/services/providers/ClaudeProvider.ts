@@ -1,5 +1,5 @@
 import { AccountCredentials, QuotaBucket, UsageSnapshot } from '../../models/types';
-import { isolatedFetch, readJsonSafe } from '../http';
+import { isolatedFetch, readJsonSafe, readTextSafe } from '../http';
 import {
   CLAUDE_OAUTH,
   fetchClaudeProfile,
@@ -229,7 +229,7 @@ export class ClaudeProvider implements UsageProvider {
 
     const orgResp = await isolatedFetch('https://claude.ai/api/organizations', { headers });
     if (orgResp.status === 401 || orgResp.status === 403) {
-      const text = await orgResp.text();
+      const text = await readTextSafe(orgResp);
       const cf = /cloudflare|challenge/i.test(text);
       return {
         snapshot: failureSnapshot(

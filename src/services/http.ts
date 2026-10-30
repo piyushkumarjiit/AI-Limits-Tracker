@@ -11,21 +11,61 @@
 function isPrivateIPv4(host: string): boolean {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (!m) return false;
-  const [a, b] = [Number(m[1]), Number(m[2])];
+  const [a, b, c] = [Number(m[1]), Number(m[2]), Number(m[3])];
   return (
+    // 0.0.0.0/8, RFC 1918, loopback, CGNAT, link-local
     a === 0 ||
     a === 10 ||
     a === 127 ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127)
+    (a === 100 && b >= 64 && b <= 127) ||
+    // 198.18.0.0/15 benchmarking, 192.0.0.0/24 IETF protocol assignments
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 192 && b === 0 && c === 0) ||
+    // Documentation ranges: TEST-NET-1/2/3
+    (a === 192 && b === 0 && c === 2) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113) ||
+    // 224.0.0.0/4 multicast, 240.0.0.0/4 reserved (includes 255.255.255.255)
+    (a >= 224 && a <= 239) ||
+    a >= 240
+  );
+}
+
+function isIPv4Literal(host: string): boolean {
+  return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/** IPv6 literal check; the input is already lowercased and stripped of brackets. */
+function isBlockedIPv6(host: string): boolean {
+  return (
+    host === '::1' || // loopback
+    host === '::' || // unspecified
+    /^f[cd]/.test(host) || // unique-local fc00::/7
+    /^fe[89ab]/.test(host) || // link-local fe80::/10
+    host.startsWith('::ffff:') // IPv4-mapped, dotted or hex form
   );
 }
 
 /**
- * SSRF guard: only https, and never localhost, loopback, link-local or
- * private (RFC 1918) addresses. Throws on anything unsafe; returns the parsed URL.
+ * True for an address that must never be connected to: private, loopback,
+ * link-local, multicast, documentation or otherwise reserved. Accepts a bare
+ * IPv4/IPv6 literal, with or without brackets.
+ */
+export function isBlockedAddress(address: string): boolean {
+  const host = address.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (isPrivateIPv4(host)) return true;
+  if (host.includes(':')) return isBlockedIPv6(host);
+  return false;
+}
+
+/**
+ * SSRF guard: only https, and never localhost, loopback, link-local, private
+ * (RFC 1918) or otherwise reserved addresses. Single-label hostnames are
+ * refused so an internal short name cannot be reached. Throws on anything
+ * unsafe; returns the parsed URL.
  */
 export function assertSafeUrl(raw: string): URL {
   let u: URL;
@@ -40,38 +80,166 @@ export function assertSafeUrl(raw: string): URL {
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
     throw new Error('Host is not allowed');
   }
-  if (isPrivateIPv4(host)) throw new Error('Private addresses are not allowed');
-  if (host.includes(':')) {
-    // IPv6 literal: block loopback, unspecified, unique-local, link-local and IPv4-mapped
-    const v4mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
-    if (
-      host === '::1' ||
-      host === '::' ||
-      /^f[cd]/.test(host) ||
-      /^fe[89ab]/.test(host) ||
-      host.startsWith('::ffff:') ||
-      (v4mapped && isPrivateIPv4(v4mapped[1]))
-    ) {
-      throw new Error('Private addresses are not allowed');
-    }
+  // A single-label name has no public suffix to anchor it to the internet.
+  if (!host.includes('.') && !host.includes(':') && !isIPv4Literal(host)) {
+    throw new Error('Host must be a fully qualified domain name');
   }
+  if (isBlockedAddress(host)) throw new Error('Private addresses are not allowed');
   return u;
 }
 
+/**
+ * Optional DNS resolver, installed by the server at startup. Mobile and the
+ * extension leave it unset, so they connect to whatever the platform resolves.
+ */
+export type HostResolver = (hostname: string) => Promise<string[]>;
+let hostResolver: HostResolver | null = null;
+
+export function setHostResolver(fn: HostResolver | null): void {
+  hostResolver = fn;
+}
+
+/**
+ * Refuses a URL whose hostname resolves to any blocked address. IP literals are
+ * already covered by `assertSafeUrl`. Residual risk: the name is resolved once
+ * here and again when the socket connects, so DNS rebinding between the two is
+ * not detected; closing that would need a custom connection agent.
+ */
+async function assertHostResolvesSafe(u: URL): Promise<void> {
+  if (!hostResolver) return;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (isIPv4Literal(host) || host.includes(':')) return;
+  let addresses: string[];
+  try {
+    addresses = await hostResolver(host);
+  } catch {
+    throw new Error('Host could not be resolved');
+  }
+  if (!addresses.length) throw new Error('Host could not be resolved');
+  for (const address of addresses) {
+    if (isBlockedAddress(address)) throw new Error('Host resolves to a private address');
+  }
+}
+
+/** Response bodies above this many bytes are refused (server installs 1 MB). */
+let maxResponseBytes: number | null = null;
+
+export function setMaxResponseBytes(bytes: number | null): void {
+  maxResponseBytes = bytes;
+}
+
+/** Response body exceeded the installed limit. */
+export class ResponseTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`Response exceeded the ${limit} byte limit`);
+    this.name = 'ResponseTooLargeError';
+  }
+}
+
+/** Reads a response body as text, refusing anything above the installed limit. */
+export async function readTextSafe(resp: Response): Promise<string> {
+  const limit = maxResponseBytes;
+  if (limit === null || !resp.body) return resp.text();
+  const reader = resp.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        try {
+          await reader.cancel();
+        } catch {
+          // already closed
+        }
+        throw new ResponseTooLargeError(limit);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 3;
+
+/**
+ * Fetches a URL after passing it through the SSRF guard. Redirects are followed
+ * manually, at most three hops, and every Location is re-checked against the
+ * same guard before it is fetched. Only GET and HEAD are followed.
+ */
 export async function isolatedFetch(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {}
 ): Promise<Response> {
   const { timeoutMs = 15000, ...rest } = init;
-  assertSafeUrl(url);
+  const method = (rest.method || 'GET').toUpperCase();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
-      ...rest,
-      credentials: 'omit',
-      signal: controller.signal,
-    });
+    let current = assertSafeUrl(url);
+    await assertHostResolvesSafe(current);
+    for (let hop = 0; ; hop++) {
+      const resp = await fetch(current.toString(), {
+        ...rest,
+        credentials: 'omit',
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+      if (!REDIRECT_STATUSES.has(resp.status)) {
+        // Callers use `response.redirected` to spot a login/consent page, which
+        // `redirect: 'manual'` no longer sets by itself.
+        if (hop > 0) {
+          try {
+            Object.defineProperty(resp, 'redirected', { value: true, configurable: true });
+          } catch {
+            // Informational only; never fail the request over it.
+          }
+        }
+        return resp;
+      }
+      if (method !== 'GET' && method !== 'HEAD') {
+        try {
+          await resp.body?.cancel();
+        } catch {
+          // already closed
+        }
+        throw new Error('Redirects are not followed for this request method');
+      }
+      if (hop >= MAX_REDIRECTS) {
+        try {
+          await resp.body?.cancel();
+        } catch {
+          // already closed
+        }
+        throw new Error('Too many redirects');
+      }
+      const location = resp.headers.get('location');
+      try {
+        await resp.body?.cancel();
+      } catch {
+        // already closed
+      }
+      if (!location) throw new Error('Redirect without a Location header');
+      let next: URL;
+      try {
+        next = new URL(location, current);
+      } catch {
+        throw new Error('Invalid redirect URL');
+      }
+      current = assertSafeUrl(next.toString());
+      await assertHostResolvesSafe(current);
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -79,9 +247,11 @@ export async function isolatedFetch(
 
 export async function readJsonSafe(resp: Response): Promise<any> {
   try {
-    const text = await resp.text();
+    const text = await readTextSafe(resp);
     return text ? JSON.parse(text) : null;
-  } catch {
+  } catch (e) {
+    // A body over the limit is a real failure, not unparsable JSON.
+    if (e instanceof ResponseTooLargeError) throw e;
     return null;
   }
 }
