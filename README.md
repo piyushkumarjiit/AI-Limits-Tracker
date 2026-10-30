@@ -69,7 +69,7 @@ docker compose --profile internal up -d   # mode 2: LAN / LXC, Caddy internal CA
 docker compose --profile direct   up -d   # mode 3: Caddy off, your own reverse proxy
 ```
 
-You must pick one profile (or set `COMPOSE_PROFILES=public|internal|direct` in `.env`); a plain `docker compose up -d` starts nothing. Images build locally or are pulled from `ghcr.io/piyushkumarjiit/ai-limits-tracker:latest`.
+You must pick one profile: a plain `docker compose up -d` starts nothing. Select it with `--profile`; `COMPOSE_PROFILES` in the environment is additive and must not be mixed with it (both modes would start and collide on host 80/443 and `./data`). Images build locally or are pulled from `ghcr.io/piyushkumarjiit/ai-limits-tracker:latest`.
 
 #### Why HTTPS is required
 
