@@ -105,9 +105,10 @@ The image is a two-stage build: Expo/TypeScript tooling stays in the build stage
 # Direct mode: the app image alone.
 docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest | gzip > ai-limits-tracker.tar.gz
 
-# Caddy modes (public/internal): pull Caddy if you only built the app, then save both.
-docker pull caddy:2.10-alpine
-docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest caddy:2.10-alpine | gzip > ai-limits-tracker.tar.gz
+# Caddy modes (public/internal): pull the exact Caddy build compose pins if you only built the app,
+# then save both. Copy this digest from the `image:` line in docker-compose.yml if it has changed.
+docker pull caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d | gzip > ai-limits-tracker.tar.gz
 
 scp ai-limits-tracker.tar.gz user@node:/tmp/
 # on the target node:
