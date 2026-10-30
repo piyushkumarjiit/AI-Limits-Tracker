@@ -16,6 +16,8 @@ import {
   setHostResolver,
   setMaxResponseBytes,
 } from '../src/services/http';
+import { GeminiProvider } from '../src/services/providers/GeminiProvider';
+import type { AccountCredentials } from '../src/models/types';
 
 const ADMIN_PASSWORD = 'test-admin-password-123';
 const APP_SECRET = 'test-app-secret-0123456789abcdef';
@@ -649,6 +651,36 @@ function testDatabasePermissions() {
   }
 }
 
+/* ---------------- Gemini: oversized app page ---------------- */
+
+async function testGeminiOversizedPage() {
+  console.log('\n[11] Gemini: oversized app page surfaces an error');
+
+  const realFetch = globalThis.fetch;
+  setHostResolver(null);
+  globalThis.fetch = (async () =>
+    new Response('x'.repeat(4096), { status: 200 })) as unknown as typeof fetch;
+  setMaxResponseBytes(1024);
+  try {
+    const credentials: AccountCredentials = { cookies: '__Secure-1PSID=secret' };
+    const result = await new GeminiProvider().fetchUsage('gemini-acct', credentials);
+    assert(
+      result.snapshot.status === 'error',
+      'Gemini: an oversized app page is reported as an error, not reauth_required',
+      result.snapshot.status
+    );
+    assert(
+      /byte limit|too large|exceed/i.test(result.snapshot.errorMessage ?? ''),
+      'Gemini: the error names the oversized response',
+      result.snapshot.errorMessage
+    );
+  } finally {
+    setMaxResponseBytes(null);
+    setHostResolver(null);
+    globalThis.fetch = realFetch;
+  }
+}
+
 /* ---------------- Runner ---------------- */
 
 async function runAllTests() {
@@ -666,6 +698,7 @@ async function runAllTests() {
   await testServerWiring();
   await testErrorHygiene();
   testDatabasePermissions();
+  await testGeminiOversizedPage();
 
   console.log('\n========================================');
   console.log(`SUMMARY: Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`);
