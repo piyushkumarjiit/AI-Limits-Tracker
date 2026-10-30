@@ -19,6 +19,8 @@ export async function notify(title: string, body: string): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: `*${escapeMd(title)}*\n${escapeMd(body)}`, parse_mode: 'MarkdownV2' }),
       redirect: 'error',
+      // A hung Telegram request must not pin a sync (and its socket) forever.
+      signal: AbortSignal.timeout(10000),
     });
   } catch {
     // Alerts must never break a sync

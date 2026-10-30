@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { IncomingMessage } from 'node:http';
+import { isIP } from 'node:net';
 
 /** Session lifetime: 180 days. */
 export const DEFAULT_SESSION_DAYS = 180;
@@ -67,7 +68,7 @@ export interface AuthConfig {
 export function isAuthed(req: IncomingMessage, config: AuthConfig): boolean {
   const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (config.apiToken && bearer && safeEqual(bearer, config.apiToken)) return true;
-  // NOTE: bearer attempts are not counted toward the login limiter; use a long random API_TOKEN.
+  // The API checks a separate per-address and global bearer limiter before calling this.
   return isBrowserAuthed(req, config);
 }
 
@@ -75,26 +76,131 @@ export function isBrowserAuthed(req: IncomingMessage, config: AuthConfig): boole
   return verifySession(parseCookies(req).get('alt_session'), config.appSecret, config.sessionDays);
 }
 
-export interface LoginLimiter {
-  tooManyAttempts(ip: string): boolean;
-  reset(ip: string): void;
+/**
+ * Client address for rate limiting. With `trustProxy` the address comes from the
+ * proxy header (X-Real-IP, else the last X-Forwarded-For hop) — and only when it
+ * looks like an IP, since the header is client-controlled otherwise.
+ */
+export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
+  const socketAddress = req.socket.remoteAddress || '';
+  if (!trustProxy) return socketAddress;
+  const realIp = (req.headers['x-real-ip'] as string | undefined)?.trim();
+  if (realIp && isIP(realIp)) return realIp;
+  const forwarded = req.headers['x-forwarded-for'];
+  const hops = (Array.isArray(forwarded) ? forwarded.join(',') : forwarded || '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+  const last = hops[hops.length - 1];
+  if (last && isIP(last)) return last;
+  return socketAddress;
 }
 
-/** Per-IP login throttle: more than 10 attempts inside 15 minutes is refused. */
-export function createLoginLimiter(): LoginLimiter {
-  const loginAttempts = new Map<string, { count: number; first: number }>();
+export interface LoginLimiterOptions {
+  /** Failed attempts allowed per address inside the window before refusing. */
+  maxPerIp?: number;
+  /** Window in milliseconds for the per-address counter. */
+  windowMs?: number;
+  /** Failed attempts allowed in total inside the window (spoofed-address backstop). */
+  maxGlobal?: number;
+  /** Hard cap on tracked addresses; the oldest entry is evicted first. */
+  maxEntries?: number;
+  /** First retry delay, doubled per consecutive failure. */
+  baseDelayMs?: number;
+  /** Upper bound for the retry delay. */
+  maxDelayMs?: number;
+}
+
+export interface LoginLimiter {
+  /** True when this address is at its own failure ceiling. Does not count as a failure. */
+  tooManyAttempts(ip: string): boolean;
+  /** True when the instance-wide failure ceiling for the current window is reached. */
+  globalExceeded(): boolean;
+  /** Records a failed attempt and returns the new consecutive-failure count. */
+  recordFailure(ip: string): number;
+  /** Clears the per-address window after a successful login. */
+  reset(ip: string): void;
+  /** Exponential backoff for the given consecutive-failure count. */
+  delayMs(failures: number): number;
+}
+
+interface Rec {
+  count: number;
+  last: number;
+}
+
+const FIFTEEN_MINUTES = 15 * 60 * 1000;
+
+/**
+ * Failure-only throttle: 10 failed attempts per address inside 15 minutes, plus a
+ * global 60-failure ceiling so rotating spoofed addresses still hits a wall. Callers
+ * check both ceilings before any credential is compared, so a tripped ceiling refuses
+ * even valid credentials for up to the window (a restart clears the in-memory
+ * counters). Successful logins reset the address; expired records are pruned
+ * on every call and the map is capped so it cannot grow without bound.
+ */
+export function createLoginLimiter(opts: LoginLimiterOptions = {}): LoginLimiter {
+  const maxPerIp = opts.maxPerIp ?? 10;
+  const windowMs = opts.windowMs ?? FIFTEEN_MINUTES;
+  const maxGlobal = opts.maxGlobal ?? 60;
+  const maxEntries = opts.maxEntries ?? 10_000;
+  const baseDelayMs = opts.baseDelayMs ?? 100;
+  const maxDelayMs = opts.maxDelayMs ?? 2000;
+
+  const attempts = new Map<string, Rec>();
+  let globalWindowStart = Date.now();
+  let globalCount = 0;
+
+  function prune(now: number): void {
+    for (const [key, rec] of attempts) {
+      if (now - rec.last > windowMs) attempts.delete(key);
+    }
+    if (now - globalWindowStart > windowMs) {
+      globalWindowStart = now;
+      globalCount = 0;
+    }
+  }
+
   function tooManyAttempts(ip: string): boolean {
     const now = Date.now();
-    const rec = loginAttempts.get(ip);
-    if (!rec || now - rec.first > 15 * 60 * 1000) {
-      loginAttempts.set(ip, { count: 1, first: now });
-      return false;
+    prune(now);
+    const rec = attempts.get(ip);
+    return Boolean(rec && rec.count >= maxPerIp);
+  }
+
+  function globalExceeded(): boolean {
+    prune(Date.now());
+    return globalCount >= maxGlobal;
+  }
+
+  function recordFailure(ip: string): number {
+    const now = Date.now();
+    prune(now);
+    let rec = attempts.get(ip);
+    if (!rec) {
+      // Cap the map: Map iteration order is insertion order, so this drops the oldest address.
+      while (attempts.size >= maxEntries) {
+        const oldest = attempts.keys().next();
+        if (oldest.done) break;
+        attempts.delete(oldest.value);
+      }
+      rec = { count: 0, last: now };
+      attempts.set(ip, rec);
     }
     rec.count++;
-    return rec.count > 10;
+    rec.last = now;
+    globalCount++;
+    return rec.count;
   }
+
   function reset(ip: string): void {
-    loginAttempts.delete(ip);
+    attempts.delete(ip);
   }
-  return { tooManyAttempts, reset };
+
+  function delayMs(failures: number): number {
+    if (failures <= 0) return 0;
+    return Math.min(maxDelayMs, baseDelayMs * 2 ** (failures - 1));
+  }
+
+  return { tooManyAttempts, globalExceeded, recordFailure, reset, delayMs };
 }
