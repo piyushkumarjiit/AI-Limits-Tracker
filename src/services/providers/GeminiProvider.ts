@@ -4,7 +4,7 @@ import {
   QuotaBucket,
   UsageSnapshot,
 } from '../../models/types';
-import { isolatedFetch } from '../http';
+import { isolatedFetch, readTextSafe } from '../http';
 import { ProviderFetchResult, UsageProvider } from './UsageProvider';
 
 const GEMINI_HEADERS = {
@@ -158,7 +158,7 @@ export class GeminiProvider implements UsageProvider {
             };
           }
 
-          const html = await pageResp.text();
+          const html = await readTextSafe(pageResp);
           const atMatch = /"SNlM0e"\s*:\s*"([^"]+)"/.exec(html) || /"(AFWLbD[^"]+)"/.exec(html);
           if (atMatch) atToken = atMatch[1];
 
@@ -242,7 +242,7 @@ export class GeminiProvider implements UsageProvider {
         };
       }
 
-      const responseText = await rpcResp.text();
+      const responseText = await readTextSafe(rpcResp);
       const chunks = parseBatchexecuteChunks(responseText);
       const match = chunks.find(([id]) => id === USAGE_RPC_ID);
 

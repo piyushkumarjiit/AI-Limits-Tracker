@@ -1,12 +1,24 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
 import type { AccountCredentials, AccountEntity, AlertKind, AlertLogEntry, UsageSnapshot } from '../../src/models/types';
 import type { StatPoint } from '../../src/services/stats';
 
 export interface ServerAccount extends AccountEntity {
   latestSnapshot?: UsageSnapshot;
+}
+
+/**
+ * Narrows a file or directory mode, best effort: some filesystems (network
+ * mounts, Windows-backed volumes) refuse chmod, and that must not stop startup.
+ */
+function restrict(path: string, mode: number): void {
+  try {
+    chmodSync(path, mode);
+  } catch (e) {
+    console.warn(`[store] could not set mode ${mode.toString(8)} on ${path}: ${(e as Error).message}`);
+  }
 }
 
 /** Credentials are encrypted at rest with AES-256-GCM; the key comes from APP_SECRET. */
@@ -50,7 +62,12 @@ export class Store {
     const path = resolve(base, fileName);
     // Confine the database file to the data directory (no traversal, no null bytes)
     if (`${baseDir}${fileName}`.includes('\0') || !path.startsWith(base + sep)) throw new Error('Invalid database path');
-    mkdirSync(dirname(path), { recursive: true });
+    const dir = dirname(path);
+    // The database holds encrypted credentials, so keep it private to the user
+    // running the server. `mode` only applies on creation, so narrow an existing
+    // directory too.
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    restrict(dir, 0o700);
     this.db = new DatabaseSync(path);
     this.vault = new Vault(secret);
     this.db.exec(`
@@ -94,6 +111,11 @@ export class Store {
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    // SQLite creates these with the process umask; the WAL/SHM siblings appear
+    // once the journal is enabled. Tighten whichever exist now.
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      if (existsSync(file)) restrict(file, 0o600);
+    }
   }
 
   private rowToAccount(r: any): ServerAccount {
