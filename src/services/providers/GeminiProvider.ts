@@ -140,10 +140,13 @@ export class GeminiProvider implements UsageProvider {
     try {
       // 1. If atToken is missing, fetch gemini app page to extract SNlM0e
       if (!atToken) {
+        let pageResp: Response | undefined;
         try {
-          const pageResp = await isolatedFetch('https://gemini.google.com/app', {
+          pageResp = await isolatedFetch('https://gemini.google.com/app', {
             headers: reqHeaders,
           });
+        } catch {}
+        if (pageResp) {
           if (pageResp.status === 401 || pageResp.status === 403 || pageResp.redirected) {
             return {
               snapshot: {
@@ -167,7 +170,7 @@ export class GeminiProvider implements UsageProvider {
 
           const sidMatch = /"FdrFJe"\s*:\s*"(-?\d+)"/.exec(html);
           if (sidMatch) sid = sidMatch[1];
-        } catch {}
+        }
       }
 
       if (!atToken) {
