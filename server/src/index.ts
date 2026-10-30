@@ -35,7 +35,7 @@ if (fatal.length || (errors.length && !allowsWeakSecrets(process.env))) {
   for (const error of errors) console.error(`  - ${error}`);
   console.error('Generate strong values with: openssl rand -hex 32');
   if (fatal.length) {
-    console.error('ADMIN_PASSWORD and APP_SECRET must be set; ALLOW_WEAK_SECRETS=1 cannot override this.');
+    console.error('The problems listed above are fatal; ALLOW_WEAK_SECRETS=1 cannot override them.');
   } else {
     console.error('To start anyway, set ALLOW_WEAK_SECRETS=1 (not recommended).');
   }
