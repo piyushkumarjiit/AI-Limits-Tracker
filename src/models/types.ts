@@ -2,6 +2,7 @@ export type ProviderType =
   | 'claude'
   | 'chatgpt'
   | 'gemini'
+  | 'antigravity'
   | 'cursor'
   | 'copilot'
   | 'perplexity'
@@ -12,7 +13,7 @@ export type ProviderType =
   | 'custom';
 
 /** The providers that have a dedicated adapter (not the generic recipe engine). */
-export const NATIVE_PROVIDERS: ProviderType[] = ['claude', 'chatgpt', 'gemini'];
+export const NATIVE_PROVIDERS: ProviderType[] = ['claude', 'chatgpt', 'gemini', 'antigravity'];
 
 /** Providers driven by the generic recipe engine (src/services/providers/recipe.ts). */
 export const RECIPE_PROVIDERS: ProviderType[] = [
@@ -107,6 +108,8 @@ export interface AccountCredentials {
   /** Cached plan title and when the profile was last fetched (epoch ms). */
   plan?: string;
   profileFetchedAt?: number;
+  /** Antigravity: Cloud Code project id resolved via loadCodeAssist (cached). */
+  projectId?: string;
 
   cookies?: string;
   sessionKey?: string;
