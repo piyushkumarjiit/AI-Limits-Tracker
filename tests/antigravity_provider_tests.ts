@@ -433,8 +433,8 @@ async function runAllTests() {
       assert(
         result.snapshot.status === 'ok' &&
           quotaCalls.length === 2 &&
-          quotaCalls[0].includes('daily-cloudcode-pa.googleapis.com') &&
-          quotaCalls[1].includes('cloudcode-pa.googleapis.com'),
+          new URL(quotaCalls[0]).hostname === 'daily-cloudcode-pa.googleapis.com' &&
+          new URL(quotaCalls[1]).hostname === 'cloudcode-pa.googleapis.com',
         'Case 9: Daily host 503 + prod host 200 -> ok, two quota calls, second to cloudcode-pa'
       );
     }
