@@ -807,6 +807,14 @@ const DEFAULT_GUIDE = {
 };
 
 const GUIDES: Partial<Record<ProviderType, { steps: string[]; placeholder: string }>> = {
+  antigravity: {
+    steps: [
+      'Recommended: use "Sign in to account" instead.',
+      'Otherwise paste a Google OAuth refresh token (starts with 1//) for the Google account you use in Antigravity.',
+      'You can also paste a JSON file that contains "refresh_token".',
+    ],
+    placeholder: '1//0g…  or  {"refresh_token":"1//…"}',
+  },
   claude: {
     steps: [
       'Open claude.ai on your computer and sign in to the account you want.',
@@ -847,12 +855,17 @@ const GUIDES: Partial<Record<ProviderType, { steps: string[]; placeholder: strin
 
 const ADD_GROUPS: Array<{ title: string; items: ProviderType[] }> = [
   { title: 'Main', items: ['claude', 'chatgpt', 'gemini'] },
-  { title: 'Coding', items: ['cursor', 'copilot'] },
+  { title: 'Coding', items: ['antigravity', 'cursor', 'copilot'] },
   { title: 'Chat assistants', items: ['perplexity', 'grok', 'mistral', 'deepseek', 'poe'] },
   { title: 'Any other service', items: ['custom'] },
 ];
 
-const supportsOAuth = (p: ProviderType) => p === 'claude' || p === 'chatgpt';
+const supportsOAuth = (p: ProviderType) => p === 'claude' || p === 'chatgpt' || p === 'antigravity';
+
+const CALLBACK_HINT: Partial<Record<ProviderType, string>> = {
+  chatgpt: 'localhost:1455/auth/callback?code=…',
+  antigravity: 'localhost:51121/oauth-callback?code=…',
+};
 
 const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload: () => Promise<void>; reconnectId?: string }> = ({ accounts, go, reload, reconnectId }) => {
   const reconnect = accounts.find((a) => a.id === reconnectId);
@@ -927,7 +940,7 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
   }
 
   const guide = GUIDES[provider] || DEFAULT_GUIDE;
-  const codePlaceholder = provider === 'claude' ? 'code#state' : 'http://localhost:1455/auth/callback?code=…';
+  const codePlaceholder = provider === 'claude' ? 'code#state' : `http://${CALLBACK_HINT[provider] ?? CALLBACK_HINT.chatgpt}`;
   return (
     <>
       <Header title={reconnect ? `Reconnect: ${reconnect.name}` : `Connect ${PROVIDER_NAMES[provider]}`} back />
@@ -952,13 +965,18 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
             </div></div>
             <div className="step"><i>2</i><div className="grow">
               <b>{provider === 'claude' ? 'Click Authorize and copy the code' : 'Copy the address after signing in'}</b>
-              <p className="small muted">{provider === 'claude' ? 'Claude will show a code like xxxx#yyyy.' : 'The browser will open localhost:1455/auth/callback?code=… and show an error — that is normal; copy the whole address from the address bar.'}</p>
+              <p className="small muted">{provider === 'claude' ? 'Claude will show a code like xxxx#yyyy.' : `The browser will open ${CALLBACK_HINT[provider] ?? CALLBACK_HINT.chatgpt} and show an error — that is normal; copy the whole address from the address bar.`}</p>
             </div></div>
             <div className="step"><i>3</i><div className="grow">
               <b>Paste it here</b>
               <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={codePlaceholder} disabled={!oauth} style={{ marginTop: 6 }} />
             </div></div>
           </div>
+          {provider === 'antigravity' && (
+            <p className="muted tiny">
+              Antigravity limits are read from Google&apos;s internal Cloud Code service using Antigravity&apos;s own sign-in client. This is unofficial. AI-Limits-Tracker only <em>reads</em> your quota every few minutes and never sends prompts, but Google could change or restrict this at any time.
+            </p>
+          )}
           {err && <p className="error">{err}</p>}
           <button className="btn dark wide" disabled={!oauth || !input.trim() || busy} onClick={submit}>{busy ? 'Connecting…' : 'Connect'}</button>
         </div>
@@ -970,7 +988,7 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
             ))}
           </div>
           <textarea rows={7} value={input} onChange={(e) => setInput(e.target.value)} placeholder={guide.placeholder} />
-          {supportsOAuth(provider) && <p className="muted tiny">⚠ cURL/sessionKey sign-in doesn't last long (about 30 min for Claude). For long-term use, choose "Sign in to account".</p>}
+          {supportsOAuth(provider) && provider !== 'antigravity' && <p className="muted tiny">⚠ cURL/sessionKey sign-in doesn't last long (about 30 min for Claude). For long-term use, choose "Sign in to account".</p>}
           {err && <p className="error">{err}</p>}
           <button className="btn dark wide" disabled={!input.trim() || busy} onClick={submit}>{busy ? 'Checking…' : 'Connect'}</button>
         </div>

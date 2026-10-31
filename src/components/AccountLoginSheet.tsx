@@ -18,6 +18,7 @@ import { CheckCircle2, ChevronLeft, KeyRound, RotateCcw, ShieldCheck, XCircle } 
 import { Colors, PROVIDER_NAMES, Radius } from '../constants/theme';
 import { AccountCredentials, AccountEntity, ProviderType } from '../models/types';
 import { parseManualInput } from '../services/curlParser';
+import { buildAntigravityAuthorizeUrl, exchangeAntigravityCode, isAntigravityCallbackUrl } from '../services/oauth/antigravityOAuth';
 import { buildChatGPTAuthorizeUrl, exchangeChatGPTCode, isChatGPTCallbackUrl } from '../services/oauth/chatgptOAuth';
 import { buildClaudeAuthorizeUrl, exchangeClaudeCode, isClaudeCallbackUrl } from '../services/oauth/claudeOAuth';
 import { parseAuthCode } from '../services/oauth/authCode';
@@ -42,9 +43,11 @@ interface Props {
   onConnected?: (accountId: string) => void;
 }
 
-const supportsOAuth = (p: ProviderType) => p === 'claude' || p === 'chatgpt';
+const supportsOAuth = (p: ProviderType) => p === 'claude' || p === 'chatgpt' || p === 'antigravity';
 
 const MANUAL_HINTS: Partial<Record<ProviderType, string>> = {
+  antigravity:
+    'Paste a Google refresh token (starts with 1//) for the account you use in Antigravity, or the JSON that contains it. Sign-in with Google is recommended instead.',
   claude:
     'Open claude.ai in a desktop browser → DevTools → Application → Cookies → copy the sessionKey value. Or go to Network → any request to /api → Copy as cURL.',
   chatgpt:
@@ -104,6 +107,8 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
   const authorizeUrl = pkce
     ? providerType === 'claude'
       ? buildClaudeAuthorizeUrl(pkce.challenge, pkce.state)
+      : providerType === 'antigravity'
+      ? buildAntigravityAuthorizeUrl(pkce.challenge, pkce.state)
       : buildChatGPTAuthorizeUrl(pkce.challenge, pkce.state)
     : null;
 
@@ -143,6 +148,8 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
       const creds =
         providerType === 'claude'
           ? await exchangeClaudeCode(parsed.code, parsed.state, pkce.verifier, pkce.state)
+          : providerType === 'antigravity'
+          ? await exchangeAntigravityCode(parsed.code, pkce.verifier)
           : await exchangeChatGPTCode(parsed.code, pkce.verifier);
       setMessage('Verifying the account and loading limits…');
       await finish(creds);
@@ -153,7 +160,11 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
   };
 
   const isCallback = (url: string) =>
-    providerType === 'claude' ? isClaudeCallbackUrl(url) : isChatGPTCallbackUrl(url);
+    providerType === 'claude'
+      ? isClaudeCallbackUrl(url)
+      : providerType === 'antigravity'
+      ? isAntigravityCallbackUrl(url)
+      : isChatGPTCallbackUrl(url);
 
   const handleManualSave = async () => {
     const parsed = parseManualInput(manualText, providerType);
@@ -200,6 +211,12 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
         </Text>
       </View>
 
+      {providerType === 'antigravity' && (
+        <Text style={styles.riskNote}>
+          Antigravity limits are read from Google's internal Cloud Code service using Antigravity's own sign-in client. This is unofficial. AI-Limits-Tracker only reads your quota every few minutes and never sends prompts, but Google could change or restrict this at any time.
+        </Text>
+      )}
+
       {showCodeInput && (
         <View style={styles.codeBox}>
           {Platform.OS === 'web' && authorizeUrl && (
@@ -212,6 +229,8 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
           <Text style={styles.codeLabel}>
             {providerType === 'claude'
               ? 'If the page shows a code, paste it here:'
+              : providerType === 'antigravity'
+              ? 'Paste the URL of the page you were redirected to (localhost:51121/…):'
               : 'Paste the URL of the page you were redirected to (localhost:1455/…):'}
           </Text>
           <View style={styles.codeRow}>
@@ -219,7 +238,13 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
               style={styles.codeInput}
               value={codeText}
               onChangeText={setCodeText}
-              placeholder={providerType === 'claude' ? 'code#state' : 'http://localhost:1455/auth/callback?code=…'}
+              placeholder={
+                providerType === 'claude'
+                  ? 'code#state'
+                  : providerType === 'antigravity'
+                  ? 'http://localhost:51121/oauth-callback?code=…'
+                  : 'http://localhost:1455/auth/callback?code=…'
+              }
               placeholderTextColor={Colors.textSubtle}
               autoCapitalize="none"
               autoCorrect={false}
@@ -296,6 +321,8 @@ export const AccountLoginSheet: React.FC<Props> = ({ visible, providerType, acco
             ? 'sk-ant-sid01-… or curl …'
             : providerType === 'chatgpt'
             ? 'eyJhbGciOi… or curl …'
+            : providerType === 'antigravity'
+            ? '1//0g… or {"refresh_token":"1//…"}'
             : "curl 'https://gemini.google.com/_/BardChatUi/…"
         }
         placeholderTextColor={Colors.textSubtle}
@@ -388,6 +415,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     color: '#166534',
+  },
+  riskNote: {
+    fontSize: 11.5,
+    color: Colors.textSubtle,
+    lineHeight: 16,
+    marginHorizontal: 16,
+    marginBottom: 10,
   },
   statusBar: {
     flexDirection: 'row',
