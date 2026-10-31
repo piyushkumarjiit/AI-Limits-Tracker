@@ -81,6 +81,53 @@ if (!hasDocker) {
     );
   }
 
+  // Regression: an IP-literal SITE_ADDRESS must complete TLS for clients that send no
+  // SNI. Browsers and curl never send SNI for IP-literal URLs (RFC 6066), so without a
+  // default certificate the handshake fails with "tlsv1 alert internal error".
+  // `caddy adapt` cannot catch this, so drive a real handshake against the pinned image.
+  const ipSite = '192.0.2.10'; // TEST-NET-1, never a local interface
+  const tlsName = `${project}-internal-tls`;
+  const tlsStarted = run('docker', [
+    'run', '-d', '--name', tlsName,
+    '-e', `SITE_ADDRESS=${ipSite}`,
+    '-v', `${join(root, 'deploy/caddy/Caddyfile.internal')}:/etc/caddy/Caddyfile:ro`,
+    '-p', '127.0.0.1::443',
+    caddyImage,
+  ]);
+  try {
+    let ready = false;
+    for (let i = 0; i < 60 && !ready; i++) {
+      const logs = run('docker', ['logs', tlsName]);
+      ready = `${logs.stdout ?? ''}${logs.stderr ?? ''}`.includes('serving initial configuration');
+      if (!ready) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+    }
+    const mapped = (run('docker', ['port', tlsName, '443/tcp']).stdout ?? '').trim();
+    const port = Number(mapped.split(':').pop());
+    assert(tlsStarted.status === 0 && ready && port > 0, 'internal: Caddy starts with an IP SITE_ADDRESS', `${tlsStarted.stderr ?? ''}${tlsStarted.stdout ?? ''}`.slice(-300));
+    // The probe connects with no servername, so it sends no SNI at all.
+    const probe = [
+      "const tls = require('node:tls');",
+      "const s = tls.connect({ host: '127.0.0.1', port: Number(process.env.PROBE_PORT), rejectUnauthorized: false }, () => {",
+      "  s.write('GET /api/health HTTP/1.1\\r\\nHost: ' + process.env.PROBE_HOST + '\\r\\nConnection: close\\r\\n\\r\\n');",
+      '});',
+      "let data = '';",
+      "s.on('data', (d) => data += d);",
+      "s.on('end', () => { console.log('PROBE_OK ' + data.split('\\r\\n')[0]); process.exit(0); });",
+      "s.on('error', (e) => { console.log('PROBE_ERR ' + e.message); process.exit(1); });",
+      "s.setTimeout(10000, () => { console.log('PROBE_ERR timeout'); process.exit(1); });",
+    ].join('\n');
+    const handshake = ready && port > 0
+      ? run(process.execPath, ['-e', probe], { PROBE_PORT: String(port), PROBE_HOST: ipSite })
+      : { status: 1, stdout: '', stderr: 'caddy never became ready' };
+    assert(
+      handshake.status === 0 && (handshake.stdout ?? '').startsWith('PROBE_OK HTTP/1.1 '),
+      'internal: IP SITE_ADDRESS completes TLS for clients that omit SNI',
+      `${handshake.stdout ?? ''}${handshake.stderr ?? ''}`.slice(-400),
+    );
+  } finally {
+    run('docker', ['rm', '-f', tlsName]);
+  }
+
   // Each profile's service set: one app service, sharing one data directory.
   for (const p of ['public', 'internal']) {
     const j = configs[p];
