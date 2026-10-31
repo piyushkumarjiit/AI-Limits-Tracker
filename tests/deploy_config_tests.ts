@@ -31,9 +31,12 @@ if (!hasDocker) {
   console.log('  - docker unavailable; skipping deploy config checks');
 } else {
   const envPath = join(root, '.env');
-  const envExisted = existsSync(envPath);
-  if (!envExisted) {
-    writeFileSync(envPath, '# temporary dummy .env for compose config test\n');
+  let createdEnv = false;
+  try {
+    writeFileSync(envPath, '# temporary dummy .env for compose config test\n', { flag: 'wx' });
+    createdEnv = true;
+  } catch (e: any) {
+    if (e.code !== 'EEXIST') throw e;
   }
   try {
     // Compose's own model of the file, one mode at a time.
@@ -186,8 +189,10 @@ if (!hasDocker) {
     run('docker', ['image', 'rm', '-f', tag]);
   }
   } finally {
-    if (!envExisted && existsSync(envPath)) {
-      rmSync(envPath, { force: true });
+    if (createdEnv) {
+      try {
+        rmSync(envPath, { force: true });
+      } catch {}
     }
   }
 }
