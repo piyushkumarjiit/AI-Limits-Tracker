@@ -1,0 +1,11 @@
+# Public domain: Caddy obtains and renews a Let's Encrypt certificate automatically.
+# SITE_ADDRESS must be a DNS name pointing at this host, with ports 80 and 443 reachable.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	reverse_proxy ai-limits-tracker-web:1455 {
+		# Overwrite anything the client sent: the app trusts these headers (TRUST_PROXY=1).
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
