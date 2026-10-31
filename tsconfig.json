@@ -29,6 +29,9 @@
     "tests/security_hardening_tests.ts",
     "tests/session_hardening_tests.ts",
     "tests/final_hardening_tests.ts",
-    "tests/deploy_config_tests.ts"
+    "tests/deploy_config_tests.ts",
+    "tests/antigravity_oauth_tests.ts",
+    "tests/antigravity_parser_tests.ts",
+    "tests/antigravity_provider_tests.ts"
   ]
 }
