@@ -3,6 +3,17 @@ import { getProvider } from '../src/services/providers';
 import { parseManualInput } from '../src/services/curlParser';
 import { ANTIGRAVITY_OAUTH } from '../src/services/oauth/antigravityOAuth';
 import type { AccountCredentials } from '../src/models/types';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AddressInfo } from 'node:net';
+import { Store } from '../server/src/store';
+import { Tracker } from '../server/src/tracker';
+import { createApp } from '../server/src/app';
+
+const ADMIN_PASSWORD = 'test-admin-password-1234567890abcdef';
+const APP_SECRET = 'test-app-secret-0123456789abcdef';
+const API_TOKEN = 'test-api-token-0123456789abcdef';
 
 let totalTests = 0;
 let passedTests = 0;
@@ -652,6 +663,198 @@ async function runAllTests() {
         'Case 17: No error message from any test case contains the substrings ya29. or 1// (no token leakage)',
         leaked.join('; ')
       );
+    }
+
+    // ==========================================
+    // Server integration tests (WP5)
+    // ==========================================
+    console.log('\nAntigravity server integration tests (Store + Tracker)');
+
+    const dir = mkdtempSync(join(tmpdir(), 'alt-server-antigravity-'));
+    const dataDir = join(dir, 'data');
+    const webDir = join(dir, 'web');
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(webDir, { recursive: true });
+    writeFileSync(join(webDir, 'index.html'), '<!doctype html><html><body>test</body></html>');
+
+    const store = new Store(dataDir, 't.db', APP_SECRET);
+    const tracker = new Tracker(store);
+    let server: ReturnType<typeof createApp> | null = null;
+
+    try {
+      let mockUserinfoEmail = 'u@x.com';
+      let tokenBehavior: 'ok' | 'invalid_grant' = 'ok';
+
+      mockFetch((url) => {
+        const parsed = new URL(url);
+        if (parsed.hostname === 'oauth2.googleapis.com' && parsed.pathname === '/token') {
+          if (tokenBehavior === 'invalid_grant') {
+            return { status: 400, body: { error: 'invalid_grant', error_description: 'Token has been revoked.' } };
+          }
+          return {
+            status: 200,
+            body: {
+              access_token: 'ya29.test-access-token',
+              refresh_token: '1//R',
+              expires_in: 3600,
+              token_type: 'Bearer',
+            },
+          };
+        }
+        if (parsed.hostname === 'www.googleapis.com' && (parsed.pathname === '/oauth2/v2/userinfo' || parsed.pathname === '/oauth2/v1/userinfo')) {
+          return {
+            status: 200,
+            body: { email: mockUserinfoEmail, id: '12345' },
+          };
+        }
+        if (
+          (parsed.hostname === 'daily-cloudcode-pa.googleapis.com' || parsed.hostname === 'cloudcode-pa.googleapis.com') &&
+          parsed.pathname === '/v1internal:loadCodeAssist'
+        ) {
+          return {
+            status: 200,
+            body: {
+              paidTier: { name: 'Google AI Pro' },
+              cloudaicompanionProject: 'p-1',
+            },
+          };
+        }
+        if (
+          (parsed.hostname === 'daily-cloudcode-pa.googleapis.com' || parsed.hostname === 'cloudcode-pa.googleapis.com') &&
+          parsed.pathname === '/v1internal:retrieveUserQuotaSummary'
+        ) {
+          return {
+            status: 200,
+            body: FIXTURE,
+          };
+        }
+        return { status: 404, body: 'Not found' };
+      });
+
+      // 1. tracker.startOAuth('antigravity') returns URL starting with Google auth and matching state
+      const oAuthStart = tracker.startOAuth('antigravity');
+      const startUrl = new URL(oAuthStart.authorizeUrl);
+      assert(
+        oAuthStart.authorizeUrl.startsWith('https://accounts.google.com/o/oauth2/v2/auth?') &&
+          startUrl.hostname === 'accounts.google.com' &&
+          startUrl.pathname === '/o/oauth2/v2/auth' &&
+          startUrl.searchParams.get('state') === oAuthStart.state,
+        'Server Case 1: tracker.startOAuth("antigravity") returns URL starting with Google auth and matching state'
+      );
+
+      // 2. startOAuth('gemini') throws
+      let startGeminiThrew = false;
+      try {
+        tracker.startOAuth('gemini' as any);
+      } catch (e: any) {
+        startGeminiThrew = true;
+        assert(
+          e.message === 'OAuth is only available for Claude, ChatGPT and Antigravity',
+          'Server Case 2: startOAuth("gemini") throws correct error message'
+        );
+      }
+      assert(startGeminiThrew, 'Server Case 2: startOAuth("gemini") throws');
+
+      // 3. finishOAuth(state, callbackUrl) completes with mocked calls, account has providerType: 'antigravity', raw DB column is encrypted (v2.)
+      const finishRes = await tracker.finishOAuth(
+        oAuthStart.state,
+        `http://localhost:51121/oauth-callback?code=C1&state=${oAuthStart.state}`
+      );
+      assert(finishRes.ok === true, 'Server Case 3: finishOAuth completes successfully');
+      if (finishRes.ok) {
+        assert(
+          finishRes.account.providerType === 'antigravity',
+          'Server Case 3: account has providerType "antigravity"'
+        );
+        assert(
+          finishRes.account.email === 'u@x.com',
+          'Server Case 3: account has email "u@x.com"'
+        );
+        const creds = store.getCredentials(finishRes.account.id);
+        assert(
+          creds?.refreshToken === '1//R',
+          'Server Case 3: store.getCredentials(id).refreshToken === "1//R"'
+        );
+        const rawRow = (store as any).db
+          .prepare('SELECT credentials FROM accounts WHERE id = ?')
+          .get(finishRes.account.id) as any;
+        assert(
+          typeof rawRow?.credentials === 'string' &&
+            rawRow.credentials.startsWith('v2.') &&
+            !rawRow.credentials.includes('1//'),
+          'Server Case 3: raw DB column is encrypted (starts with v2., no plaintext token)'
+        );
+      }
+
+      // 4. Connecting same email again returns { ok: false } with already connected
+      mockUserinfoEmail = 'u@x.com';
+      const oAuthStart2 = tracker.startOAuth('antigravity');
+      const dupRes = await tracker.finishOAuth(
+        oAuthStart2.state,
+        `http://localhost:51121/oauth-callback?code=C2&state=${oAuthStart2.state}`
+      );
+      assert(
+        dupRes.ok === false && dupRes.error.includes('already connected'),
+        'Server Case 4: Connecting same email again returns { ok: false } with already connected'
+      );
+
+      // 5. tracker.connectManual('antigravity', '1//0g...') succeeds
+      mockUserinfoEmail = 'manual-user@x.com';
+      const manualRes = await tracker.connectManual('antigravity', '1//0gABCDEFGHIJKLMNOPQRSTUV');
+      assert(
+        manualRes.ok === true &&
+          manualRes.account.providerType === 'antigravity' &&
+          manualRes.account.email === 'manual-user@x.com',
+        'Server Case 5: tracker.connectManual("antigravity", "1//0g...") succeeds'
+      );
+
+      // 6. tracker.connectManual with invalid_grant returns { ok: false }
+      tokenBehavior = 'invalid_grant';
+      const invalidRes = await tracker.connectManual('antigravity', '1//0gRevokedToken1234567890');
+      assert(
+        invalidRes.ok === false,
+        'Server Case 6: tracker.connectManual with invalid_grant returns { ok: false }'
+      );
+      tokenBehavior = 'ok';
+
+      // 7. HTTP API level: POST /api/accounts/manual with provider: 'antigravity' and invalid input returns 400 (proving ALL_PROVIDERS accepts it)
+      globalThis.fetch = realFetch;
+      server = createApp(
+        {
+          adminPassword: ADMIN_PASSWORD,
+          appSecret: APP_SECRET,
+          apiToken: API_TOKEN,
+          secureCookies: false,
+          trustProxy: false,
+          webDir,
+        },
+        { store, tracker }
+      );
+
+      await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', () => resolve()));
+      const { port } = server.address() as AddressInfo;
+      const httpRes = await fetch(`http://127.0.0.1:${port}/api/accounts/manual`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${API_TOKEN}`,
+        },
+        body: JSON.stringify({ provider: 'antigravity', input: 'hello' }),
+      });
+      const httpBody = (await httpRes.json()) as any;
+      assert(
+        httpRes.status === 400 &&
+          httpBody.ok === false &&
+          httpBody.error !== 'Unknown provider',
+        'Server Case 7: POST /api/accounts/manual with provider: "antigravity" and invalid input returns 400 (ALL_PROVIDERS accepts it)'
+      );
+    } finally {
+      if (server) {
+        await new Promise<void>((resolve) => (server as any).close(() => resolve()));
+        server.closeAllConnections();
+      }
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   } finally {
     globalThis.fetch = realFetch;
