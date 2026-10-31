@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { AccountCredentials, ProviderType, UsageSnapshot } from '../../src/models/types';
 import { parseManualInput } from '../../src/services/curlParser';
 import { parseAuthCode } from '../../src/services/oauth/authCode';
+import { buildAntigravityAuthorizeUrl, exchangeAntigravityCode } from '../../src/services/oauth/antigravityOAuth';
 import { buildChatGPTAuthorizeUrl, exchangeChatGPTCode } from '../../src/services/oauth/chatgptOAuth';
 import { buildClaudeAuthorizeUrl, exchangeClaudeCode } from '../../src/services/oauth/claudeOAuth';
 import { bindingBucket, mergeWithPrevious } from '../../src/services/providers/common';
@@ -146,10 +147,10 @@ export class Tracker {
 
   /* ---------------- Connecting accounts ---------------- */
 
-  /* ---------------- OAuth (Claude / ChatGPT) — keeps accounts alive for weeks ---------------- */
+  /* ---------------- OAuth (Claude / ChatGPT / Antigravity) — keeps accounts alive for weeks ---------------- */
 
   startOAuth(provider: ProviderType, accountId?: string): { authorizeUrl: string; state: string } {
-    if (provider !== 'claude' && provider !== 'chatgpt') throw new Error('OAuth is only available for Claude and ChatGPT');
+    if (provider !== 'claude' && provider !== 'chatgpt' && provider !== 'antigravity') throw new Error('OAuth is only available for Claude, ChatGPT and Antigravity');
     for (const [k, v] of this.pending) if (Date.now() - v.createdAt > 15 * 60 * 1000) this.pending.delete(k);
 
     const verifier = b64url(randomBytes(32));
@@ -157,7 +158,11 @@ export class Tracker {
     const state = b64url(randomBytes(24));
     this.pending.set(state, { provider, verifier, state, accountId, createdAt: Date.now() });
     const authorizeUrl =
-      provider === 'claude' ? buildClaudeAuthorizeUrl(challenge, state) : buildChatGPTAuthorizeUrl(challenge, state);
+      provider === 'claude'
+        ? buildClaudeAuthorizeUrl(challenge, state)
+        : provider === 'chatgpt'
+          ? buildChatGPTAuthorizeUrl(challenge, state)
+          : buildAntigravityAuthorizeUrl(challenge, state);
     return { authorizeUrl, state };
   }
 
@@ -173,7 +178,9 @@ export class Tracker {
       const creds =
         pending.provider === 'claude'
           ? await exchangeClaudeCode(parsed.code, parsed.state, pending.verifier, pending.state)
-          : await exchangeChatGPTCode(parsed.code, pending.verifier);
+          : pending.provider === 'chatgpt'
+            ? await exchangeChatGPTCode(parsed.code, pending.verifier)
+            : await exchangeAntigravityCode(parsed.code, pending.verifier);
       return await this.connect(pending.provider, creds, pending.accountId);
     } catch (e) {
       // The exchange error can carry internal detail; keep it in the log only.
