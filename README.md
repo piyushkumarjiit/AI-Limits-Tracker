@@ -24,7 +24,7 @@ You have more than one AI subscription — maybe **two Claude accounts and two C
 
 ## What you get
 
-- 🔢 **All limits on one screen** — Claude (5-hour, weekly, Opus/Sonnet, extra spend), ChatGPT (Codex 5h & weekly, credits), Gemini (session & weekly).
+- 🔢 **All limits on one screen** — Claude (5-hour, weekly, Opus/Sonnet, extra spend), ChatGPT (Codex 5h & weekly, credits), Gemini (session & weekly), Antigravity (Gemini 5-hour & weekly, Claude/GPT, Argon).
 - 👥 **Unlimited accounts per service** — two, three, ten Claude accounts? Each isolated, each refreshed in the background.
 - ⏱ **Live reset countdowns** — "resets in 2h 14m", recalculated every tick.
 - 📊 **Real statistics** — day streaks, limit hits, time spent in the red zone, burn-rate forecast ("will run out in 1h 40m"), busiest hours & weekdays, per-account comparison. All computed from real measurements — no invented message counts.
@@ -134,8 +134,11 @@ The server reads your limits using a session you export from your browser — no
 - **Claude** — `claude.ai` → DevTools → Application → Cookies → copy `sessionKey`, or *Copy as cURL* on any `/api` request.
 - **ChatGPT** — `chatgpt.com` → DevTools → Network → *Copy as cURL* on a `backend-api` request.
 - **Gemini** — `gemini.google.com` → Network → *Copy as cURL* on a `batchexecute` request (one browser profile per Google account).
+- **Antigravity** — OAuth sign-in via Google (recommended) or paste a Google refresh token (`1//…`).
 
 Paste it into **Add account**. For a second account of the same service, export from a second browser profile / incognito window.
+
+> **Antigravity provider note:** Antigravity limits are read from Google's internal Cloud Code service using Antigravity's own sign-in client. This is unofficial. AI-Limits-Tracker only *reads* your quota every few minutes and never sends prompts, but Google could change or restrict this at any time.
 
 ## Security notes
 
