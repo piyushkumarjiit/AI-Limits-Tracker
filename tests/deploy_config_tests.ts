@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(__dirname, '..');
@@ -30,17 +30,23 @@ console.log('Deploy config tests');
 if (!hasDocker) {
   console.log('  - docker unavailable; skipping deploy config checks');
 } else {
-  // Compose's own model of the file, one mode at a time.
-  const cfg = (profile: string) => {
-    const r = run(
-      'docker',
-      ['compose', '--project-name', `${project}-${profile}`, '--env-file', '/dev/null', '--profile', profile, 'config', '--no-env-resolution', '--format', 'json'],
-      { SITE_ADDRESS: 'tracker.example.com' },
-    );
-    return r.status === 0 ? JSON.parse(r.stdout) : { error: r.stderr };
-  };
-  const configs: Record<string, any> = {};
-  for (const p of ['public', 'internal', 'direct']) configs[p] = cfg(p);
+  const envPath = join(root, '.env');
+  const envExisted = existsSync(envPath);
+  if (!envExisted) {
+    writeFileSync(envPath, '# temporary dummy .env for compose config test\n');
+  }
+  try {
+    // Compose's own model of the file, one mode at a time.
+    const cfg = (profile: string) => {
+      const r = run(
+        'docker',
+        ['compose', '--project-name', `${project}-${profile}`, '--profile', profile, 'config', '--no-env-resolution', '--format', 'json'],
+        { SITE_ADDRESS: 'tracker.example.com' },
+      );
+      return r.status === 0 ? JSON.parse(r.stdout) : { error: r.stderr };
+    };
+    const configs: Record<string, any> = {};
+    for (const p of ['public', 'internal', 'direct']) configs[p] = cfg(p);
 
   // Caddy files as Caddy itself resolves them, in the image compose pins.
   const caddyImage: string = configs.public.services?.['caddy-public']?.image ?? '';
@@ -178,6 +184,11 @@ if (!hasDocker) {
     assert(c.User === 'node', 'image runs as the unprivileged node user', String(c.User));
     assert((c.Healthcheck?.Test ?? []).join(' ').includes('/api/health'), 'image healthcheck probes /api/health', JSON.stringify(c.Healthcheck));
     run('docker', ['image', 'rm', '-f', tag]);
+  }
+  } finally {
+    if (!envExisted && existsSync(envPath)) {
+      rmSync(envPath, { force: true });
+    }
   }
 }
 
