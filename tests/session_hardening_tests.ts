@@ -37,6 +37,7 @@ function assert(condition: boolean, testName: string, extraInfo?: string) {
   } else {
     failedTests++;
     console.error(`  ✗ [FAIL] ${testName} ${extraInfo ? `-> ${extraInfo}` : ''}`);
+    console.log(`::error file=tests/session_hardening_tests.ts::[FAIL] ${testName} ${extraInfo ? `-> ${extraInfo.replace(/\r?\n/g, ' ')}` : ''}`);
   }
 }
 
