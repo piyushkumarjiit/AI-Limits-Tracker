@@ -22,6 +22,7 @@ const GROUPS: Array<{ title: string; items: Array<{ type: ProviderType; note: st
   {
     title: 'Coding',
     items: [
+      { type: 'antigravity', note: 'Gemini 5-hour & weekly, Claude/GPT, Argon' },
       { type: 'cursor', note: 'Premium (fast) requests' },
       { type: 'copilot', note: 'Premium requests per month' },
     ],
