@@ -1,23 +1,100 @@
+# Three deployment modes, selected with a compose profile:
+#
+#   docker compose --profile public   up -d   # Caddy + Let's Encrypt (SITE_ADDRESS = your domain)
+#   docker compose --profile internal up -d   # Caddy + internal CA   (SITE_ADDRESS = LAN IP / name)
+#   docker compose --profile direct   up -d   # Caddy off: app port published (own reverse proxy)
+#
+# The panel's login cookie is Secure, so any non-localhost deployment needs HTTPS.
+# Pick one profile. COMPOSE_PROFILES in the environment is additive and must not be
+# mixed with --profile: both would start, and both modes bind host 80/443 and ./data.
+
+x-app-base: &app-base
+  image: ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
+  build: .
+  # The container runs as UID 1000; ./data must be writable by it:
+  #   mkdir -p data && sudo chown 1000:1000 data
+  volumes:
+    - ./data:/app/data
+  env_file:
+    - .env
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  mem_limit: 512m
+  pids_limit: 256
+  logging: &log-limits
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
+  # Caddy modes: reachable only through Caddy, never published to the host.
+  # New name: direct mode keeps `ai-limits-tracker` so existing deployments are
+  # not orphaned by a rename.
+  ai-limits-tracker-web:
+    <<: *app-base
+    profiles: ["public", "internal"]
+    environment:
+      # Caddy sets X-Real-IP / X-Forwarded-Proto, so trust them.
+      TRUST_PROXY: "1"
+      # Listen port is fixed inside the container; PORT only moves the host port.
+      PORT: "1455"
+
+  # Caddy off: original behaviour, app port published on the host.
   ai-limits-tracker:
-    image: ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
-    build: .
+    <<: *app-base
+    profiles: ["direct"]
     ports:
       - "${PORT:-1455}:1455"
-    # The container runs as UID 1000; ./data must be writable by it:
-    #   mkdir -p data && sudo chown 1000:1000 data
-    volumes:
-      - ./data:/app/data
-    env_file:
-      - .env
     environment:
-      # Set TRUST_PROXY=1 only when a reverse proxy in front of the container sets X-Real-IP
+      # Set TRUST_PROXY=1 only when your own reverse proxy sets X-Real-IP.
       TRUST_PROXY: "${TRUST_PROXY:-0}"
+      PORT: "1455"
+
+  caddy-public:
+    &caddy-base
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    profiles: ["public"]
+    depends_on:
+      - ai-limits-tracker-web
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      SITE_ADDRESS: "${SITE_ADDRESS:-localhost}"
+    volumes:
+      - ./deploy/caddy/Caddyfile.public:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp
     cap_drop:
       - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+    logging: *log-limits
+
+  caddy-internal:
+    <<: *caddy-base
+    profiles: ["internal"]
+    volumes:
+      - ./deploy/caddy/Caddyfile.internal:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

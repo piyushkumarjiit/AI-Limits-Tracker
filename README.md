@@ -61,12 +61,39 @@ WEB_DIR=web/dist DATA_DIR=./data node server/dist/server.mjs
 ```bash
 git clone https://github.com/piyushkumarjiit/AI-Limits-Tracker.git
 cd AI-Limits-Tracker
-cp .env.example .env                 # set ADMIN_PASSWORD and APP_SECRET (openssl rand -hex 32)
+cp .env.example .env                 # set ADMIN_PASSWORD, APP_SECRET (openssl rand -hex 32) and SITE_ADDRESS
 mkdir -p data && sudo chown 1000:1000 data   # the container runs as UID 1000 (node)
 
-docker compose up -d                 # builds locally, or pulls ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
-# open http://localhost:1455
+docker compose --profile public   up -d   # mode 1: public domain, Let's Encrypt
+docker compose --profile internal up -d   # mode 2: LAN / LXC, Caddy internal CA
+docker compose --profile direct   up -d   # mode 3: Caddy off, your own reverse proxy
 ```
+
+You must pick one profile: a plain `docker compose up -d` starts nothing. Select it with `--profile`; `COMPOSE_PROFILES` in the environment is additive and must not be mixed with it (both modes would start and collide on host 80/443 and `./data`). Images build locally or are pulled from `ghcr.io/piyushkumarjiit/ai-limits-tracker:latest`.
+
+Switching modes, or upgrading from the earlier single-service compose file: stop the old stack first with `docker compose --profile <old-mode> down` (or `docker compose down --remove-orphans` right after upgrading). Otherwise the previous mode's app container keeps running and polling alongside the new one, both writing `./data`, and a leftover Caddy container keeps host 80/443 so the new one fails with "port is already allocated".
+
+#### Why HTTPS is required
+
+The panel's login cookie is always marked `Secure`. Over plain `http://` on any address other than `localhost`, the browser silently drops it, so login cannot persist (and a non-Secure cookie would travel in clear text anyway). Any real Docker deployment therefore needs TLS in front of the app. The bundled [Caddy](https://caddyserver.com/) service provides it; its config is in [`deploy/caddy/`](deploy/caddy/).
+
+In the two Caddy modes the app port is **not** published to the host: only Caddy publishes 80/443. Caddy sets `X-Real-IP` and `X-Forwarded-Proto`, and the app runs with `TRUST_PROXY=1` (forced by compose in those modes). Caddy's certificates and config live in the named volumes `caddy_data` and `caddy_config`. Set `ALLOWED_HOSTS` in `.env` to the same host as `SITE_ADDRESS` (hostname only, no port).
+
+**Mode 1 — public domain (`--profile public`).** Point a DNS record at the host, make ports 80 and 443 reachable from the internet, then set `SITE_ADDRESS=tracker.example.com` and `ALLOWED_HOSTS=tracker.example.com`. Caddy obtains and renews a Let's Encrypt certificate automatically. Open `https://tracker.example.com`.
+
+**Mode 2 — home LAN or LXC, no public domain (`--profile internal`).** Set `SITE_ADDRESS` to the LAN IP or local name (for example `192.168.1.20` or `tracker.lan`) and `ALLOWED_HOSTS` to the same. Caddy issues the certificate from its own internal CA (`tls internal`), so browsers warn until you trust the root certificate once per client device:
+
+```bash
+docker compose --profile internal cp caddy-internal:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+```
+
+Import `caddy-root.crt` into the device's trust store (Windows: *certmgr* → Trusted Root Certification Authorities; macOS: Keychain Access → System → Always Trust; Debian/Ubuntu: copy to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`; Firefox keeps its own store under Settings → Certificates). Keep `caddy_data` — it holds the CA key; recreating it issues a new root you must trust again.
+
+**Mode 3 — Caddy off (`--profile direct`).** Starts only the app, published on `${PORT:-1455}` as before, with `TRUST_PROXY` taken from `.env` (default `0`). Put your own TLS-terminating reverse proxy in front; [`deploy/nginx.conf`](deploy/nginx.conf) is the systemd deployment's vhost, so for direct mode change its `proxy_pass` to the published port (`http://127.0.0.1:1455` by default). Set `TRUST_PROXY=1` only if your proxy sets `X-Real-IP`. Without HTTPS only `http://localhost` works. If you are coming from one of the Caddy modes, stop it first (`docker compose --profile <old-mode> down`) so it releases `./data` and host 80/443.
+
+**Docker inside an LXC container.** The LXC needs nesting enabled on the host (Proxmox: Options → Features → *nesting*; or `lxc config set <name> security.nesting true`), otherwise Docker cannot start containers. Caddy binds 80/443 inside the Docker network namespace, so no extra LXC privileges are needed beyond that.
+
+Host ports are configurable with `HTTP_PORT`, `HTTPS_PORT` (Caddy) and `PORT` (direct mode). In public mode leave `HTTP_PORT` and `HTTPS_PORT` at 80/443: Let's Encrypt validates and renews on those ports.
 
 The image is a two-stage build: Expo/TypeScript tooling stays in the build stage, and the runtime image contains only the compiled server bundle (zero runtime dependencies) and the web panel. It runs as a non-root user with a read-only root filesystem, all capabilities dropped and `no-new-privileges`. Only `/app/data` is writable — that is where the SQLite database lives.
 
@@ -75,11 +102,18 @@ The image is a two-stage build: Expo/TypeScript tooling stays in the build stage
 **Offline / air-gapped transfer** — build once, then move the image:
 
 ```bash
-docker save ai-limits-tracker:latest | gzip > ai-limits-tracker.tar.gz
+# Direct mode: the app image alone.
+docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest | gzip > ai-limits-tracker.tar.gz
+
+# Caddy modes (public/internal): pull the exact Caddy build compose pins if you only built the app,
+# then save both. Copy this digest from the `image:` line in docker-compose.yml if it has changed.
+docker pull caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d | gzip > ai-limits-tracker.tar.gz
+
 scp ai-limits-tracker.tar.gz user@node:/tmp/
 # on the target node:
 gunzip -c /tmp/ai-limits-tracker.tar.gz | docker load
-docker compose up -d --no-build
+docker compose --profile public up -d --no-build   # use --profile internal or direct instead as needed
 ```
 
 Images are published for `linux/amd64` and `linux/arm64` by [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) on every push to `main` and on `v*` tags.
@@ -108,7 +142,7 @@ Paste it into **Add account**. For a second account of the same service, export 
 - The server requires `ADMIN_PASSWORD` and `APP_SECRET`. Generate each with `openssl rand -hex 32`; the server refuses to start when either is missing or still an example placeholder, and rejects a short or predictable `APP_SECRET`.
 - `API_TOKEN` is optional: a long-lived bearer token for scripts that cannot log in through the form.
 - `SESSION_DAYS` sets the session cookie lifetime (default 30 days). `POST /api/sessions/revoke-all` ends every existing session at once.
-- `ALLOWED_HOSTS` limits which `Host` headers are accepted. Set `TRUST_PROXY=1` when a reverse proxy sits in front so rate limiting sees real client IPs.
+- `ALLOWED_HOSTS` limits which `Host` headers are accepted. Set `TRUST_PROXY=1` when a reverse proxy sits in front so rate limiting sees real client IPs (the Caddy profiles do this for you).
 - Run the panel behind HTTPS only — terminate TLS at a proxy in front of it — and do not expose it on a network you do not trust.
 - The database directory is created with mode `0700` and the database files with `0600`; keep them owned by the user that runs the server.
 - Client-facing errors are short and fixed; the exceptions behind them are logged on the server, never returned.
@@ -147,10 +181,10 @@ src/app/        mobile app screens (Expo Router)
 server/         self-hosted Node server + API  (server/src)
 web/            web panel — React PWA           (web/src)
 extension/      Chrome MV3 extension            (extension/src)
-deploy/         systemd unit, nginx vhost, deploy script
+deploy/         systemd unit, nginx vhost, deploy script, Caddyfiles for the Docker profiles
 ```
 
-Run the test suites (multi-account isolation, token refresh, parsing, honest statuses, plus the server's auth and HTTP security tests — `npm run test:security` runs only the latter):
+Run the test suites (multi-account isolation, token refresh, parsing, honest statuses, the server's auth and HTTP security tests, and the Docker deploy-config checks — `npm run test:security` runs only the last two):
 
 ```bash
 npm test

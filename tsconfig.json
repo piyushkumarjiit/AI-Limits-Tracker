@@ -28,6 +28,7 @@
     "tests/security_tests.ts",
     "tests/security_hardening_tests.ts",
     "tests/session_hardening_tests.ts",
-    "tests/final_hardening_tests.ts"
+    "tests/final_hardening_tests.ts",
+    "tests/deploy_config_tests.ts"
   ]
 }
