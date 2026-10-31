@@ -1,5 +1,6 @@
 import { ProviderType, RECIPE_PROVIDERS } from '../../models/types';
 import { PROVIDER_NAMES } from '../../constants/theme';
+import { AntigravityProvider } from './AntigravityProvider';
 import { ChatGPTProvider } from './ChatGPTProvider';
 import { ClaudeProvider } from './ClaudeProvider';
 import { GeminiProvider } from './GeminiProvider';
@@ -7,6 +8,7 @@ import { RecipeProvider } from './recipe';
 import { UsageProvider } from './UsageProvider';
 
 const PROVIDERS: Partial<Record<ProviderType, UsageProvider>> = {
+  antigravity: new AntigravityProvider(),
   claude: new ClaudeProvider(),
   chatgpt: new ChatGPTProvider(),
   gemini: new GeminiProvider(),
@@ -22,6 +24,7 @@ export function getProvider(type: ProviderType): UsageProvider {
   return PROVIDERS[type] || PROVIDERS.custom!;
 }
 
+export * from './AntigravityProvider';
 export * from './ChatGPTProvider';
 export * from './ClaudeProvider';
 export * from './GeminiProvider';
