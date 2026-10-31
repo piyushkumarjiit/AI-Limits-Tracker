@@ -170,6 +170,57 @@ export function parseManualInput(input: string, providerType: ProviderType): Man
     return { ok: false, error: 'Expected Google cookies (__Secure-1PSID…) or cURL' };
   }
 
+  if (providerType === 'antigravity') {
+    if (text.length > 16384) {
+      return { ok: false, error: 'Manual input too large' };
+    }
+    let refreshToken: string | undefined;
+    let accessToken: string | undefined;
+    let expiresAt: number | undefined;
+
+    if (text.startsWith('{')) {
+      let json: any;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return { ok: false, error: 'Invalid JSON' };
+      }
+      refreshToken = json.refresh_token ?? json.refreshToken;
+      accessToken = json.access_token ?? json.accessToken;
+      if (typeof json.expiry_date === 'number') {
+        expiresAt = json.expiry_date;
+      }
+    } else {
+      const mRefresh = /1\/\/[A-Za-z0-9_\-]{20,}/.exec(text);
+      if (mRefresh) {
+        refreshToken = mRefresh[0];
+      } else if (/^ya29\.[A-Za-z0-9_\-\.]{20,}$/.test(text)) {
+        accessToken = text;
+      }
+    }
+
+    if (!refreshToken && !accessToken) {
+      return {
+        ok: false,
+        error: 'Paste a Google refresh token (starts with 1//) or the JSON that contains one.',
+      };
+    }
+
+    if (accessToken && !refreshToken && expiresAt === undefined) {
+      expiresAt = Date.now() + 50 * 60 * 1000;
+    }
+
+    return {
+      ok: true,
+      credentials: {
+        authType: 'oauth',
+        refreshToken,
+        accessToken,
+        expiresAt,
+      },
+    };
+  }
+
   // --- Custom: build a recipe straight from the pasted cURL ---
   if (providerType === 'custom') {
     if (!isCurl) return { ok: false, error: 'Paste the cURL of the request that returns your limits' };
