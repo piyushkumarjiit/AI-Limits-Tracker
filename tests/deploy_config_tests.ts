@@ -10,9 +10,16 @@ function assert(cond: boolean, name: string, info?: string) {
   if (cond) console.log(`  ✓ [PASS] ${name}`);
   else {
     failed++;
-    console.error(`  ✗ [FAIL] ${name}${info ? ` -> ${info}` : ''}`);
+    const detail = info ? ` -> ${info}` : '';
+    console.error(`  ✗ [FAIL] ${name}${detail}`);
+    console.log(`::error file=tests/deploy_config_tests.ts::[FAIL] ${name}${detail.replace(/\r?\n/g, ' ')}`);
   }
 }
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception in deploy_config_tests:', err);
+  console.log(`::error file=tests/deploy_config_tests.ts::[CRASH] ${err.message}`);
+  process.exit(1);
+});
 function run(cmd: string, args: string[], env: Record<string, string> = {}, input?: string) {
   return spawnSync(cmd, args, { cwd: root, encoding: 'utf8', env: { ...process.env, ...env }, input, timeout: 600_000 });
 }
