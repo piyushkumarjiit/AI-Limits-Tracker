@@ -90,13 +90,14 @@ export interface AccountEntity {
   createdAt: string;
 }
 
-export type AuthType = 'oauth' | 'cookie' | 'token';
+export type AuthType = 'oauth' | 'cookie' | 'token' | 'cpa';
 
 export interface AccountCredentials {
   /**
    * oauth  – per-account OAuth tokens (Claude Code / Codex login), fully isolated, auto-refreshed.
    * cookie – raw browser cookies imported via cURL / sessionKey.
    * token  – bare bearer access token (ChatGPT), no refresh.
+   * cpa    – CLIProxyAPI-held credentials, token never stored or refreshed by tracker.
    */
   authType?: AuthType;
   accessToken?: string;
@@ -110,6 +111,17 @@ export interface AccountCredentials {
   profileFetchedAt?: number;
   /** Antigravity: Cloud Code project id resolved via loadCodeAssist (cached). */
   projectId?: string;
+
+  /** CPA (CLIProxyAPI) integration fields (§3.1) */
+  cpaAuthIndex?: string;
+  cpaName?: string;
+  cpaProvider?: 'claude' | 'codex' | 'antigravity' | string;
+  cpaProjectId?: string;
+  cpaAccountId?: string;
+  cpaStatus?: string;
+  cpaSignals?: Record<string, string>;
+  cpaObservedAt?: string;
+  cpaQuota?: { observed_at?: string; signals?: Record<string, string> };
 
   cookies?: string;
   sessionKey?: string;
