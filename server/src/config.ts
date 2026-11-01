@@ -22,7 +22,7 @@ const MAX_SESSION_DAYS = 365;
 /** Bounds for CPA configuration */
 const MIN_CPA_TIMEOUT_MS = 1000;
 const MAX_CPA_TIMEOUT_MS = 60000;
-const MIN_CPA_POLL_INTERVAL_SEC = 5;
+const MIN_CPA_POLL_INTERVAL_SEC = 15;
 const MAX_CPA_POLL_INTERVAL_SEC = 3600;
 
 const HINT = 'Generate one with: openssl rand -hex 32';
