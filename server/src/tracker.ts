@@ -7,6 +7,7 @@ import { buildChatGPTAuthorizeUrl, exchangeChatGPTCode } from '../../src/service
 import { buildClaudeAuthorizeUrl, exchangeClaudeCode } from '../../src/services/oauth/claudeOAuth';
 import { bindingBucket, mergeWithPrevious } from '../../src/services/providers/common';
 import { getProvider } from '../../src/services/providers';
+import type { UsageProvider } from '../../src/services/providers/UsageProvider';
 import { PROVIDER_NAMES } from '../../src/constants/theme';
 import { notify } from './notify';
 import { ServerAccount, Store } from './store';
@@ -28,8 +29,18 @@ export class Tracker {
   private inFlight = new Map<string, Promise<void>>();
   private timer: NodeJS.Timeout | null = null;
   lastSyncAllAt: string | null = null;
+  cpaJitterEnabled: boolean = true;
+  cpaJitterMaxMs?: number;
 
-  constructor(private store: Store) {}
+  constructor(private store: Store, private cpaProvider?: UsageProvider) {}
+
+  setCpaProvider(provider: UsageProvider): void {
+    this.cpaProvider = provider;
+  }
+
+  getCpaProvider(): UsageProvider | undefined {
+    return this.cpaProvider;
+  }
 
   /* ---------------- Polling ---------------- */
 
@@ -58,8 +69,52 @@ export class Tracker {
 
   async syncAll(): Promise<void> {
     const accounts = this.store.listAccounts().filter((a) => a.isActive);
-    await Promise.allSettled(accounts.map((a) => this.sync(a.id)));
+    const nativeAccounts: ServerAccount[] = [];
+    const cpaAccounts: ServerAccount[] = [];
+
+    for (const a of accounts) {
+      const creds = this.store.getCredentials(a.id);
+      if (creds?.authType === 'cpa') {
+        cpaAccounts.push(a);
+      } else {
+        nativeAccounts.push(a);
+      }
+    }
+
+    const nativePromises = nativeAccounts.map((a) => this.sync(a.id));
+    const cpaPromise = this.syncCpaAccounts(cpaAccounts);
+
+    await Promise.allSettled([...nativePromises, cpaPromise]);
     this.lastSyncAllAt = new Date().toISOString();
+  }
+
+  private async syncCpaAccounts(accounts: ServerAccount[]): Promise<void> {
+    if (accounts.length === 0) return;
+    const CONCURRENCY_CAP = 4;
+    const intervalMs = this.intervalMin() * 60 * 1000;
+    let index = 0;
+
+    const workers = Array.from({ length: Math.min(CONCURRENCY_CAP, accounts.length) }, async () => {
+      while (index < accounts.length) {
+        const acc = accounts[index++];
+        if (!acc) break;
+        if (this.cpaJitterEnabled) {
+          const maxJitter =
+            this.cpaJitterMaxMs !== undefined ? this.cpaJitterMaxMs : intervalMs * 0.1;
+          const jitter = Math.floor(Math.random() * maxJitter);
+          if (jitter > 0) {
+            await new Promise((res) => setTimeout(res, jitter));
+          }
+        }
+        try {
+          await this.sync(acc.id);
+        } catch {
+          // Handled inside sync()
+        }
+      }
+    });
+
+    await Promise.allSettled(workers);
   }
 
   /** One sync per account at a time — refresh tokens rotate and must not race. */
@@ -75,7 +130,23 @@ export class Tracker {
     const account = this.store.getAccount(accountId);
     if (!account) return;
     const creds = this.store.getCredentials(accountId) || {};
-    const result = await getProvider(account.providerType).fetchUsage(accountId, creds);
+
+    // For CPA accounts: skip quota fetch if link is unlinked or cpaStatus === 'disabled'
+    if (creds.authType === 'cpa') {
+      const link = this.store.getCpaLink(accountId);
+      if (link && link.state === 'unlinked') {
+        return;
+      }
+      if (creds.cpaStatus === 'disabled') {
+        return;
+      }
+    }
+
+    const provider =
+      creds.authType === 'cpa' && this.cpaProvider
+        ? this.cpaProvider
+        : getProvider(account.providerType);
+    const result = await provider.fetchUsage(accountId, creds);
     if (result.updatedCredentials) this.store.setCredentials(accountId, result.updatedCredentials);
 
     const snapshot = mergeWithPrevious(result.snapshot, account.latestSnapshot);
