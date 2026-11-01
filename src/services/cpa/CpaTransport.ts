@@ -260,7 +260,15 @@ export class CpaTransport {
    * Update metadata fields for a credential in CPA.
    * Path: PATCH /v8/management/credentials/fields (fallback to PATCH /v0/management/auth-files/fields).
    */
-  async patchFields(req: CpaPatchFieldsRequest): Promise<void> {
+  async patchFields(
+    nameOrReq: string | CpaPatchFieldsRequest,
+    fields?: Record<string, unknown>
+  ): Promise<void> {
+    const req: CpaPatchFieldsRequest =
+      typeof nameOrReq === 'string'
+        ? { name: nameOrReq, ...(fields || {}) }
+        : nameOrReq;
+
     try {
       await this.cpaFetch('/v8/management/credentials/fields', {
         method: 'PATCH',
@@ -276,6 +284,14 @@ export class CpaTransport {
         throw err;
       }
     }
+  }
+
+  /**
+   * Update credential weight in CPA.
+   * Sends PATCH /credentials/fields with { name, weight, alt_managed_weight: true }
+   */
+  async patchCredentialWeight(name: string, weight: number): Promise<void> {
+    await this.patchFields({ name, weight, alt_managed_weight: true });
   }
 
   /**

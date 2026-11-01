@@ -5,6 +5,12 @@ import { dirname, resolve, sep } from 'node:path';
 import type { AccountCredentials, AccountEntity, AlertKind, AlertLogEntry, UsageSnapshot } from '../../src/models/types';
 import type { StatPoint } from '../../src/services/stats';
 import type { CpaLink } from '../../src/services/cpa/reconcile';
+import type { LinkRoutingState } from '../../src/services/cpa/types';
+import {
+  DEFAULT_ROUTING,
+  type RoutingConfig,
+  validateRoutingConfig,
+} from '../../src/services/cpa/routingPlanner';
 
 export interface ServerAccount extends AccountEntity {
   latestSnapshot?: UsageSnapshot;
@@ -233,9 +239,9 @@ export class Store {
         link.accountId,
         link.identityKey,
         link.cpaName,
-        link.authIndex,
+        link.authIndex ?? null,
         link.state,
-        link.lastSeenAt,
+        link.lastSeenAt ?? Date.now(),
         link.unlinkedAt ?? null,
         link.routingJson ?? null
       );
@@ -323,6 +329,50 @@ export class Store {
     this.db
       .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(key, value);
+  }
+
+  getCpaRoutingConfig(): RoutingConfig {
+    const raw = this.getSetting('cpa_routing');
+    if (raw) {
+      try {
+        return validateRoutingConfig(JSON.parse(raw));
+      } catch {
+        // Fall back to default
+      }
+    }
+    const envMode = process.env.CPA_ROUTING_MODE?.trim();
+    if (envMode === 'off' || envMode === 'shadow' || envMode === 'enforce') {
+      return { ...DEFAULT_ROUTING, mode: envMode };
+    }
+    return { ...DEFAULT_ROUTING };
+  }
+
+  setCpaRoutingConfig(cfg: RoutingConfig): void {
+    const validated = validateRoutingConfig(cfg);
+    this.setSetting('cpa_routing', JSON.stringify(validated));
+  }
+
+  updateCpaLinkRouting(accountId: string, routing: LinkRoutingState | null): void {
+    const json = routing ? JSON.stringify(routing) : null;
+    this.db
+      .prepare('UPDATE cpa_links SET routing_json = ? WHERE account_id = ?')
+      .run(json, accountId);
+  }
+
+  getCpaLinkRouting(accountId: string): LinkRoutingState | null {
+    const link = this.getCpaLink(accountId);
+    if (!link || !link.routingJson) return null;
+    try {
+      return JSON.parse(link.routingJson) as LinkRoutingState;
+    } catch {
+      return null;
+    }
+  }
+
+  setCpaLinkManaged(accountId: string, managed: boolean): void {
+    const routing = this.getCpaLinkRouting(accountId) || {};
+    routing.managed = managed;
+    this.updateCpaLinkRouting(accountId, routing);
   }
 
   /** Flushes the write-ahead log into the database file (used on shutdown). */

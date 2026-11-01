@@ -4,6 +4,7 @@ import { CpaTransport } from '../../src/services/cpa/CpaTransport';
 import { CpaCredential, CpaListResponse } from '../../src/services/cpa/types';
 import { CpaLink, ReconcileAction, reconcile } from '../../src/services/cpa/reconcile';
 import type { AccountCredentials } from '../../src/models/types';
+import type { CpaRoutingExecutor } from './cpaRouting';
 
 export interface CpaSyncEngineConfig {
   syncIntervalSec?: number;
@@ -15,6 +16,7 @@ export interface CpaSyncStatus {
   enabled: boolean;
   lastDiscoveryAt: string | null;
   lastDiscoveryOk: boolean;
+  routingMode?: string;
 }
 
 export class CpaSyncEngine {
@@ -23,6 +25,8 @@ export class CpaSyncEngine {
   private lastDiscoveryAt: string | null = null;
   private lastDiscoveryOk: boolean = false;
   private emptyStreak: number = 0;
+  private routingExecutor?: CpaRoutingExecutor;
+  private trackerHookRegistered: boolean = false;
 
   readonly syncIntervalSec: number;
   readonly purgeDays: number;
@@ -32,11 +36,37 @@ export class CpaSyncEngine {
     private store: Store,
     private tracker: Tracker,
     private t: CpaTransport,
-    cfg?: CpaSyncEngineConfig
+    cfg?: CpaSyncEngineConfig,
+    routingExecutor?: CpaRoutingExecutor
   ) {
     this.syncIntervalSec = cfg?.syncIntervalSec ?? 60;
     this.purgeDays = cfg?.purgeDays ?? 30;
     this.adoptExisting = cfg?.adoptExisting ?? true;
+    this.routingExecutor = routingExecutor;
+    this.hookTrackerSync();
+  }
+
+  private hookTrackerSync(): void {
+    if (this.trackerHookRegistered) return;
+    if (typeof this.tracker.onSyncAll === 'function') {
+      this.trackerHookRegistered = true;
+      this.tracker.onSyncAll(() => {
+        if (this.routingExecutor) {
+          this.routingExecutor.run().catch((err) => {
+            console.error('[cpaSync] routingExecutor.run after tracker sync failed:', err);
+          });
+        }
+      });
+    }
+  }
+
+  setRoutingExecutor(executor: CpaRoutingExecutor): void {
+    this.routingExecutor = executor;
+    this.hookTrackerSync();
+  }
+
+  getRoutingExecutor(): CpaRoutingExecutor | undefined {
+    return this.routingExecutor;
   }
 
   start(): void {
@@ -61,10 +91,12 @@ export class CpaSyncEngine {
   }
 
   status(): CpaSyncStatus {
+    const routingCfg = this.store.getCpaRoutingConfig();
     return {
       enabled: true,
       lastDiscoveryAt: this.lastDiscoveryAt,
       lastDiscoveryOk: this.lastDiscoveryOk,
+      routingMode: routingCfg.mode,
     };
   }
 
@@ -155,6 +187,15 @@ export class CpaSyncEngine {
       }
     }
     await Promise.allSettled(syncPromises);
+
+    // Invoke routing write-back executor after discovery pass
+    if (this.routingExecutor) {
+      try {
+        await this.routingExecutor.run(entries);
+      } catch (err) {
+        console.error('[cpaSync] routingExecutor.run after discovery failed:', err);
+      }
+    }
 
     return result.actions;
   }
