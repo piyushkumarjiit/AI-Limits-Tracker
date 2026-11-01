@@ -15,10 +15,26 @@
   --bad: #ef4444;
   --bad-soft: #fdecec;
   --ring: #1f9d74;
+  --sev-healthy: #1f9d74;
+  --sev-healthy-ink: #15803d;
+  --sev-healthy-soft: #e7f6ec;
+  --sev-warning: #d97706;
+  --sev-warning-ink: #b45309;
+  --sev-warning-soft: #fdf3e1;
+  --sev-critical: #ea580c;
+  --sev-critical-ink: #c2410c;
+  --sev-critical-soft: #fff1e6;
+  --sev-exhausted: #dc2626;
+  --sev-exhausted-ink: #dc2626;
+  --sev-exhausted-soft: #fdecec;
+  --ring-size: 88px;
   --radius: 22px;
   --shadow: 0 3px 12px rgba(63, 58, 46, 0.06);
   color-scheme: light;
 }
+
+@media (min-width: 960px) { :root { --ring-size: 96px; } }
+@media (max-width: 380px) { :root { --ring-size: 80px; } }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
@@ -141,6 +157,13 @@ button.card:active { transform: scale(0.985); background: #f7f6f2; }
 
 .logo { display: grid; place-items: center; flex: none; }
 .ring { position: relative; display: grid; place-items: center; flex: none; }
+.ring b, .ac-foot, .fd-legend, .family-card .meta { font-variant-numeric: tabular-nums; }
+.dr-track { fill: none; stroke: var(--track); }
+.dr-track.dr-exhausted { stroke: var(--sev-exhausted-soft); outline: none; }
+.dr-arc { fill: none; transition: stroke-dashoffset .6s ease, stroke .3s ease; }
+.ring.dual .ring-center span { font-size: 10.5px; font-weight: 600; }
+.ring.sev-exhausted .ring-center b { color: var(--sev-exhausted-ink); }
+.ring.sev-critical .ring-center b { color: var(--sev-critical-ink); }
 .ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .ring-center b { font-weight: 800; letter-spacing: -0.6px; }
 .ring-center span { color: var(--muted); }
@@ -191,11 +214,19 @@ button.card:active { transform: scale(0.985); background: #f7f6f2; }
 .chip.active { background: var(--ink); border-color: var(--ink); color: #fff; }
 .chip.active i { background: #fff; color: var(--text); }
 
-.account-card { display: flex; align-items: center; gap: 8px; padding: 14px; margin-bottom: 12px; }
+.account-card { display: flex; align-items: center; gap: 8px; padding: 14px; margin-bottom: 12px; flex-wrap: wrap; row-gap: 10px; }
 .ac-left { flex: 1; min-width: 0; display: flex; align-items: center; gap: 11px; }
 .ac-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ac-meta b { font-size: 15.5px; letter-spacing: -0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ac-right { width: 96px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.ac-foot { flex-basis: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--muted); }
+.ac-foot b { color: var(--text); }
+.pill { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+.pill.sev-healthy { background: var(--sev-healthy-soft); color: var(--sev-healthy-ink); }
+.pill.sev-warning { background: var(--sev-warning-soft); color: var(--sev-warning-ink); }
+.pill.sev-critical { background: var(--sev-critical-soft); color: var(--sev-critical-ink); }
+.pill.sev-exhausted { background: var(--sev-exhausted-soft); color: var(--sev-exhausted-ink); }
+.badge-next { font-size: 10.5px; font-weight: 800; color: #fff; background: var(--ink); padding: 2px 8px; border-radius: 999px; }
 .reset { display: inline-flex; align-items: center; gap: 4px; font-size: 13.5px; }
 .stale { font-size: 10px; color: var(--warn); text-align: right; }
 
@@ -383,6 +414,8 @@ button.card:active { transform: scale(0.985); background: #f7f6f2; }
   .remote-panel { padding: 14px; }
   .remote-pair > code { font-size: 21px; }
 }
+@media (max-width: 380px) { .ac-foot .long { display: none; } }
 @media (prefers-reduced-motion: reduce) {
   .remote-page *, .remote-page *::before, .remote-page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .dr-arc, .track i { transition: none; }
 }
