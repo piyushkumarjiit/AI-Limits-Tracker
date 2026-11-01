@@ -32,6 +32,7 @@
     "tests/deploy_config_tests.ts",
     "tests/antigravity_oauth_tests.ts",
     "tests/antigravity_parser_tests.ts",
-    "tests/antigravity_provider_tests.ts"
+    "tests/antigravity_provider_tests.ts",
+    "tests/capacity_tests.ts"
   ]
 }

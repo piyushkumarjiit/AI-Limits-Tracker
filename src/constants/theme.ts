@@ -1,4 +1,23 @@
 import { ProviderType } from '../models/types';
+import { Severity, severityOf } from '../services/capacity';
+
+export { Severity, severityOf } from '../services/capacity';
+
+export const SEVERITY_COLORS = {
+  healthy: '#1f9d74',
+  warning: '#d97706',
+  critical: '#ea580c',
+  exhausted: '#dc2626',
+  unknown: '#a1a1aa',
+} as const;
+
+export const SeverityTokens = {
+  healthy: { stroke: '#1f9d74', ink: '#15803d', soft: '#e7f6ec' },
+  warning: { stroke: '#d97706', ink: '#b45309', soft: '#fdf3e1' },
+  critical: { stroke: '#ea580c', ink: '#c2410c', soft: '#fff1e6' },
+  exhausted: { stroke: '#dc2626', ink: '#dc2626', soft: '#fdecec' },
+  unknown: { stroke: '#a1a1aa', ink: '#71717a', soft: '#eceae4' },
+} as const;
 
 export const Colors = {
   // Warm light palette from the design mockup
@@ -176,13 +195,18 @@ export function accountChartColor(providerType: ProviderType, indexWithinProvide
   return indexWithinProvider % 2 === 0 ? scheme.chart : scheme.chartAlt;
 }
 
+/** Ring color by remaining percent, using severity thresholds and colors. */
+export function severityColor(remaining: number | null, providerType?: ProviderType): string {
+  const sev = severityOf(remaining);
+  if (sev === 'healthy' && providerType === 'gemini') {
+    return Colors.ringBlue;
+  }
+  return SEVERITY_COLORS[sev];
+}
+
 /** Ring color by remaining percent, as in the mockup (green → orange → red). */
 export function remainingColor(remaining: number | null, providerType?: ProviderType): string {
-  if (remaining === null) return Colors.unavailable;
-  if (remaining <= 15) return Colors.exhausted;
-  if (remaining <= 35) return Colors.critical;
-  if (providerType === 'gemini') return Colors.ringBlue;
-  return Colors.ring;
+  return severityColor(remaining, providerType);
 }
 
 export const Typography = {
