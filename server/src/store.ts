@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
 import type { AccountCredentials, AccountEntity, AlertKind, AlertLogEntry, UsageSnapshot } from '../../src/models/types';
 import type { StatPoint } from '../../src/services/stats';
+import type { CpaLink } from '../../src/services/cpa/reconcile';
 
 export interface ServerAccount extends AccountEntity {
   latestSnapshot?: UsageSnapshot;
@@ -110,6 +111,16 @@ export class Store {
         armed0 INTEGER NOT NULL DEFAULT 1
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS cpa_links (
+        account_id TEXT PRIMARY KEY,
+        identity_key TEXT NOT NULL UNIQUE,
+        cpa_name TEXT NOT NULL,
+        auth_index TEXT NOT NULL,
+        state TEXT NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        unlinked_at INTEGER,
+        routing_json TEXT
+      );
     `);
     // SQLite creates these with the process umask; the WAL/SHM siblings appear
     // once the journal is enabled. Tighten whichever exist now.
@@ -166,7 +177,7 @@ export class Store {
         a.orderIndex,
         a.isActive ? 1 : 0,
         a.lastSyncAt ?? null,
-        a.lastStatus,
+        a.lastStatus ?? 'idle',
         a.lastError ?? null,
         a.createdAt,
         a.latestSnapshot ? JSON.stringify(a.latestSnapshot) : null
@@ -178,6 +189,60 @@ export class Store {
     this.db.prepare('DELETE FROM history WHERE account_id = ?').run(id);
     this.db.prepare('DELETE FROM alerts WHERE account_id = ?').run(id);
     this.db.prepare('DELETE FROM alert_state WHERE account_id = ?').run(id);
+    this.db.prepare('DELETE FROM cpa_links WHERE account_id = ?').run(id);
+  }
+
+  private rowToCpaLink(r: any): CpaLink {
+    return {
+      accountId: r.account_id,
+      identityKey: r.identity_key,
+      cpaName: r.cpa_name,
+      authIndex: r.auth_index,
+      state: r.state as 'linked' | 'unlinked',
+      lastSeenAt: Number(r.last_seen_at),
+      unlinkedAt: r.unlinked_at != null ? Number(r.unlinked_at) : null,
+      routingJson: r.routing_json ?? null,
+    };
+  }
+
+  getCpaLink(accountId: string): CpaLink | null {
+    const r = this.db.prepare('SELECT * FROM cpa_links WHERE account_id = ?').get(accountId);
+    return r ? this.rowToCpaLink(r) : null;
+  }
+
+  listCpaLinks(): CpaLink[] {
+    const rows = this.db.prepare('SELECT * FROM cpa_links').all() as any[];
+    return rows.map((r) => this.rowToCpaLink(r));
+  }
+
+  upsertCpaLink(link: CpaLink): void {
+    this.db
+      .prepare(
+        `INSERT INTO cpa_links (account_id, identity_key, cpa_name, auth_index, state, last_seen_at, unlinked_at, routing_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(account_id) DO UPDATE SET
+           identity_key = excluded.identity_key,
+           cpa_name = excluded.cpa_name,
+           auth_index = excluded.auth_index,
+           state = excluded.state,
+           last_seen_at = excluded.last_seen_at,
+           unlinked_at = excluded.unlinked_at,
+           routing_json = excluded.routing_json`
+      )
+      .run(
+        link.accountId,
+        link.identityKey,
+        link.cpaName,
+        link.authIndex,
+        link.state,
+        link.lastSeenAt,
+        link.unlinkedAt ?? null,
+        link.routingJson ?? null
+      );
+  }
+
+  deleteCpaLink(accountId: string): void {
+    this.db.prepare('DELETE FROM cpa_links WHERE account_id = ?').run(accountId);
   }
 
   getCredentials(id: string): AccountCredentials | null {

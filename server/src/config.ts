@@ -69,7 +69,8 @@ export function validateCpaConfig(env: Env): string[] {
   const rawBaseUrl = (env.CPA_BASE_URL ?? '').trim();
   const rawMgmtKey = (env.CPA_MANAGEMENT_KEY ?? '').trim();
   const rawTimeout = (env.CPA_TIMEOUT_MS ?? '').trim();
-  const rawPoll = (env.CPA_POLL_INTERVAL_SEC ?? '').trim();
+  const rawPollKey = env.CPA_SYNC_INTERVAL_SEC ? 'CPA_SYNC_INTERVAL_SEC' : 'CPA_POLL_INTERVAL_SEC';
+  const rawPoll = (env.CPA_SYNC_INTERVAL_SEC ?? env.CPA_POLL_INTERVAL_SEC ?? '').trim();
 
   // If both base URL and management key are unset, CPA is disabled (valid)
   if (!rawBaseUrl && !rawMgmtKey) {
@@ -77,7 +78,7 @@ export function validateCpaConfig(env: Env): string[] {
       errors.push('CPA_TIMEOUT_MS is configured but CPA_BASE_URL is not set.');
     }
     if (rawPoll) {
-      errors.push('CPA_POLL_INTERVAL_SEC is configured but CPA_BASE_URL is not set.');
+      errors.push(`${rawPollKey} is configured but CPA_BASE_URL is not set.`);
     }
     return errors;
   }
@@ -123,11 +124,11 @@ export function validateCpaConfig(env: Env): string[] {
 
   if (rawPoll) {
     if (!/^\d+$/.test(rawPoll)) {
-      errors.push(`CPA_POLL_INTERVAL_SEC must be a positive integer between ${MIN_CPA_POLL_INTERVAL_SEC} and ${MAX_CPA_POLL_INTERVAL_SEC}. Got ${JSON.stringify(rawPoll)}.`);
+      errors.push(`${rawPollKey} must be a positive integer between ${MIN_CPA_POLL_INTERVAL_SEC} and ${MAX_CPA_POLL_INTERVAL_SEC}. Got ${JSON.stringify(rawPoll)}.`);
     } else {
       const sec = Number(rawPoll);
       if (sec < MIN_CPA_POLL_INTERVAL_SEC || sec > MAX_CPA_POLL_INTERVAL_SEC) {
-        errors.push(`CPA_POLL_INTERVAL_SEC must be between ${MIN_CPA_POLL_INTERVAL_SEC} and ${MAX_CPA_POLL_INTERVAL_SEC}. Got ${sec}.`);
+        errors.push(`${rawPollKey} must be between ${MIN_CPA_POLL_INTERVAL_SEC} and ${MAX_CPA_POLL_INTERVAL_SEC}. Got ${sec}.`);
       }
     }
   }
@@ -156,7 +157,9 @@ export function resolveCpaConfig(env: Env): CpaResolvedConfig | null {
   }
 
   const timeoutMs = env.CPA_TIMEOUT_MS?.trim() ? Number(env.CPA_TIMEOUT_MS.trim()) : 10000;
-  const pollIntervalSec = env.CPA_POLL_INTERVAL_SEC?.trim() ? Number(env.CPA_POLL_INTERVAL_SEC.trim()) : 60;
+  const pollIntervalSec = (env.CPA_SYNC_INTERVAL_SEC ?? env.CPA_POLL_INTERVAL_SEC)?.trim()
+    ? Number((env.CPA_SYNC_INTERVAL_SEC ?? env.CPA_POLL_INTERVAL_SEC)!.trim())
+    : 60;
 
   return {
     baseUrl: cleanBaseUrl,

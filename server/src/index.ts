@@ -11,6 +11,10 @@ import {
 import { installServerNetworking } from './net';
 import { Store } from './store';
 import { Tracker } from './tracker';
+import { CpaTransport } from '../../src/services/cpa/CpaTransport';
+import { CpaUsageProvider } from '../../src/services/cpa/CpaUsageProvider';
+import { CpaSyncEngine } from './cpaSync';
+import { resolveCpaConfig } from './config';
 
 // Server-only SSRF guard: resolve hostnames and cap outbound response bodies.
 installServerNetworking();
@@ -72,6 +76,22 @@ for (const host of ALLOWED_HOSTS) {
 const store = new Store(DATA_DIR, 'tracker.db', APP_SECRET);
 const tracker = new Tracker(store);
 
+const cpaConfig = resolveCpaConfig(process.env);
+let cpaSync: CpaSyncEngine | undefined;
+
+if (cpaConfig) {
+  const cpaTransport = new CpaTransport({
+    baseUrl: cpaConfig.baseUrl,
+    managementKey: cpaConfig.managementKey,
+    timeoutMs: cpaConfig.timeoutMs,
+  });
+  const cpaUsageProvider = new CpaUsageProvider(cpaTransport);
+  tracker.setCpaProvider(cpaUsageProvider);
+  cpaSync = new CpaSyncEngine(store, tracker, cpaTransport, {
+    syncIntervalSec: cpaConfig.pollIntervalSec,
+  });
+}
+
 const server = createApp(
   {
     adminPassword: ADMIN_PASSWORD,
@@ -85,7 +105,7 @@ const server = createApp(
     allowedHosts: ALLOWED_HOSTS,
     maxHeaderSize: 8192,
   },
-  { store, tracker }
+  { store, tracker, cpaSync }
 );
 
 // Explicit resource bounds: slow/malicious clients cannot hold sockets or headers forever.
@@ -107,6 +127,7 @@ function shutdown(signal: string): void {
   }, 10000);
   hard.unref();
   tracker.stop();
+  if (cpaSync) cpaSync.stop();
   server.close(() => {
     try {
       store.checkpoint();
@@ -126,4 +147,5 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   console.log(`AI Limits Tracker server on :${PORT} (data: ${DATA_DIR}, web: ${WEB_DIR})`);
   tracker.start();
+  if (cpaSync) cpaSync.start();
 });
