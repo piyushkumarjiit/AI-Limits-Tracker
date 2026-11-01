@@ -282,9 +282,22 @@ async function handleApi(
   if (path === '/api/quota' && method === 'GET') {
     const q: QuotaQuery = {};
     const provs = url.searchParams.getAll('provider');
-    if (provs.length > 0) q.provider = provs;
+    if (provs.length > 0) {
+      const allowed = new Set(['claude', 'chatgpt', 'antigravity']);
+      for (const p of provs) {
+        if (!allowed.has(p.toLowerCase())) {
+          return send(res, 400, { error: `Invalid provider: ${p}. Must be claude, chatgpt, or antigravity.` });
+        }
+      }
+      q.provider = provs;
+    }
     const src = url.searchParams.get('source');
-    if (src === 'cpa' || src === 'native' || src === 'all') q.source = src;
+    if (src) {
+      if (src !== 'cpa' && src !== 'native' && src !== 'all') {
+        return send(res, 400, { error: `Invalid source: ${src}. Must be cpa, native, or all.` });
+      }
+      q.source = src;
+    }
 
     const cache = quotaCache ?? new QuotaCache(() => store.listAccounts());
     const { view, etag } = cache.get(q);
