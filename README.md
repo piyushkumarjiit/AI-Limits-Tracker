@@ -144,6 +144,7 @@ Paste it into **Add account**. For a second account of the same service, export 
 
 - The server requires `ADMIN_PASSWORD` and `APP_SECRET`. Generate each with `openssl rand -hex 32`; the server refuses to start when either is missing or still an example placeholder, and rejects a short or predictable `APP_SECRET`.
 - `API_TOKEN` is optional: a long-lived bearer token for scripts that cannot log in through the form.
+- `METRICS_TOKEN` is optional: dedicated bearer token for Prometheus `/metrics` scraping (defaults to `API_TOKEN` if not set). Must be at least 24 characters.
 - `SESSION_DAYS` sets the session cookie lifetime (default 30 days). `POST /api/sessions/revoke-all` ends every existing session at once.
 - `ALLOWED_HOSTS` limits which `Host` headers are accepted. Set `TRUST_PROXY=1` when a reverse proxy sits in front so rate limiting sees real client IPs (the Caddy profiles do this for you).
 - Run the panel behind HTTPS only — terminate TLS at a proxy in front of it — and do not expose it on a network you do not trust.
@@ -169,6 +170,83 @@ npm run build:extension
 ```
 
 Reads limits through the browser's **own logged-in session** on claude.ai / chatgpt.com — it never signs in for you. One account per service per Chrome profile; use a second profile for a second account. A badge on the toolbar icon shows the lowest remaining %.
+
+## Prometheus & Quota Integration
+
+AI Limits Tracker exposes machine-readable endpoints for external schedulers, routing proxies (like LiteLLM or CLIProxyAPI), and observability stacks:
+
+### 1. Unified Quota Endpoint (`GET /api/quota`)
+
+Returns normalized quota state, binding windows, headroom scores, age/staleness, and active weights for all accounts. Requires Bearer authentication (`API_TOKEN`).
+
+```bash
+curl -H "Authorization: Bearer <API_TOKEN>" \
+  "https://tracker.example.com/api/quota?provider=claude&source=all"
+```
+
+Supported query parameters:
+- `provider`: Filter by provider (`claude`, `chatgpt`, `antigravity`, etc.; repeatable: `?provider=claude&provider=chatgpt`)
+- `source`: Filter by source (`cpa`, `native`, or `all`, defaults to `all`)
+
+Supports conditional requests via HTTP `ETag: W/"<version>"` and `304 Not Modified` headers with `Cache-Control: private, max-age=15`.
+
+### 2. Prometheus Metrics (`GET /metrics`)
+
+Exports Prometheus-compatible metrics (version 0.0.4) prefixed with `alt_`. Requires dedicated `METRICS_TOKEN` or `API_TOKEN` bearer authentication (throttled by bearer login limiter). Cookie authentication is explicitly rejected.
+
+Sample Prometheus scrape job (`prometheus.yml`):
+```yaml
+scrape_configs:
+  - job_name: 'ai-limits-tracker'
+    scheme: https
+    static_configs:
+      - targets: ['tracker.example.com']
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials: '<METRICS_TOKEN>'
+```
+
+Exported metric series:
+- `alt_quota_used_ratio{provider, account, auth_index, email, window}`: Quota used fraction `[0, 1]`
+- `alt_quota_remaining_ratio{provider, account, auth_index, email, window}`: Quota remaining fraction `[0, 1]`
+- `alt_quota_reset_timestamp_seconds{provider, account, auth_index, email, window}`: Window reset timestamp in epoch seconds
+- `alt_quota_burn_ratio_per_hour{provider, account, auth_index, email, window}`: Burn rate per hour `[0, 1]` (omitted when null)
+- `alt_quota_exhaust_timestamp_seconds{provider, account, auth_index, email, window}`: Predicted quota exhaustion epoch seconds (omitted when null)
+- `alt_account_headroom_ratio{provider, account, auth_index, email}`: Normalized headroom score `[0, 1]`
+- `alt_account_up{provider, account, auth_index, email, status}`: Binary indicator (`1` if `status==ok && !stale`, `0` otherwise)
+- `alt_account_last_success_timestamp_seconds{provider, account, auth_index, email}`: Timestamp of last successful sync
+- `alt_cpa_routing_weight{provider, account, auth_index, kind="planned|applied"}`: Routing weight
+- `alt_cpa_routing_writes_total{result="ok|error|skipped"}`: Counter of routing write attempts
+- `alt_cpa_routing_blocked{reason}`: Gauge set when enforce mode is blocked
+- `alt_cpa_discovery_last_success_timestamp_seconds`: Timestamp of last successful discovery pass
+- `alt_cpa_credentials{provider, link_state}`: Total CPA credentials by link state
+- `alt_cpa_ignored_credentials{provider}`: Total ignored credentials
+- `alt_cpa_requests_total{endpoint, outcome}`: Total CPA API requests performed
+
+### 3. LiteLLM Proxy Integration Example
+
+Use the quota endpoint to dynamically weight or route traffic across accounts:
+
+```yaml
+# litellm_config.yaml
+model_list:
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_KEY_1
+    model_info:
+      id: "acc-1"
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_KEY_2
+    model_info:
+      id: "acc-2"
+
+router_settings:
+  routing_strategy: "usage-based-routing" # Routes traffic proportionally to available headroom
+```
 
 ---
 

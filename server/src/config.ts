@@ -13,6 +13,8 @@ const MIN_SECRET_LENGTH = 16;
 const RECOMMENDED_SECRET_LENGTH = 32;
 /** Minimum length for an explicitly configured API_TOKEN. */
 const MIN_API_TOKEN_LENGTH = 24;
+/** Minimum length for an explicitly configured METRICS_TOKEN. */
+const MIN_METRICS_TOKEN_LENGTH = 24;
 /** Bounds for an explicitly configured SESSION_DAYS value. */
 const MIN_SESSION_DAYS = 1;
 const MAX_SESSION_DAYS = 365;
@@ -257,6 +259,7 @@ export function validateConfig(env: Env): string[] {
   const adminPassword = env.ADMIN_PASSWORD ?? '';
   const appSecret = env.APP_SECRET ?? '';
   const apiToken = env.API_TOKEN ?? '';
+  const metricsToken = env.METRICS_TOKEN ?? '';
 
   if (!adminPassword) {
     errors.push(EMPTY_ADMIN_PASSWORD);
@@ -278,6 +281,10 @@ export function validateConfig(env: Env): string[] {
     errors.push(`API_TOKEN must be at least ${MIN_API_TOKEN_LENGTH} characters. ${HINT}`);
   }
 
+  if (metricsToken && metricsToken.length < MIN_METRICS_TOKEN_LENGTH) {
+    errors.push(`METRICS_TOKEN must be at least ${MIN_METRICS_TOKEN_LENGTH} characters. ${HINT}`);
+  }
+
   const sessionDays = sessionDaysProblem(env);
   if (sessionDays) errors.push(sessionDays);
 
@@ -296,6 +303,7 @@ export function validateConfigWarnings(env: Env): string[] {
   const adminPassword = env.ADMIN_PASSWORD ?? '';
   const appSecret = env.APP_SECRET ?? '';
   const apiToken = env.API_TOKEN ?? '';
+  const metricsToken = env.METRICS_TOKEN ?? '';
 
   if (adminPassword && adminPassword.length < RECOMMENDED_SECRET_LENGTH && !isPlaceholderPassword(adminPassword)) {
     warnings.push(`ADMIN_PASSWORD is shorter than ${RECOMMENDED_SECRET_LENGTH} characters; consider a longer one.`);
@@ -310,6 +318,9 @@ export function validateConfigWarnings(env: Env): string[] {
   }
   if (apiToken && apiToken.length >= MIN_API_TOKEN_LENGTH && apiToken.length < RECOMMENDED_SECRET_LENGTH) {
     warnings.push(`API_TOKEN is shorter than ${RECOMMENDED_SECRET_LENGTH} characters; ${HINT}`);
+  }
+  if (metricsToken && metricsToken.length >= MIN_METRICS_TOKEN_LENGTH && metricsToken.length < RECOMMENDED_SECRET_LENGTH) {
+    warnings.push(`METRICS_TOKEN is shorter than ${RECOMMENDED_SECRET_LENGTH} characters; ${HINT}`);
   }
 
   return warnings;

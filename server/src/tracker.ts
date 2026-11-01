@@ -29,6 +29,7 @@ export class Tracker {
   private inFlight = new Map<string, Promise<void>>();
   private timer: NodeJS.Timeout | null = null;
   private onSyncAllCallbacks: Array<() => void | Promise<void>> = [];
+  private onSyncedCallbacks: Array<(accountId: string) => void | Promise<void>> = [];
   lastSyncAllAt: string | null = null;
   cpaJitterEnabled: boolean = true;
   cpaJitterMaxMs?: number;
@@ -37,6 +38,10 @@ export class Tracker {
 
   onSyncAll(cb: () => void | Promise<void>): void {
     this.onSyncAllCallbacks.push(cb);
+  }
+
+  onSynced(cb: (accountId: string) => void | Promise<void>): void {
+    this.onSyncedCallbacks.push(cb);
   }
 
   setCpaProvider(provider: UsageProvider): void {
@@ -180,6 +185,14 @@ export class Tracker {
 
     if (snapshot.status === 'ok' && !snapshot.isStale) this.recordHistory(accountId, snapshot);
     await this.checkAlerts(updated, snapshot, previousStatus);
+
+    for (const cb of this.onSyncedCallbacks) {
+      try {
+        await cb(accountId);
+      } catch (err) {
+        console.error('[tracker] onSynced callback failed:', err);
+      }
+    }
   }
 
   private recordHistory(accountId: string, s: UsageSnapshot): void {
