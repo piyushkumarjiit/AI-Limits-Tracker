@@ -12,9 +12,54 @@ import { parseAntigravityQuotaSummary } from '../providers/antigravityQuota';
 import { CpaTransport, CpaError } from './CpaTransport';
 import { CpaApiCallResponse } from './types';
 import { bucketsFromClaudeSignals, bucketsFromCodexSignals } from './signals';
+import { CODEX_USER_AGENT, getAntigravityUserAgent } from './clientIdentity';
 
 /** 10 minutes refresh cooldown per credential (§3.2). */
 export const CPA_REFRESH_COOLDOWN_MS = 10 * 60 * 1000;
+
+export function isTerminalQuarantineError(body: unknown): { isQuarantined: boolean; reason: string } {
+  if (!body) return { isQuarantined: false, reason: '' };
+  const str = typeof body === 'string' ? body : JSON.stringify(body);
+  const lower = str.toLowerCase();
+
+  if (str.includes('TOS_VIOLATION') || lower.includes('tos_violation')) {
+    return { isQuarantined: true, reason: 'Terms of Service violation (TOS_VIOLATION)' };
+  }
+  if (str.includes('invalid_grant') || lower.includes('invalid_grant')) {
+    return { isQuarantined: true, reason: 'Token revoked or invalid grant (invalid_grant)' };
+  }
+  if (lower.includes('only authorized for use with claude code')) {
+    return { isQuarantined: true, reason: 'Credential only authorized for use with Claude Code' };
+  }
+  if (lower.includes('account suspended') || lower.includes('account disabled') || lower.includes('account deactivated')) {
+    return { isQuarantined: true, reason: 'Account suspended or disabled' };
+  }
+  if (lower.includes('out of extra usage')) {
+    return { isQuarantined: true, reason: 'Out of extra usage' };
+  }
+  if (lower.includes('third-party apps now draw from')) {
+    return { isQuarantined: true, reason: 'Third-party app extra usage exhausted' };
+  }
+
+  return { isQuarantined: false, reason: '' };
+}
+
+function makeQuarantinedCredentials(creds: AccountCredentials, reason: string): AccountCredentials {
+  return {
+    ...creds,
+    authType: 'cpa',
+    cpaAuthIndex: creds.cpaAuthIndex,
+    cpaName: creds.cpaName,
+    cpaProvider: creds.cpaProvider,
+    cpaAccountId: creds.cpaAccountId,
+    cpaProjectId: creds.cpaProjectId,
+    cpaStatus: 'disabled',
+    quarantined: true,
+    quarantinedAt: new Date().toISOString(),
+    quarantineReason: reason,
+    cpaRisk: 'suspended',
+  };
+}
 
 export interface RefreshGate {
   canRefresh(key: string, now?: number): boolean;
@@ -84,6 +129,18 @@ export class CpaUsageProvider implements UsageProvider {
           provider,
           'error',
           'Missing cpaAuthIndex or cpaName'
+        ),
+      };
+    }
+
+    // Check if account has been marked quarantined or suspended
+    if (creds.quarantined || creds.cpaRisk === 'suspended') {
+      return {
+        snapshot: failureSnapshot(
+          accountId,
+          provider,
+          'quarantined',
+          creds.quarantineReason || 'Account quarantined due to terminal error'
         ),
       };
     }
@@ -187,6 +244,20 @@ export class CpaUsageProvider implements UsageProvider {
         return this.parseProviderResponse(accountId, creds, provider, apiResp);
       }
 
+      // Check for terminal quarantine patterns across 403, 400, or any non-2xx
+      const quarantineCheck = isTerminalQuarantineError(apiResp.body);
+      if (quarantineCheck.isQuarantined) {
+        return {
+          snapshot: failureSnapshot(
+            accountId,
+            provider,
+            'quarantined',
+            quarantineCheck.reason
+          ),
+          updatedCredentials: makeQuarantinedCredentials(creds, quarantineCheck.reason),
+        };
+      }
+
       // Handle 401 Unauthorized from upstream provider
       if (apiResp.status_code === 401) {
         return this.handleUpstream401(accountId, creds, provider, authTarget, hasRetried);
@@ -238,6 +309,20 @@ export class CpaUsageProvider implements UsageProvider {
         ),
       };
     } catch (err: any) {
+      // Check if caught error represents a terminal quarantine error
+      const errQuarantine = isTerminalQuarantineError(err?.message || err?.body || String(err));
+      if (errQuarantine.isQuarantined) {
+        return {
+          snapshot: failureSnapshot(
+            accountId,
+            provider,
+            'quarantined',
+            errQuarantine.reason
+          ),
+          updatedCredentials: makeQuarantinedCredentials(creds, errQuarantine.reason),
+        };
+      }
+
       if (err instanceof CpaError) {
         // Management 401 or 403 -> operator problem, surface as account error, NOT reauth_required and NO forceRefresh
         if (err.status === 401 || err.status === 403) {
@@ -310,7 +395,19 @@ export class CpaUsageProvider implements UsageProvider {
           creds.cpaAuthIndex
         );
         return await this.executeActiveProbe(accountId, creds, provider, true);
-      } catch {
+      } catch (refreshErr: any) {
+        const refreshQuarantine = isTerminalQuarantineError(refreshErr?.message || refreshErr?.body || String(refreshErr));
+        if (refreshQuarantine.isQuarantined) {
+          return {
+            snapshot: failureSnapshot(
+              accountId,
+              provider,
+              'quarantined',
+              refreshQuarantine.reason
+            ),
+            updatedCredentials: makeQuarantinedCredentials(creds, refreshQuarantine.reason),
+          };
+        }
         return {
           snapshot: failureSnapshot(
             accountId,
@@ -351,7 +448,7 @@ export class CpaUsageProvider implements UsageProvider {
   private async probeCodex(creds: AccountCredentials): Promise<CpaApiCallResponse> {
     const headers: Record<string, string> = {
       Authorization: 'Bearer $TOKEN$',
-      'User-Agent': 'codex_cli_rs/0.50.0',
+      'User-Agent': CODEX_USER_AGENT,
       Accept: 'application/json',
       originator: 'codex_cli_rs',
     };
@@ -379,7 +476,7 @@ export class CpaUsageProvider implements UsageProvider {
     const headers: Record<string, string> = {
       Authorization: 'Bearer $TOKEN$',
       'Content-Type': 'application/json',
-      'User-Agent': 'antigravity/hub/2.24.0 (aidev_client; os_type=darwin; arch=arm64; cl=1000335682)',
+      'User-Agent': getAntigravityUserAgent(),
     };
 
     const quotaHosts = [
@@ -462,7 +559,18 @@ export class CpaUsageProvider implements UsageProvider {
     };
 
     const updatedCredentials: AccountCredentials | undefined =
-      planName && planName !== creds.plan ? { plan: planName } : undefined;
+      planName && planName !== creds.plan
+        ? {
+            ...creds,
+            plan: planName,
+            authType: 'cpa',
+            cpaAuthIndex: creds.cpaAuthIndex,
+            cpaName: creds.cpaName,
+            cpaProvider: creds.cpaProvider,
+            cpaAccountId: creds.cpaAccountId,
+            cpaProjectId: creds.cpaProjectId,
+          }
+        : undefined;
 
     return {
       snapshot,
