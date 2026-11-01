@@ -144,6 +144,7 @@ Paste it into **Add account**. For a second account of the same service, export 
 
 - The server requires `ADMIN_PASSWORD` and `APP_SECRET`. Generate each with `openssl rand -hex 32`; the server refuses to start when either is missing or still an example placeholder, and rejects a short or predictable `APP_SECRET`.
 - `API_TOKEN` is optional: a long-lived bearer token for scripts that cannot log in through the form.
+- `METRICS_TOKEN` is optional: dedicated bearer token for Prometheus `/metrics` scraping (defaults to `API_TOKEN` if not set). Must be at least 24 characters.
 - `SESSION_DAYS` sets the session cookie lifetime (default 30 days). `POST /api/sessions/revoke-all` ends every existing session at once.
 - `ALLOWED_HOSTS` limits which `Host` headers are accepted. Set `TRUST_PROXY=1` when a reverse proxy sits in front so rate limiting sees real client IPs (the Caddy profiles do this for you).
 - Run the panel behind HTTPS only — terminate TLS at a proxy in front of it — and do not expose it on a network you do not trust.
@@ -169,6 +170,80 @@ npm run build:extension
 ```
 
 Reads limits through the browser's **own logged-in session** on claude.ai / chatgpt.com — it never signs in for you. One account per service per Chrome profile; use a second profile for a second account. A badge on the toolbar icon shows the lowest remaining %.
+
+## Prometheus & Quota Integration
+
+AI Limits Tracker exposes machine-readable endpoints for external schedulers, routing proxies (like LiteLLM or CLIProxyAPI), and observability stacks:
+
+### 1. Unified Quota Endpoint (`GET /api/quota`)
+
+Returns normalized quota state, binding windows, headroom scores, and active weights for all accounts. Requires Bearer authentication (`API_TOKEN`).
+
+```bash
+curl -H "Authorization: Bearer <API_TOKEN>" \
+  "https://tracker.example.com/api/quota?provider=claude&include_exhausted=false"
+```
+
+Supported query parameters:
+- `provider`: Filter by provider (`claude`, `chatgpt`, `gemini`, `antigravity`, etc.)
+- `auth_index`: Filter by CPA auth index
+- `source`: Filter by source (`cpa` or `native`)
+- `include_exhausted`: Include accounts with 0% remaining quota (`true` or `false`, defaults to `true`)
+
+Supports conditional requests via HTTP `ETag` and `304 Not Modified` headers.
+
+### 2. Prometheus Metrics (`GET /metrics`)
+
+Exports Prometheus-compatible metrics (version 0.0.4) prefixed with `alt_`. Requires dedicated `METRICS_TOKEN` or `API_TOKEN` bearer authentication. Cookie authentication is explicitly rejected.
+
+Sample Prometheus scrape job (`prometheus.yml`):
+```yaml
+scrape_configs:
+  - job_name: 'ai-limits-tracker'
+    scheme: https
+    static_configs:
+      - targets: ['tracker.example.com']
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials: '<METRICS_TOKEN>'
+```
+
+Exported metric series:
+- `alt_headroom_score{provider, account, auth_index, email}`: Normalized headroom score `[0, 1]`
+- `alt_effective_remaining_ratio{provider, account, auth_index, email}`: Effective quota fraction remaining `[0, 1]`
+- `alt_current_weight{provider, account, auth_index, email}`: Active proxy weight
+- `alt_target_weight{provider, account, auth_index, email}`: Target weight computed by routing planner
+- `alt_cooldown{provider, account, auth_index, email}`: Binary cooldown flag (`1` or `0`)
+- `alt_window_remaining_ratio{provider, account, auth_index, email, window}`: Remaining fraction per window
+- `alt_window_reset_timestamp_seconds{provider, account, auth_index, email, window}`: Window reset timestamp in epoch seconds
+- `alt_accounts_total{provider}`: Total registered accounts
+- `alt_accounts_active{provider}`: Total active syncing accounts
+- `alt_headroom_available_total`: Aggregate headroom units across all accounts
+
+### 3. LiteLLM Proxy Integration Example
+
+Use the quota endpoint to dynamically weight or route traffic across accounts:
+
+```yaml
+# litellm_config.yaml
+model_list:
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_KEY_1
+    model_info:
+      id: "acc-1"
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_KEY_2
+    model_info:
+      id: "acc-2"
+
+router_settings:
+  routing_strategy: "usage-based-routing" # Routes traffic proportionally to available headroom
+```
 
 ---
 
