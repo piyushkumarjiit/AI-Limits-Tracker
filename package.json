@@ -7,7 +7,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "tsx tests/run_tests.ts && tsx tests/security_tests.ts && tsx tests/security_hardening_tests.ts && tsx tests/session_hardening_tests.ts && tsx tests/final_hardening_tests.ts && tsx tests/deploy_config_tests.ts && tsx tests/antigravity_oauth_tests.ts && tsx tests/antigravity_parser_tests.ts && tsx tests/antigravity_provider_tests.ts",
+    "test": "tsx tests/run_tests.ts && tsx tests/security_tests.ts && tsx tests/security_hardening_tests.ts && tsx tests/session_hardening_tests.ts && tsx tests/final_hardening_tests.ts && tsx tests/deploy_config_tests.ts && tsx tests/antigravity_oauth_tests.ts && tsx tests/antigravity_parser_tests.ts && tsx tests/antigravity_provider_tests.ts && tsx tests/capacity_tests.ts",
     "test:security": "tsx tests/security_tests.ts && tsx tests/security_hardening_tests.ts && tsx tests/session_hardening_tests.ts && tsx tests/final_hardening_tests.ts && tsx tests/deploy_config_tests.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --noEmit && tsc -p server --noEmit && tsc -p web --noEmit && tsc -p extension --noEmit",
