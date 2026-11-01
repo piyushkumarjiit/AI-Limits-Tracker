@@ -23,6 +23,7 @@ export class CpaRoutingExecutor {
   private lastTokenRefillTime: number;
   private bucketCapacity: number;
   private readonly now: () => number;
+  private inFlightRun: Promise<CpaRoutingRunResult> | null = null;
 
   constructor(
     private readonly store: Store,
@@ -60,6 +61,20 @@ export class CpaRoutingExecutor {
   }
 
   async run(entries?: CpaCredential[], simulatedNow?: number): Promise<CpaRoutingRunResult> {
+    if (this.inFlightRun) {
+      return this.inFlightRun;
+    }
+
+    const runPromise = this.executeRun(entries, simulatedNow);
+    this.inFlightRun = runPromise;
+    try {
+      return await runPromise;
+    } finally {
+      this.inFlightRun = null;
+    }
+  }
+
+  private async executeRun(entries?: CpaCredential[], simulatedNow?: number): Promise<CpaRoutingRunResult> {
     const cfg = this.store.getCpaRoutingConfig();
     if (cfg.mode === 'off') {
       this._lastPlans = [];
@@ -104,7 +119,13 @@ export class CpaRoutingExecutor {
         cpaEntries = Array.isArray(listRes) ? listRes : (listRes?.files ?? []);
       } catch (err) {
         console.error('[cpaRouting] Failed to list CPA credentials:', err);
-        cpaEntries = [];
+        return {
+          mode: cfg.mode,
+          applied: false,
+          plans: [],
+          writes: 0,
+          blocked: 'list_failed',
+        };
       }
     }
 
@@ -183,6 +204,14 @@ export class CpaRoutingExecutor {
 
     for (const plan of plans) {
       if (!plan.write) continue;
+
+      // Skip PATCH attempts for any link whose entry is not found in CPA credential list
+      const hasEntry = cpaEntries.some(
+        (e) => e.name === plan.cpaName || e.auth_index === plan.accountId
+      );
+      if (!hasEntry) {
+        continue;
+      }
 
       if (this.tokens < 1) {
         // Token bucket exhausted for this window; skip write
