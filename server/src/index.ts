@@ -107,19 +107,32 @@ if (cpaConfig) {
 const quotaCache = new QuotaCache(
   () => store.listAccounts(),
   () => ({
+    intervalSec: tracker.intervalMin() * 60,
+    cpaStatus: cpaSync ? cpaSync.status() : null,
     cpaLinks: store.listCpaLinks(),
     cpaRouting: {
       config: store.getCpaRoutingConfig(),
       plans: cpaRouting ? cpaRouting.lastPlans() : [],
     },
+    getHistory: (accountId: string) => store.history(Date.now() - 24 * 3600 * 1000, accountId),
   }),
   renderMetrics
 );
 
-// Invalidate quota cache after tracker sync
+// Invalidate quota cache after tracker sync and per-account sync
 tracker.onSyncAll(() => {
   quotaCache.invalidate();
 });
+tracker.onSynced(() => {
+  quotaCache.invalidate();
+});
+
+// Invalidate quota cache after discovery pass
+if (cpaSync) {
+  cpaSync.onDiscoveryComplete(() => {
+    quotaCache.invalidate();
+  });
+}
 
 const server = createApp(
   {

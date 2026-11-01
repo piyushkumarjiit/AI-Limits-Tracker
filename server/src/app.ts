@@ -281,26 +281,22 @@ async function handleApi(
 
   if (path === '/api/quota' && method === 'GET') {
     const q: QuotaQuery = {};
-    const prov = url.searchParams.get('provider');
-    if (prov) q.provider = prov;
-    const authIdx = url.searchParams.get('auth_index');
-    if (authIdx !== null) q.auth_index = authIdx;
+    const provs = url.searchParams.getAll('provider');
+    if (provs.length > 0) q.provider = provs;
     const src = url.searchParams.get('source');
-    if (src === 'cpa' || src === 'native') q.source = src;
-    const inclExh = url.searchParams.get('include_exhausted');
-    if (inclExh !== null) q.include_exhausted = inclExh === 'true' || inclExh === '1';
+    if (src === 'cpa' || src === 'native' || src === 'all') q.source = src;
 
     const cache = quotaCache ?? new QuotaCache(() => store.listAccounts());
     const { view, etag } = cache.get(q);
 
     const clientETag = req.headers['if-none-match'];
     if (clientETag && clientETag === etag) {
-      res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'no-cache' });
+      res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'private, max-age=15' });
       res.end();
       return;
     }
 
-    return send(res, 200, view, { 'ETag': etag, 'Cache-Control': 'no-cache' });
+    return send(res, 200, view, { 'ETag': etag, 'Cache-Control': 'private, max-age=15' });
   }
 
   if (path === '/api/refresh' && method === 'POST') {
@@ -514,21 +510,41 @@ export function createApp(config: AppConfig, deps: AppDeps) {
         if (!effectiveMetricsToken) {
           return send(res, 404, { error: 'Metrics endpoint not configured' });
         }
-        // Strict bearer token authentication: rejects cookie auth
-        const authHeader = req.headers.authorization || '';
-        const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
-        if (!match) {
-          return send(res, 401, { error: 'unauthorized' });
-        }
-        const providedToken = match[1];
-        if (!safeEqual(providedToken, effectiveMetricsToken)) {
-          return send(res, 401, { error: 'unauthorized' });
-        }
+
+      // Strict bearer token authentication: rejects cookie auth
+      const authHeader = req.headers.authorization || '';
+      const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
+      if (!match) {
+        return send(res, 401, { error: 'unauthorized' });
+      }
+
+      // Bearer attempts throttled per address and global ceiling
+      const ip = clientIp(req, config.trustProxy);
+      if (bearerLimiter.tooManyAttempts(ip) || bearerLimiter.globalExceeded()) {
+        return send(res, 429, { error: 'Too many attempts, please wait 15 minutes' });
+      }
+
+      const providedToken = match[1];
+      if (!safeEqual(providedToken, effectiveMetricsToken)) {
+        const failures = bearerLimiter.recordFailure(ip);
+        await sleep(bearerLimiter.delayMs(failures));
+        return send(res, 401, { error: 'unauthorized' });
+      }
+
         const cache = deps.quotaCache ?? new QuotaCache(() => deps.store.listAccounts(), undefined, renderMetrics);
-        const metricsText = cache.getMetricsText();
+        const etag = cache.getETag();
+        const clientETag = req.headers['if-none-match'];
+        if (clientETag && clientETag === etag) {
+          res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'private, max-age=15' });
+          res.end();
+          return;
+        }
+
+        const metricsText = cache.metricsText();
         res.writeHead(200, {
           'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'private, max-age=15',
+          'ETag': etag,
         });
         res.end(metricsText);
         return;
