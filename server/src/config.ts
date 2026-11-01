@@ -156,7 +156,13 @@ export function resolveCpaConfig(env: Env): CpaResolvedConfig | null {
     cleanBaseUrl = cleanBaseUrl.slice(0, -1);
   }
 
-  const timeoutMs = env.CPA_TIMEOUT_MS?.trim() ? Number(env.CPA_TIMEOUT_MS.trim()) : 10000;
+  let timeoutMs = 10000;
+  if (env.CPA_TIMEOUT_MS?.trim()) {
+    const parsed = Number(env.CPA_TIMEOUT_MS.trim());
+    if (!Number.isNaN(parsed) && parsed >= 1000 && parsed <= 120000) {
+      timeoutMs = parsed;
+    }
+  }
   const pollIntervalSec = (env.CPA_SYNC_INTERVAL_SEC ?? env.CPA_POLL_INTERVAL_SEC)?.trim()
     ? Number((env.CPA_SYNC_INTERVAL_SEC ?? env.CPA_POLL_INTERVAL_SEC)!.trim())
     : 60;
