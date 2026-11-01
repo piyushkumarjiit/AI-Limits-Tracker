@@ -61,7 +61,7 @@ export class CpaUsageProvider implements UsageProvider {
   ) {
     this.transport = transport;
     this.refreshGate = refreshGate ?? new MemoryRefreshGate();
-    this.usePassiveSignals = options?.usePassiveSignals ?? true;
+    this.usePassiveSignals = options?.usePassiveSignals ?? false;
   }
 
   validateCredentials(credentials: AccountCredentials): boolean {
@@ -187,37 +187,9 @@ export class CpaUsageProvider implements UsageProvider {
         return this.parseProviderResponse(accountId, creds, provider, apiResp);
       }
 
-      // Handle 401 Unauthorized
+      // Handle 401 Unauthorized from upstream provider
       if (apiResp.status_code === 401) {
-        if (!hasRetried && authTarget && this.refreshGate.canRefresh(authTarget)) {
-          this.refreshGate.markRefreshed(authTarget);
-          try {
-            await this.transport.forceRefresh(
-              creds.cpaName ? creds.cpaName : (creds.cpaAuthIndex ? { auth_index: creds.cpaAuthIndex } : undefined),
-              creds.cpaAuthIndex
-            );
-            return await this.executeActiveProbe(accountId, creds, provider, true);
-          } catch {
-            return {
-              snapshot: failureSnapshot(
-                accountId,
-                provider,
-                'reauth_required',
-                'Authentication failed, refresh attempt failed'
-              ),
-            };
-          }
-        }
-        return {
-          snapshot: failureSnapshot(
-            accountId,
-            provider,
-            'reauth_required',
-            hasRetried
-              ? 'Authentication failed (401)'
-              : 'CPA token stale; CPA refresh pending'
-          ),
-        };
+        return this.handleUpstream401(accountId, creds, provider, authTarget, hasRetried);
       }
 
       // Handle 403 Forbidden
@@ -267,46 +239,26 @@ export class CpaUsageProvider implements UsageProvider {
       };
     } catch (err: any) {
       if (err instanceof CpaError) {
-        // If CPA proxy itself returns 401
-        if (err.status === 401) {
-          if (!hasRetried && authTarget && this.refreshGate.canRefresh(authTarget)) {
-            this.refreshGate.markRefreshed(authTarget);
-            try {
-              await this.transport.forceRefresh(
-                creds.cpaName ? creds.cpaName : (creds.cpaAuthIndex ? { auth_index: creds.cpaAuthIndex } : undefined),
-                creds.cpaAuthIndex
-              );
-              return await this.executeActiveProbe(accountId, creds, provider, true);
-            } catch {
-              return {
-                snapshot: failureSnapshot(
-                  accountId,
-                  provider,
-                  'reauth_required',
-                  'Authentication failed, refresh attempt failed'
-                ),
-              };
-            }
-          }
+        // Management 401 or 403 -> operator problem, surface as account error, NOT reauth_required and NO forceRefresh
+        if (err.status === 401 || err.status === 403) {
           return {
             snapshot: failureSnapshot(
               accountId,
               provider,
-              'reauth_required',
-              hasRetried
-                ? 'Authentication failed (401)'
-                : 'CPA token stale; CPA refresh pending'
+              'error',
+              'CPA management unauthorized'
             ),
           };
         }
 
-        if (err.status === 403) {
+        // CPA 400 "auth token not found" from $TOKEN$ -> maps to account reauth_required
+        if (err.status === 400 && err.message.toLowerCase().includes('auth token not found')) {
           return {
             snapshot: failureSnapshot(
               accountId,
               provider,
               'reauth_required',
-              'Authentication forbidden (403)'
+              'Authentication failed (auth token not found)'
             ),
           };
         }
@@ -341,6 +293,44 @@ export class CpaUsageProvider implements UsageProvider {
         ),
       };
     }
+  }
+
+  private async handleUpstream401(
+    accountId: string,
+    creds: AccountCredentials,
+    provider: ProviderType,
+    authTarget: string | undefined,
+    hasRetried: boolean
+  ): Promise<ProviderFetchResult> {
+    if (!hasRetried && authTarget && this.refreshGate.canRefresh(authTarget)) {
+      this.refreshGate.markRefreshed(authTarget);
+      try {
+        await this.transport.forceRefresh(
+          creds.cpaName ? creds.cpaName : (creds.cpaAuthIndex ? { auth_index: creds.cpaAuthIndex } : undefined),
+          creds.cpaAuthIndex
+        );
+        return await this.executeActiveProbe(accountId, creds, provider, true);
+      } catch {
+        return {
+          snapshot: failureSnapshot(
+            accountId,
+            provider,
+            'reauth_required',
+            'Authentication failed, refresh attempt failed'
+          ),
+        };
+      }
+    }
+    return {
+      snapshot: failureSnapshot(
+        accountId,
+        provider,
+        'reauth_required',
+        hasRetried
+          ? 'Authentication failed (401)'
+          : 'CPA token stale; CPA refresh pending'
+      ),
+    };
   }
 
   private async probeClaude(creds: AccountCredentials): Promise<CpaApiCallResponse> {

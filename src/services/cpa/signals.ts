@@ -32,8 +32,19 @@ function findHeader(normalized: Record<string, string>, ...keys: string[]): stri
 }
 
 /**
- * Parse a utilization value that may be a ratio (0.42 -> 42%) or a percent (42 -> 42%).
+ * Parse a Codex utilization percentage.
+ * Unlike Claude ratio headers, Codex X-Codex-*-Used-Percent headers are already
+ * in percentage units (0 to 100). Do NOT scale <= 2.0 to 100.
  */
+export function parseCodexPercent(raw: string | undefined): number | null {
+  if (!raw) return null;
+  let trimmed = raw.trim();
+  if (trimmed.endsWith('%')) {
+    trimmed = trimmed.slice(0, -1).trim();
+  }
+  const num = parseFloat(trimmed);
+  return isNaN(num) ? null : num;
+}
 export function parseRatioOrPercent(raw: string | undefined): number | null {
   if (!raw) return null;
   let trimmed = raw.trim();
@@ -216,7 +227,7 @@ export function bucketsFromCodexSignals(
     'used-percent'
   );
   if (primaryUsed !== undefined) {
-    const pct = parseRatioOrPercent(primaryUsed);
+    const pct = parseCodexPercent(primaryUsed);
     const rawResetAt = findHeader(
       norm,
       'x-codex-primary-reset-at',
@@ -255,7 +266,7 @@ export function bucketsFromCodexSignals(
     'secondary-used-percent'
   );
   if (secUsed !== undefined) {
-    const pct = parseRatioOrPercent(secUsed);
+    const pct = parseCodexPercent(secUsed);
     const rawResetAt = findHeader(
       norm,
       'x-codex-secondary-reset-at',
@@ -291,7 +302,7 @@ export function bucketsFromCodexSignals(
     'x-codex-code-review-used-percent'
   );
   if (crUsed !== undefined) {
-    const pct = parseRatioOrPercent(crUsed);
+    const pct = parseCodexPercent(crUsed);
     const rawResetAt = findHeader(
       norm,
       'x-codex-code-review-primary-reset-at',

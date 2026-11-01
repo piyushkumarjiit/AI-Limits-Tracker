@@ -4,11 +4,15 @@ import {
   bucketsFromClaudeSignals,
   bucketsFromCodexSignals,
   isSignalFresh,
+  parseCodexPercent,
   parseRatioOrPercent,
   parseResetEpochOrIso,
 } from '../src/services/cpa/signals';
 import { Account } from '../src/models/types';
 import { CpaApiCallResponse } from '../src/services/cpa/types';
+import * as claudeOAuth from '../src/services/oauth/claudeOAuth';
+import * as chatgptOAuth from '../src/services/oauth/chatgptOAuth';
+import * as antigravityOAuth from '../src/services/oauth/antigravityOAuth';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -49,6 +53,17 @@ async function runTests() {
     assert(isSignalFresh(String(Math.floor((now - 30000) / 1000)), now), 'epoch seconds should work');
     assert(!isSignalFresh('', now), 'empty string should be stale');
     assert(!isSignalFresh('invalid-date', now), 'invalid date should be stale');
+  }
+
+  // Test parseCodexPercent (F1: percentages are not ratios)
+  {
+    assertEquals(parseCodexPercent('0'), 0, 'raw "0" -> 0%');
+    assertEquals(parseCodexPercent('1'), 1, 'raw "1" -> 1% (not 100%)');
+    assertEquals(parseCodexPercent('2'), 2, 'raw "2" -> 2% (not 200%)');
+    assertEquals(parseCodexPercent('0.5'), 0.5, 'raw "0.5" -> 0.5% (not 50%)');
+    assertEquals(parseCodexPercent('50'), 50, 'raw "50" -> 50%');
+    assertEquals(parseCodexPercent('100%'), 100, '"100%" -> 100%');
+    assertEquals(parseCodexPercent(undefined), null, 'undefined -> null');
   }
 
   // Test parseRatioOrPercent
@@ -146,14 +161,14 @@ async function runTests() {
     assert(res.snapshot.errorMessage?.includes('Missing cpaAuthIndex') ?? false, 'Helpful error message');
   }
 
-  // Test 2: Passive signals fast-path
+  // Test 2: Passive signals fast-path (requires usePassiveSignals: true)
   {
     const transport = createMockTransport({
       apiCallMock: async () => {
         throw new Error('apiCall should not be invoked when fresh signals exist');
       },
     });
-    const provider = new CpaUsageProvider(transport);
+    const provider = new CpaUsageProvider(transport, undefined, { usePassiveSignals: true });
     const now = Date.now();
     const creds: AccountCredentials = {
       authType: 'cpa',
@@ -169,6 +184,39 @@ async function runTests() {
     assertEquals(res.snapshot.status, 'ok', 'Status should be ok');
     assertEquals(res.snapshot.buckets.length, 1, 'One bucket parsed');
     assertEquals(res.snapshot.buckets[0].utilizationPercent, 50, 'Utilization 50%');
+  }
+
+  // Test 2b: Passive signals default OFF (calls upstream probe when usePassiveSignals not passed)
+  {
+    let probeCalled = false;
+    const transport = createMockTransport({
+      apiCallMock: async () => {
+        probeCalled = true;
+        return {
+          status_code: 200,
+          header: {},
+          body: JSON.stringify({
+            five_hour: { utilization: 20, resets_at: null },
+          }),
+        };
+      },
+    });
+    // Default options (usePassiveSignals: false)
+    const provider = new CpaUsageProvider(transport);
+    const now = Date.now();
+    const creds: AccountCredentials = {
+      authType: 'cpa',
+      cpaProvider: 'claude',
+      cpaAuthIndex: 'cpa-idx-default-off',
+      cpaSignals: {
+        'anthropic-ratelimit-unified-5h-utilization': '0.80',
+        'anthropic-ratelimit-unified-5h-reset': String(Math.floor((now + 3600000) / 1000)),
+      },
+      cpaObservedAt: new Date(now - 5000).toISOString(),
+    };
+    const res = await provider.fetchUsage('acc-passive-off', creds);
+    assertEquals(probeCalled, true, 'Upstream probe called because passive signals default OFF');
+    assertEquals(res.snapshot.buckets[0].utilizationPercent, 20, 'Parsed upstream probe response');
   }
 
   // Test 3: Active probe Claude
@@ -487,6 +535,112 @@ async function runTests() {
     assertEquals(callCount, 2, 'Made 2 calls (initial + 1 retry)');
     assertEquals(res.snapshot.status, 'reauth_required', 'Failed retry gives reauth_required');
     assertEquals(res.snapshot.errorMessage, 'Authentication failed (401)', 'Expected error message');
+  }
+
+  // Test 15: Management 401/403 surfaces as operator error, does not trigger forceRefresh (F3)
+  {
+    let refreshAttempted = false;
+    const transport = createMockTransport({
+      apiCallMock: async () => {
+        throw new CpaError(401, 'Unauthorized management key');
+      },
+      forceRefreshMock: async () => {
+        refreshAttempted = true;
+        return { ok: true };
+      },
+    });
+    const provider = new CpaUsageProvider(transport);
+    const creds: AccountCredentials = {
+      authType: 'cpa',
+      cpaProvider: 'claude',
+      cpaAuthIndex: 'mgmt-401-idx',
+    };
+    const res = await provider.fetchUsage('acc-mgmt-401', creds);
+    assertEquals(refreshAttempted, false, 'Management 401 must NOT trigger forceRefresh');
+    assertEquals(res.snapshot.status, 'error', 'Management 401 must report error status, not reauth_required');
+    assertEquals(res.snapshot.errorMessage, 'CPA management unauthorized', 'Clear operator error message');
+  }
+
+  // Test 16: CPA 400 "auth token not found" maps to reauth_required (F3)
+  {
+    const transport = createMockTransport({
+      apiCallMock: async () => {
+        throw new CpaError(400, 'auth token not found in storage');
+      },
+    });
+    const provider = new CpaUsageProvider(transport);
+    const creds: AccountCredentials = {
+      authType: 'cpa',
+      cpaProvider: 'claude',
+      cpaAuthIndex: 'token-missing-idx',
+    };
+    const res = await provider.fetchUsage('acc-token-missing', creds);
+    assertEquals(res.snapshot.status, 'reauth_required', 'Token not found maps to reauth_required');
+    assert(res.snapshot.errorMessage?.includes('auth token not found') ?? false, 'Helpful reauth message');
+  }
+
+  // Test 17: Native token refresh is never called by CpaUsageProvider (F4)
+  {
+    // Spy / monkeypatch native refresh functions
+    let nativeClaudeRefreshCalled = false;
+    let nativeChatGPTRefreshCalled = false;
+    let nativeAntigravityRefreshCalled = false;
+
+    const origClaude = (claudeOAuth as any).refreshClaudeToken;
+    const origChatGPT = (chatgptOAuth as any).refreshChatGPTToken;
+    const origAntigravity = (antigravityOAuth as any).refreshAntigravityToken;
+
+    (claudeOAuth as any).refreshClaudeToken = async () => {
+      nativeClaudeRefreshCalled = true;
+      throw new Error('Native refreshClaudeToken must never be called by CPA provider!');
+    };
+    (chatgptOAuth as any).refreshChatGPTToken = async () => {
+      nativeChatGPTRefreshCalled = true;
+      throw new Error('Native refreshChatGPTToken must never be called by CPA provider!');
+    };
+    (antigravityOAuth as any).refreshAntigravityToken = async () => {
+      nativeAntigravityRefreshCalled = true;
+      throw new Error('Native refreshAntigravityToken must never be called by CPA provider!');
+    };
+
+    try {
+      let forceRefreshCalled = false;
+      const transport = createMockTransport({
+        apiCallMock: async () => {
+          if (!forceRefreshCalled) {
+            return { status_code: 401, header: {}, body: 'Unauthorized' };
+          }
+          return {
+            status_code: 200,
+            header: {},
+            body: JSON.stringify({
+              five_hour: { utilization: 10, resets_at: null },
+            }),
+          };
+        },
+        forceRefreshMock: async () => {
+          forceRefreshCalled = true;
+          return { ok: true };
+        },
+      });
+
+      const provider = new CpaUsageProvider(transport);
+      const res = await provider.fetchUsage('acc-native-check', {
+        authType: 'cpa',
+        cpaProvider: 'claude',
+        cpaAuthIndex: 'cpa-no-native-idx',
+      });
+
+      assertEquals(res.snapshot.status, 'ok', '401 was recovered via CPA forceRefresh');
+      assertEquals(forceRefreshCalled, true, 'CPA forceRefresh was called');
+      assertEquals(nativeClaudeRefreshCalled, false, 'Native Claude refresh was NEVER called');
+      assertEquals(nativeChatGPTRefreshCalled, false, 'Native ChatGPT refresh was NEVER called');
+      assertEquals(nativeAntigravityRefreshCalled, false, 'Native Antigravity refresh was NEVER called');
+    } finally {
+      (claudeOAuth as any).refreshClaudeToken = origClaude;
+      (chatgptOAuth as any).refreshChatGPTToken = origChatGPT;
+      (antigravityOAuth as any).refreshAntigravityToken = origAntigravity;
+    }
   }
 
   console.log('All CPA provider tests passed successfully!');
