@@ -3,6 +3,7 @@ import { Tracker } from './tracker';
 import { CpaTransport } from '../../src/services/cpa/CpaTransport';
 import { CpaCredential, CpaListResponse } from '../../src/services/cpa/types';
 import { CpaLink, ReconcileAction, reconcile } from '../../src/services/cpa/reconcile';
+import type { AccountCredentials } from '../../src/models/types';
 
 export interface CpaSyncEngineConfig {
   syncIntervalSec?: number;
@@ -99,32 +100,48 @@ export class CpaSyncEngine {
     const accounts = this.store.listAccounts();
     const now = Date.now();
 
-    const result = reconcile(entries, links, accounts, now, {
-      purgeDays: this.purgeDays,
-      adoptExisting: this.adoptExisting,
-      emptyStreak: this.emptyStreak,
+    const credMap = new Map<string, AccountCredentials>();
+    for (const a of accounts) {
+      const c = this.store.getCredentials(a.id);
+      if (c) credMap.set(a.id, c);
+    }
+
+    const result = reconcile(
+      entries,
+      links,
+      accounts,
+      now,
+      {
+        purgeDays: this.purgeDays,
+        adoptExisting: this.adoptExisting,
+        emptyStreak: this.emptyStreak,
+      },
+      credMap
+    );
+
+    // Apply DB updates atomically in a transaction
+    this.store.transaction(() => {
+      // Apply deletes first (account, history, cpa_link)
+      for (const delId of result.deletes) {
+        this.store.deleteAccount(delId);
+        this.store.deleteCpaLink(delId);
+      }
+
+      // Apply account upserts
+      for (const acc of result.accountUpserts) {
+        this.store.upsertAccount(acc);
+      }
+
+      // Apply credential upserts
+      for (const [accId, creds] of result.credUpserts) {
+        this.store.setCredentials(accId, creds);
+      }
+
+      // Apply links upserts
+      for (const link of result.links) {
+        this.store.upsertCpaLink(link);
+      }
     });
-
-    // Apply deletes first (account, history, cpa_link)
-    for (const delId of result.deletes) {
-      this.store.deleteAccount(delId);
-      this.store.deleteCpaLink(delId);
-    }
-
-    // Apply account upserts
-    for (const acc of result.accountUpserts) {
-      this.store.upsertAccount(acc);
-    }
-
-    // Apply credential upserts
-    for (const [accId, creds] of result.credUpserts) {
-      this.store.setCredentials(accId, creds);
-    }
-
-    // Apply links upserts
-    for (const link of result.links) {
-      this.store.upsertCpaLink(link);
-    }
 
     // Trigger tracker.sync(id) for newly created/relinked/adopted accounts
     const syncPromises: Promise<void>[] = [];
@@ -132,7 +149,7 @@ export class CpaSyncEngine {
       if (a.kind === 'created' || a.kind === 'relinked' || a.kind === 'adopted') {
         syncPromises.push(
           this.tracker.sync(a.accountId).catch((err) => {
-            console.error(`[cpaSync] tracker.sync failed for ${a.accountId}:`, err);
+            console.error('[cpaSync] tracker.sync failed for', a.accountId, err);
           })
         );
       }

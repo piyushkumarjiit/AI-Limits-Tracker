@@ -235,6 +235,109 @@ async function runTests() {
     assertEquals(result.deletes.length, 1, 'AccountId marked for delete');
   }
 
+  {
+    // Case 6 (B1): Duplicate email entries create unique identity keys without collision
+    const entries: CpaCredential[] = [
+      {
+        name: 'claude-1',
+        auth_index: 'idx-dup-1',
+        provider: 'claude',
+        source: 'file',
+        email: 'shared@example.com',
+      },
+      {
+        name: 'claude-2',
+        auth_index: 'idx-dup-2',
+        provider: 'claude',
+        source: 'file',
+        email: 'shared@example.com',
+      },
+    ];
+    const result = reconcile(entries, [], [], now, {
+      purgeDays: 7,
+      adoptExisting: false,
+      emptyStreak: 0,
+    });
+    assertEquals(result.actions.length, 2, 'Two accounts created for duplicate email');
+    assertEquals(result.links.length, 2, 'Two links created');
+    assert(
+      result.links[0].identityKey !== result.links[1].identityKey,
+      'Duplicate email entries produce unique identity keys'
+    );
+    assert(
+      result.links[1].identityKey.includes('claude-2'),
+      'Second entry qualified with credential name'
+    );
+  }
+
+  {
+    // Case 7 (B2): Status hint transitions on existing accounts produce credUpsert
+    const entries: CpaCredential[] = [
+      {
+        name: 'acc-existing',
+        auth_index: 'idx-exist',
+        provider: 'claude',
+        source: 'file',
+        email: 'exist@example.com',
+        disabled: true,
+        status: 'disabled',
+      },
+    ];
+    const existingAccounts: ServerAccount[] = [
+      {
+        id: 'acc-exist-1',
+        providerType: 'claude',
+        name: 'acc-existing',
+        email: 'exist@example.com',
+        isActive: true,
+        sortOrder: 0,
+        createdAt: new Date(now - 10000).toISOString(),
+      },
+    ];
+    const existingLinks: CpaLink[] = [
+      {
+        accountId: 'acc-exist-1',
+        identityKey: 'claude:exist@example.com',
+        cpaName: 'acc-existing',
+        authIndex: 'idx-exist',
+        state: 'linked',
+        lastSeenAt: now - 10000,
+      },
+    ];
+    const existingCreds = new Map([
+      [
+        'acc-exist-1',
+        {
+          authType: 'cpa' as const,
+          cpaAuthIndex: 'idx-exist',
+          cpaName: 'acc-existing',
+          cpaStatus: 'active',
+        },
+      ],
+    ]);
+
+    const result = reconcile(
+      entries,
+      existingLinks,
+      existingAccounts,
+      now,
+      {
+        purgeDays: 7,
+        adoptExisting: false,
+        emptyStreak: 0,
+      },
+      existingCreds
+    );
+    assertEquals(result.actions.length, 1, 'Action produced for status hint change');
+    assertEquals(result.actions[0].kind, 'updated', 'Action kind is updated');
+    assertEquals(result.credUpserts.length, 1, 'credUpserts includes status update');
+    assertEquals(
+      result.credUpserts[0][1].cpaStatus,
+      'disabled',
+      'cpaStatus updated to disabled'
+    );
+  }
+
   // Suite 2: Store cpa_links SQLite CRUD
   console.log('\nSuite 2: Store cpa_links SQLite CRUD');
   const tempDir = createTempDir();
@@ -451,6 +554,23 @@ async function runTests() {
     const { port } = server.address() as AddressInfo;
 
     try {
+      // 0. Unauthenticated requests must receive 401
+      const unauthStatus = await fetch(`http://127.0.0.1:${port}/api/cpa/status`);
+      assertEquals(
+        unauthStatus.status,
+        401,
+        'GET /api/cpa/status without token returns 401'
+      );
+
+      const unauthSync = await fetch(`http://127.0.0.1:${port}/api/cpa/sync`, {
+        method: 'POST',
+      });
+      assertEquals(
+        unauthSync.status,
+        401,
+        'POST /api/cpa/sync without token returns 401'
+      );
+
       // 1. GET /api/cpa/status
       const statusRes = await fetch(`http://127.0.0.1:${port}/api/cpa/status`, {
         headers: { Authorization: `Bearer ${API_TOKEN}` },
