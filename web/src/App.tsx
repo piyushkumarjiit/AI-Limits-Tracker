@@ -3,12 +3,11 @@ import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES, severityColor, severityOf } from '../../src/constants/theme';
-import { familySummaries, type Weighting } from '../../src/services/capacity';
+import { dualRingData, familySummaries, type Weighting } from '../../src/services/capacity';
 import { formatTimeRemaining, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
-import { dualRingData } from '../../src/services/capacity';
 import { Account, api, ApiError } from './api';
 import { isInsecurePage } from './session';
-import { BarChart, Donut, FamilyCard, DualRing, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
+import { BarChart, Donut, DualRing, FamilyCard, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
 
 /* ---------------- Router ---------------- */
 
