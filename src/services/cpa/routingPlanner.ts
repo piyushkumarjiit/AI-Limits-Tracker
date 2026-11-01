@@ -335,11 +335,17 @@ export function planWeights(
   }
 
   const intermediates: Intermediate[] = inputs.map((input) => {
+    const candidateBuckets = input.snapshot ? getCandidateBuckets(input.snapshot) : [];
+    const hasValidCandidate = candidateBuckets.some(
+      (b) => typeof b.remainingPercent === 'number' && Number.isFinite(b.remainingPercent)
+    );
+
     const isStale =
       !input.snapshot ||
       input.snapshot.status !== 'ok' ||
       input.snapshot.isStale === true ||
-      (input.snapshot.buckets || []).length === 0;
+      (input.snapshot.buckets || []).length === 0 ||
+      !hasValidCandidate;
 
     if (!input.managed) {
       const windows = evaluateWindows(input.snapshot, input.history, now);
@@ -471,8 +477,12 @@ export function planWeights(
   });
 
   // Starvation guard (§4.3):
-  // If applying the plan would set all linked credentials of one provider to 0,
-  // the tracker sets the one with the earliest reset to weight 1 instead.
+  // If applying the plan would result in all credentials of one provider having
+  // effective weight 0, the tracker sets the eligible (managed and non-stale)
+  // account with the earliest reset to weight 1 instead.
+  // Peers that are unmanaged or stale retain their currentWeight (since write=false),
+  // so if any has currentWeight > 0, traffic is still being served and starvation guard
+  // does not trigger.
   const byProvider = new Map<string, Intermediate[]>();
   for (const item of intermediates) {
     const list = byProvider.get(item.input.provider) || [];
@@ -481,15 +491,30 @@ export function planWeights(
   }
 
   for (const [, providerItems] of byProvider) {
-    if (providerItems.length > 0 && providerItems.every((it) => it.plan.target === 0)) {
-      const eligible = providerItems.filter((it) => it.input.managed && !it.isStale);
-      const pool = eligible.length > 0 ? eligible : providerItems;
+    if (providerItems.length === 0) continue;
 
-      let chosen = pool[0];
+    // Check effective weights across all accounts in this provider:
+    // - For managed non-stale accounts: effective weight is plan.target
+    // - For unmanaged or stale accounts: write is false, so effective weight is currentWeight (or 0 if null/<=0)
+    const allEffectivelyZero = providerItems.every((it) => {
+      if (it.input.managed && !it.isStale) {
+        return it.plan.target === 0;
+      }
+      return it.input.currentWeight === null || it.input.currentWeight <= 0;
+    });
+
+    if (allEffectivelyZero) {
+      const eligible = providerItems.filter((it) => it.input.managed && !it.isStale);
+      if (eligible.length === 0) {
+        // No managed, non-stale account can be promoted; preserve original reasons
+        continue;
+      }
+
+      let chosen = eligible[0];
       let earliestReset = getEarliestResetTime(chosen.input.snapshot);
 
-      for (let i = 1; i < pool.length; i++) {
-        const item = pool[i];
+      for (let i = 1; i < eligible.length; i++) {
+        const item = eligible[i];
         const rTime = getEarliestResetTime(item.input.snapshot);
         if (rTime < earliestReset) {
           chosen = item;
