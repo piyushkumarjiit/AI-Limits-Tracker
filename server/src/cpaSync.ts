@@ -32,6 +32,8 @@ export class CpaSyncEngine {
   readonly purgeDays: number;
   readonly adoptExisting: boolean;
 
+  private onDiscoveryCompleteCallbacks: Array<() => void | Promise<void>> = [];
+
   constructor(
     private store: Store,
     private tracker: Tracker,
@@ -44,6 +46,10 @@ export class CpaSyncEngine {
     this.adoptExisting = cfg?.adoptExisting ?? true;
     this.routingExecutor = routingExecutor;
     this.hookTrackerSync();
+  }
+
+  onDiscoveryComplete(cb: () => void | Promise<void>): void {
+    this.onDiscoveryCompleteCallbacks.push(cb);
   }
 
   private hookTrackerSync(): void {
@@ -194,6 +200,14 @@ export class CpaSyncEngine {
         await this.routingExecutor.run(entries);
       } catch (err) {
         console.error('[cpaSync] routingExecutor.run after discovery failed:', err);
+      }
+    }
+
+    for (const cb of this.onDiscoveryCompleteCallbacks) {
+      try {
+        await cb();
+      } catch (err) {
+        console.error('[cpaSync] onDiscoveryComplete callback failed:', err);
       }
     }
 

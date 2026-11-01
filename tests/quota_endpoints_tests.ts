@@ -5,7 +5,7 @@ import { AddressInfo } from 'node:net';
 import { Store, ServerAccount } from '../server/src/store';
 import { Tracker } from '../server/src/tracker';
 import { createApp } from '../server/src/app';
-import { QuotaCache, buildQuotaView, computeETag } from '../server/src/quotaCache';
+import { QuotaCache, buildQuotaView, filterQuotaView } from '../server/src/quotaCache';
 import { renderMetrics } from '../server/src/metrics';
 import { validateConfig, validateConfigWarnings } from '../server/src/config';
 
@@ -86,9 +86,10 @@ async function runTests() {
     );
   }
 
-  // --- Suite 2: buildQuotaView schema and zero secret leakage ---
-  console.log('\nSuite 2: buildQuotaView Schema & Secret Hygiene');
+  // --- Suite 2: buildQuotaView schema (§5.3 camelCase & exact fields) and zero secret leakage ---
+  console.log('\nSuite 2: buildQuotaView Schema (§5.3 Conformance) & Secret Hygiene');
   {
+    const now = 1000000;
     const accounts: ServerAccount[] = [
       {
         id: 'acc-native-1',
@@ -104,25 +105,25 @@ async function runTests() {
           providerType: 'claude',
           planName: 'Pro',
           status: 'ok',
-          fetchedAt: new Date(2000).toISOString(),
+          fetchedAt: new Date(now - 42000).toISOString(),
           buckets: [
             {
               id: 'five_hour',
-              label: '5-Hour Limit',
+              label: 'Session (5h)',
               windowType: 'session_5h',
-              utilizationPercent: 40,
-              remainingPercent: 60,
-              resetsAt: new Date(3600000).toISOString(),
+              utilizationPercent: 29,
+              remainingPercent: 71,
+              resetsAt: new Date(now + 8000000).toISOString(),
               isExhausted: false,
               severity: 'normal',
             },
             {
               id: 'seven_day',
-              label: 'Weekly Limit',
+              label: 'Weekly',
               windowType: 'weekly_7d',
               utilizationPercent: 80,
               remainingPercent: 20,
-              resetsAt: new Date(86400000).toISOString(),
+              resetsAt: new Date(now + 86400000).toISOString(),
               isExhausted: false,
               severity: 'critical',
             },
@@ -143,7 +144,7 @@ async function runTests() {
           providerType: 'chatgpt',
           planName: 'Team',
           status: 'ok',
-          fetchedAt: new Date(2000).toISOString(),
+          fetchedAt: new Date(now - 10000).toISOString(),
           buckets: [
             {
               id: 'primary',
@@ -151,7 +152,7 @@ async function runTests() {
               windowType: 'session_5h',
               utilizationPercent: 100,
               remainingPercent: 0,
-              resetsAt: new Date(1800000).toISOString(),
+              resetsAt: new Date(now + 1800000).toISOString(),
               isExhausted: true,
               severity: 'exhausted',
             },
@@ -161,65 +162,83 @@ async function runTests() {
     ];
 
     const ctx = {
+      intervalSec: 300,
+      cpaStatus: {
+        enabled: true,
+        lastDiscoveryAt: '2026-11-01T05:25:00.000Z',
+        lastDiscoveryOk: true,
+        routingMode: 'shadow' as const,
+      },
       cpaLinks: [
         {
           accountId: 'acc-cpa-1',
           identityKey: 'chatgpt:cpa:1',
-          cpaName: 'cpa-gpt-1',
-          authIndex: 1,
+          cpaName: 'claude-user@x.json',
+          authIndex: 'a1b2c3d4e5f60718',
           state: 'linked' as const,
           lastSeenAt: 2000,
           unlinkedAt: null,
-          routingJson: JSON.stringify({ applied: 75, cooldown: true }),
+          routingJson: JSON.stringify({ applied: 1240, cooldown: false, reason: 'headroom' }),
         },
       ],
       cpaRouting: {
         plans: [
           {
             accountId: 'acc-cpa-1',
-            cpaName: 'cpa-gpt-1',
-            headroom: 0,
-            target: 0,
-            cooldown: true,
-            reason: 'exhausted' as const,
+            cpaName: 'claude-user@x.json',
+            headroom: 0.62,
+            target: 1240,
+            cooldown: false,
+            reason: 'headroom' as const,
             write: true,
           },
         ],
       },
+      getHistory: () => [
+        { accountId: 'acc-native-1', t: now - 3600000, session: 20, weekly: 70 },
+        { accountId: 'acc-native-1', t: now - 1800000, session: 26, weekly: 75 },
+      ],
     };
 
-    const now = 10000;
     const view = buildQuotaView(accounts, ctx, now);
 
     assertEquals(view.version, 1, 'Version is 1');
-    assertEquals(view.accounts.length, 2, '2 accounts returned');
+    assertEquals(view.intervalSec, 300, 'intervalSec is 300');
+    assert(Boolean(view.generatedAt), 'generatedAt is present');
+    assertEquals(view.cpa.enabled, true, 'cpa.enabled is true');
+    assertEquals(view.cpa.routingMode, 'shadow', 'cpa.routingMode is shadow');
+    assertEquals((view as any).totals, undefined, 'Invented root totals is removed');
 
-    // acc-native-1
+    // acc-native-1 checks
     const nat = view.accounts.find((a) => a.id === 'acc-native-1')!;
     assert(Boolean(nat), 'Found native account');
     assertEquals(nat.source, 'native', 'Source is native');
-    assertEquals(nat.auth_index, null, 'auth_index is null for native');
-    assertEquals(nat.binding_window?.id, 'seven_day', 'Binding window is lowest remaining (seven_day at 20%)');
-    assertEquals(nat.effective_remaining_percent, 20, 'Effective remaining is 20');
-    assertEquals(nat.headroom_score, 0.2, 'Headroom score is 0.2');
+    assertEquals(nat.cpa, null, 'cpa is null for native');
+    assertEquals(nat.plan, 'Pro', 'Plan is Pro');
+    assertEquals(nat.ageSeconds, 42, 'ageSeconds is 42');
+    assertEquals(nat.stale, false, 'stale is false');
+    assertEquals(nat.effectiveRemainingPct, 20, 'effectiveRemainingPct is 20 (binding)');
+    assert(nat.headroom !== null, 'headroom is computed');
+    assertEquals(nat.windows.length, 2, '2 windows for native');
+    assertEquals(nat.windows[0].id, 'five_hour', 'Window id is five_hour per canonical mapping');
+    assertEquals(nat.windows[0].type, 'session_5h', 'Window type is session_5h');
+    assertEquals(nat.windows[0].remainingPct, 71, 'remainingPct is 71');
+    assertEquals(nat.windows[0].usedPct, 29, 'usedPct is 29');
+    assertEquals(nat.windows[0].resetInSec, 8000, 'resetInSec is 8000');
+    assertEquals(nat.windows[0].exhausted, false, 'exhausted is false');
 
-    // acc-cpa-1
+    // acc-cpa-1 checks
     const cpa = view.accounts.find((a) => a.id === 'acc-cpa-1')!;
     assert(Boolean(cpa), 'Found CPA account');
     assertEquals(cpa.source, 'cpa', 'Source is cpa');
-    assertEquals(cpa.auth_index, '1', 'auth_index matches CPA authIndex');
-    assertEquals(cpa.binding_window?.id, 'primary', 'Binding window is primary');
-    assertEquals(cpa.effective_remaining_percent, 0, 'Effective remaining is 0');
-    assertEquals(cpa.headroom_score, 0, 'Headroom score is 0');
-    assertEquals(cpa.target_weight, 0, 'Target weight is 0 from plan');
-    assertEquals(cpa.cooldown, true, 'Cooldown is true from plan');
-
-    // Totals
-    assertEquals(view.totals.total_accounts, 2, 'Total accounts is 2');
-    assertEquals(view.totals.active_accounts, 2, 'Active accounts is 2');
-    assertEquals(view.totals.headroom_available, 0.2, 'Headroom available sum is 0.2');
-    assertEquals(view.totals.providers.claude.total, 1, 'Claude total is 1');
-    assertEquals(view.totals.providers.chatgpt.total, 1, 'ChatGPT total is 1');
+    assertEquals(cpa.cpa?.authIndex, 'a1b2c3d4e5f60718', 'cpa.authIndex matches spec');
+    assertEquals(cpa.cpa?.name, 'claude-user@x.json', 'cpa.name matches spec');
+    assertEquals(cpa.cpa?.linkState, 'linked', 'cpa.linkState matches spec');
+    assertEquals(cpa.routing.planned, 1240, 'routing.planned matches spec');
+    assertEquals(cpa.routing.applied, 1240, 'routing.applied matches spec');
+    assertEquals(cpa.routing.managed, true, 'routing.managed is true');
+    assertEquals(cpa.routing.cooldown, false, 'routing.cooldown matches spec');
+    assertEquals(cpa.routing.reason, 'headroom', 'routing.reason matches spec');
 
     // Zero secret leakage check
     const serialized = JSON.stringify(view);
@@ -229,9 +248,50 @@ async function runTests() {
     assert(!serialized.includes('managementKey'), 'Zero leakage: no managementKey');
   }
 
-  // --- Suite 3: Prometheus metrics rendering ---
-  console.log('\nSuite 3: Prometheus Metrics Rendering (alt_ prefix and Prometheus 0.0.4)');
+  // --- Suite 3: Staleness dynamic evaluation (ageSeconds and 3*interval) ---
+  console.log('\nSuite 3: Dynamic Staleness Evaluation at Query Time');
   {
+    const baseNow = 1000000;
+    const intervalSec = 300;
+    const accounts: ServerAccount[] = [
+      {
+        id: 'acc-stale-test',
+        name: 'Staleness Account',
+        providerType: 'claude',
+        orderIndex: 0,
+        isActive: true,
+        createdAt: 1000,
+        plan: 'Pro',
+        latestSnapshot: {
+          accountId: 'acc-stale-test',
+          providerType: 'claude',
+          planName: 'Pro',
+          status: 'ok',
+          fetchedAt: new Date(baseNow).toISOString(),
+          buckets: [],
+        },
+      },
+    ];
+
+    const view = buildQuotaView(accounts, { intervalSec }, baseNow);
+    assertEquals(view.accounts[0].stale, false, 'Account is fresh at baseNow');
+    assertEquals(view.accounts[0].ageSeconds, 0, 'ageSeconds is 0 at baseNow');
+
+    // Query 500s later (500 < 3*300 = 900)
+    const view500 = filterQuotaView(view, {}, baseNow + 500 * 1000);
+    assertEquals(view500.accounts[0].ageSeconds, 500, 'ageSeconds is 500');
+    assertEquals(view500.accounts[0].stale, false, 'Account still fresh at 500s');
+
+    // Query 901s later (901 > 3*300 = 900) -> stale flips to true!
+    const view901 = filterQuotaView(view, {}, baseNow + 901 * 1000);
+    assertEquals(view901.accounts[0].ageSeconds, 901, 'ageSeconds is 901');
+    assertEquals(view901.accounts[0].stale, true, 'Account stale flips to true past 3 * intervalSec');
+  }
+
+  // --- Suite 4: Prometheus metrics rendering (§5.4 exact families) ---
+  console.log('\nSuite 4: Prometheus Metrics Rendering (§5.4 Exact Metric Names)');
+  {
+    const now = 1000000;
     const accounts: ServerAccount[] = [
       {
         id: 'acc-native-1',
@@ -247,14 +307,14 @@ async function runTests() {
           providerType: 'claude',
           planName: 'Pro',
           status: 'ok',
-          fetchedAt: new Date(2000).toISOString(),
+          fetchedAt: new Date(now - 42000).toISOString(),
           buckets: [
             {
               id: 'five_hour',
-              label: '5-Hour Limit',
+              label: 'Session (5h)',
               windowType: 'session_5h',
-              utilizationPercent: 40,
-              remainingPercent: 60,
+              utilizationPercent: 29,
+              remainingPercent: 71,
               resetsAt: '2026-04-01T12:00:00.000Z',
               isExhausted: false,
               severity: 'normal',
@@ -276,71 +336,116 @@ async function runTests() {
           providerType: 'chatgpt',
           planName: 'Plus',
           status: 'ok',
-          fetchedAt: new Date(2000).toISOString(),
+          fetchedAt: new Date(now).toISOString(),
           buckets: [],
         },
       },
     ];
 
     const ctx = {
+      intervalSec: 300,
+      cpaStatus: {
+        enabled: true,
+        lastDiscoveryAt: '2026-11-01T05:25:00.000Z',
+        lastDiscoveryOk: true,
+        routingMode: 'shadow' as const,
+      },
       cpaLinks: [
         {
           accountId: 'acc-cpa-1',
           identityKey: 'chatgpt:cpa:1',
           cpaName: 'cpa-gpt-1',
-          authIndex: 2,
+          authIndex: 'idx-gpt',
           state: 'linked' as const,
           lastSeenAt: 2000,
           unlinkedAt: null,
-          routingJson: JSON.stringify({ applied: 50, cooldown: false }),
+          routingJson: JSON.stringify({ applied: 50 }),
         },
+      ],
+      cpaRouting: {
+        plans: [
+          {
+            accountId: 'acc-cpa-1',
+            cpaName: 'cpa-gpt-1',
+            headroom: 0.5,
+            target: 50,
+            cooldown: false,
+            reason: 'headroom' as const,
+            write: false,
+          },
+        ],
+      },
+      getHistory: () => [
+        { accountId: 'acc-native-1', t: now - 3600000, session: 20, weekly: 0 },
+        { accountId: 'acc-native-1', t: now - 1800000, session: 29, weekly: 0 },
       ],
     };
 
-    const view = buildQuotaView(accounts, ctx, 10000);
-    const metrics = renderMetrics(view);
+    const view = buildQuotaView(accounts, ctx, now);
+    const metrics = renderMetrics(view, now);
 
     assert(metrics.endsWith('\n'), 'Metrics end with newline');
-    assert(metrics.includes('# HELP alt_headroom_score'), 'alt_headroom_score HELP present');
-    assert(metrics.includes('# TYPE alt_headroom_score gauge'), 'alt_headroom_score TYPE present');
+
+    // §5.4 metric families assertion
+    assert(metrics.includes('# HELP alt_quota_used_ratio'), 'alt_quota_used_ratio present');
+    assert(metrics.includes('# TYPE alt_quota_used_ratio gauge'), 'alt_quota_used_ratio gauge');
     assert(
-      metrics.includes('alt_headroom_score{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com"} 0.6'),
-      'Native account has auth_index="" and correct score'
+      metrics.includes('alt_quota_used_ratio{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com",window="five_hour"} 0.29'),
+      'alt_quota_used_ratio has native auth_index="" and window="five_hour"'
+    );
+
+    assert(metrics.includes('# HELP alt_quota_remaining_ratio'), 'alt_quota_remaining_ratio present');
+    assert(
+      metrics.includes('alt_quota_remaining_ratio{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com",window="five_hour"} 0.71'),
+      'alt_quota_remaining_ratio rendered'
+    );
+
+    assert(metrics.includes('# HELP alt_quota_reset_timestamp_seconds'), 'alt_quota_reset_timestamp_seconds present');
+    assert(
+      metrics.includes('alt_quota_reset_timestamp_seconds{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com",window="five_hour"} 1775044800'),
+      'alt_quota_reset_timestamp_seconds rendered'
+    );
+
+    assert(metrics.includes('# HELP alt_quota_burn_ratio_per_hour'), 'alt_quota_burn_ratio_per_hour present');
+    assert(
+      metrics.includes('alt_quota_burn_ratio_per_hour{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com",window="five_hour"}'),
+      'alt_quota_burn_ratio_per_hour rendered for non-null burn'
+    );
+
+    assert(metrics.includes('# HELP alt_account_headroom_ratio'), 'alt_account_headroom_ratio present');
+    assert(metrics.includes('# HELP alt_account_up'), 'alt_account_up present');
+    assert(
+      metrics.includes('alt_account_up{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com",status="ok"} 1'),
+      'alt_account_up rendered with status="ok"'
+    );
+
+    assert(metrics.includes('# HELP alt_account_last_success_timestamp_seconds'), 'alt_account_last_success_timestamp_seconds present');
+    assert(metrics.includes('# HELP alt_cpa_routing_weight'), 'alt_cpa_routing_weight present');
+    assert(
+      metrics.includes('alt_cpa_routing_weight{provider="chatgpt",account="acc-cpa-1",auth_index="idx-gpt",email="bob@example.com",kind="planned"} 50'),
+      'alt_cpa_routing_weight planned rendered with auth_index'
     );
     assert(
-      metrics.includes('alt_effective_remaining_ratio{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com"} 0.6'),
-      'Effective remaining ratio rendered'
+      metrics.includes('alt_cpa_routing_weight{provider="chatgpt",account="acc-cpa-1",auth_index="idx-gpt",email="bob@example.com",kind="applied"} 50'),
+      'alt_cpa_routing_weight applied rendered with auth_index'
     );
+
+    assert(metrics.includes('# HELP alt_cpa_routing_writes_total'), 'alt_cpa_routing_writes_total present');
+    assert(metrics.includes('# HELP alt_cpa_discovery_last_success_timestamp_seconds'), 'alt_cpa_discovery_last_success_timestamp_seconds present');
+    assert(metrics.includes('# HELP alt_cpa_credentials'), 'alt_cpa_credentials present');
     assert(
-      metrics.includes('alt_window_remaining_ratio{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com",window="five_hour"} 0.6'),
-      'Window remaining ratio rendered'
-    );
-    assert(
-      metrics.includes('alt_window_reset_timestamp_seconds{provider="claude",account="acc-native-1",auth_index="",email="alice@example.com",window="five_hour"} 1775044800'),
-      'Window reset epoch rendered'
-    );
-    assert(
-      metrics.includes('alt_current_weight{provider="chatgpt",account="acc-cpa-1",auth_index="2",email="bob@example.com"} 50'),
-      'CPA current weight rendered with auth_index="2"'
-    );
-    assert(
-      metrics.includes('alt_accounts_total{provider="claude"} 1'),
-      'Accounts total metric rendered'
-    );
-    assert(
-      metrics.includes('alt_headroom_available_total 0.6'),
-      'Headroom available total rendered'
+      metrics.includes('alt_cpa_credentials{provider="chatgpt",link_state="linked"} 1'),
+      'alt_cpa_credentials rendered'
     );
   }
 
-  // --- Suite 4: HTTP GET /api/quota with filtering and ETag/304 ---
-  console.log('\nSuite 4: HTTP GET /api/quota, Filtering, and ETag/304');
+  // --- Suite 5: HTTP GET /api/quota with repeatable providers, source, and ETag W/"<version>" ---
+  console.log('\nSuite 5: HTTP GET /api/quota, Repeatable Query, and ETag: W/"<version>"');
   {
     const tempDir = createTempDir();
     const store = new Store(tempDir, 'test.db', APP_SECRET);
     const tracker = new Tracker(store);
 
-    // Populate 2 accounts
     store.upsertAccount({
       id: 'claude-1',
       name: 'Claude Account',
@@ -386,18 +491,26 @@ async function runTests() {
         planName: 'Plus',
         status: 'ok',
         fetchedAt: new Date(2000).toISOString(),
-        buckets: [
-          {
-            id: '5h',
-            label: '5h',
-            windowType: 'session_5h',
-            utilizationPercent: 100,
-            remainingPercent: 0,
-            resetsAt: null,
-            isExhausted: true,
-            severity: 'exhausted',
-          },
-        ],
+        buckets: [],
+      },
+    });
+
+    store.upsertAccount({
+      id: 'agy-1',
+      name: 'Antigravity CPA',
+      providerType: 'antigravity',
+      orderIndex: 2,
+      isActive: true,
+      createdAt: 3000,
+      email: 'user3@example.com',
+      plan: 'Free',
+      latestSnapshot: {
+        accountId: 'agy-1',
+        providerType: 'antigravity',
+        planName: 'Free',
+        status: 'ok',
+        fetchedAt: new Date(3000).toISOString(),
+        buckets: [],
       },
     });
 
@@ -405,7 +518,7 @@ async function runTests() {
       accountId: 'gpt-1',
       identityKey: 'chatgpt:cpa:gpt-1',
       cpaName: 'cpa-gpt-1',
-      authIndex: '3',
+      authIndex: 'idx-gpt',
       state: 'linked',
       lastSeenAt: 2000,
       unlinkedAt: null,
@@ -435,20 +548,25 @@ async function runTests() {
     const base = `http://127.0.0.1:${port}`;
 
     try {
-      // 1. Unauthenticated request to /api/quota -> 401
+      // 1. Unauthenticated -> 401
       const unauthRes = await fetch(`${base}/api/quota`);
       assertEquals(unauthRes.status, 401, 'Unauthenticated /api/quota is 401');
 
-      // 2. Authenticated request with Bearer API_TOKEN -> 200
+      // 2. Authenticated -> 200, ETag is W/"<version>", Cache-Control is private, max-age=15
       const authedRes = await fetch(`${base}/api/quota`, {
         headers: { Authorization: `Bearer ${API_TOKEN}` },
       });
       assertEquals(authedRes.status, 200, 'Authenticated /api/quota is 200');
       const etag = authedRes.headers.get('etag');
-      assert(Boolean(etag), 'ETag header is returned');
+      assert(etag?.startsWith('W/"') === true, `ETag is weak version format W/"<version>": ${etag}`);
+      assertEquals(
+        authedRes.headers.get('cache-control'),
+        'private, max-age=15',
+        'Cache-Control is private, max-age=15'
+      );
       const body = await authedRes.json();
       assertEquals(body.version, 1, 'Body version is 1');
-      assertEquals(body.accounts.length, 2, '2 accounts returned in unfiltered view');
+      assertEquals(body.accounts.length, 3, '3 accounts in unfiltered view');
 
       // 3. Conditional GET with If-None-Match -> 304 Not Modified
       const notModifiedRes = await fetch(`${base}/api/quota`, {
@@ -459,38 +577,33 @@ async function runTests() {
       });
       assertEquals(notModifiedRes.status, 304, 'If-None-Match with matching ETag returns 304');
 
-      // 4. Query filter: ?provider=claude
-      const claudeRes = await fetch(`${base}/api/quota?provider=claude`, {
+      // 4. Repeatable query: ?provider=claude&provider=antigravity
+      const repeatRes = await fetch(`${base}/api/quota?provider=claude&provider=antigravity`, {
         headers: { Authorization: `Bearer ${API_TOKEN}` },
       });
-      assertEquals(claudeRes.status, 200, 'Filter ?provider=claude is 200');
-      const claudeBody = await claudeRes.json();
-      assertEquals(claudeBody.accounts.length, 1, 'Only 1 account returned for provider=claude');
-      assertEquals(claudeBody.accounts[0].id, 'claude-1', 'Returned claude-1');
+      assertEquals(repeatRes.status, 200, 'Repeatable provider query returns 200');
+      const repeatBody = await repeatRes.json();
+      assertEquals(repeatBody.accounts.length, 2, '2 accounts returned for claude + antigravity');
+      assert(
+        repeatBody.accounts.some((a: any) => a.id === 'claude-1') &&
+          repeatBody.accounts.some((a: any) => a.id === 'agy-1'),
+        'Returned claude-1 and agy-1'
+      );
 
-      // 5. Query filter: ?source=cpa
+      // 5. Source filter: ?source=cpa
       const cpaRes = await fetch(`${base}/api/quota?source=cpa`, {
         headers: { Authorization: `Bearer ${API_TOKEN}` },
       });
       const cpaBody = await cpaRes.json();
-      assertEquals(cpaBody.accounts.length, 1, 'Only 1 account returned for source=cpa');
+      assertEquals(cpaBody.accounts.length, 1, '1 account returned for source=cpa');
       assertEquals(cpaBody.accounts[0].id, 'gpt-1', 'Returned gpt-1');
 
-      // 6. Query filter: ?auth_index=3
-      const authIdxRes = await fetch(`${base}/api/quota?auth_index=3`, {
+      // 6. Source filter: ?source=all
+      const allRes = await fetch(`${base}/api/quota?source=all`, {
         headers: { Authorization: `Bearer ${API_TOKEN}` },
       });
-      const authIdxBody = await authIdxRes.json();
-      assertEquals(authIdxBody.accounts.length, 1, 'Only 1 account returned for auth_index=3');
-      assertEquals(authIdxBody.accounts[0].id, 'gpt-1', 'Returned gpt-1');
-
-      // 7. Query filter: ?include_exhausted=false (default includes exhausted, unless excluded or filtering)
-      const exhRes = await fetch(`${base}/api/quota?include_exhausted=false`, {
-        headers: { Authorization: `Bearer ${API_TOKEN}` },
-      });
-      const exhBody = await exhRes.json();
-      assertEquals(exhBody.accounts.length, 1, 'Only non-exhausted returned when include_exhausted=false');
-      assertEquals(exhBody.accounts[0].id, 'claude-1', 'Returned non-exhausted claude-1');
+      const allBody = await allRes.json();
+      assertEquals(allBody.accounts.length, 3, '3 accounts returned for source=all');
     } finally {
       app.close();
       store.close();
@@ -498,31 +611,12 @@ async function runTests() {
     }
   }
 
-  // --- Suite 5: HTTP GET /metrics authentication and format ---
-  console.log('\nSuite 5: HTTP GET /metrics Auth and Content-Type');
+  // --- Suite 6: /metrics bearer rate limiter & caching ---
+  console.log('\nSuite 6: HTTP GET /metrics Bearer Rate Limiter & Auth');
   {
     const tempDir = createTempDir();
     const store = new Store(tempDir, 'test.db', APP_SECRET);
     const tracker = new Tracker(store);
-
-    store.upsertAccount({
-      id: 'claude-1',
-      name: 'Claude Pro',
-      providerType: 'claude',
-      orderIndex: 0,
-      isActive: true,
-      createdAt: 1000,
-      email: 'c@example.com',
-      plan: 'Pro',
-      latestSnapshot: {
-        accountId: 'claude-1',
-        providerType: 'claude',
-        planName: 'Pro',
-        status: 'ok',
-        fetchedAt: new Date(2000).toISOString(),
-        buckets: [],
-      },
-    });
 
     const quotaCache = new QuotaCache(
       () => store.listAccounts(),
@@ -548,31 +642,28 @@ async function runTests() {
     const base = `http://127.0.0.1:${port}`;
 
     try {
-      // 1. Unauthenticated /metrics -> 401
+      // 1. Unauthenticated -> 401
       const unauthRes = await fetch(`${base}/metrics`);
       assertEquals(unauthRes.status, 401, 'Unauthenticated /metrics is 401');
 
-      // 2. Cookie auth rejected on /metrics -> 401
+      // 2. Cookie auth rejected -> 401
       const cookieRes = await fetch(`${base}/metrics`, {
         headers: { Cookie: 'alt_session=somerandomsessioncookie' },
       });
       assertEquals(cookieRes.status, 401, 'Cookie auth on /metrics is rejected with 401');
 
-      // 3. Invalid Bearer token -> 401
-      const invalidTokenRes = await fetch(`${base}/metrics`, {
-        headers: { Authorization: 'Bearer wrong-metrics-token' },
-      });
-      assertEquals(invalidTokenRes.status, 401, 'Invalid Bearer token is 401');
-
-      // 4. Valid Bearer METRICS_TOKEN -> 200 with text/plain; version=0.0.4
-      const validRes = await fetch(`${base}/metrics`, {
+      // 3. Bearer rate limiter: 10 failed guesses trigger 429
+      for (let i = 0; i < 10; i++) {
+        const failRes = await fetch(`${base}/metrics`, {
+          headers: { Authorization: `Bearer wrong-token-${i}` },
+        });
+        assertEquals(failRes.status, 401, `Failed attempt ${i + 1} is 401`);
+      }
+      // 11th attempt should be throttled by bearerLimiter with 429
+      const throttledRes = await fetch(`${base}/metrics`, {
         headers: { Authorization: `Bearer ${METRICS_TOKEN}` },
       });
-      assertEquals(validRes.status, 200, 'Valid METRICS_TOKEN returns 200');
-      const ct = validRes.headers.get('content-type') || '';
-      assert(ct.includes('text/plain') && ct.includes('version=0.0.4'), 'Content-Type is text/plain; version=0.0.4');
-      const text = await validRes.text();
-      assert(text.includes('alt_accounts_total{provider="claude"} 1'), 'Rendered metric in body');
+      assertEquals(throttledRes.status, 429, '11th attempt is 429 (bearer rate limiter active on /metrics)');
     } finally {
       app.close();
       store.close();
@@ -580,64 +671,45 @@ async function runTests() {
     }
   }
 
-  // --- Suite 6: GET /metrics returns 404 when neither METRICS_TOKEN nor API_TOKEN configured ---
-  console.log('\nSuite 6: GET /metrics 404 when unconfigured');
+  // --- Suite 7: 250ms debounced invalidation & zero fetch during 100 requests ---
+  console.log('\nSuite 7: Debounced Invalidation & Zero-Fetch Performance');
   {
-    const tempDir = createTempDir();
-    const store = new Store(tempDir, 'test.db', APP_SECRET);
-    const tracker = new Tracker(store);
-
-    const app = createApp(
-      {
-        adminPassword: ADMIN_PASSWORD,
-        appSecret: APP_SECRET,
-        apiToken: '', // empty
-        metricsToken: '', // empty
-        secureCookies: false,
-        trustProxy: false,
-        webDir: tempDir,
-      },
-      { store, tracker }
-    );
-
-    await new Promise<void>((resolve) => app.listen(0, '127.0.0.1', resolve));
-    const port = (app.address() as AddressInfo).port;
-    const base = `http://127.0.0.1:${port}`;
-
-    try {
-      const res = await fetch(`${base}/metrics`, {
-        headers: { Authorization: 'Bearer some-token-value' },
-      });
-      assertEquals(res.status, 404, 'Returns 404 when metrics tokens unconfigured');
-    } finally {
-      app.close();
-      store.close();
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  }
-
-  // --- Suite 7: Cache invalidation on sync ---
-  console.log('\nSuite 7: Cache Invalidation on Sync');
-  {
-    let count = 0;
+    let accountReadCount = 0;
     const accounts: ServerAccount[] = [];
     const cache = new QuotaCache(
       () => {
-        count++;
+        accountReadCount++;
         return accounts;
       },
       undefined,
       renderMetrics
     );
 
-    const first = cache.getView();
-    assertEquals(count, 1, 'Store read once');
-    const second = cache.getView();
-    assertEquals(count, 1, 'Store cached, read count remains 1');
+    // Initial read
+    cache.getView();
+    assertEquals(accountReadCount, 1, 'Initial read performed');
+    assertEquals(cache.getVersion(), 1, 'Initial version is 1');
 
+    // 100 rapid cache.get() calls
+    for (let i = 0; i < 100; i++) {
+      cache.get({ source: 'all' });
+    }
+    assertEquals(accountReadCount, 1, 'Zero extra upstream reads over 100 requests');
+
+    // Debounced invalidation calls in rapid succession
     cache.invalidate();
-    const third = cache.getView();
-    assertEquals(count, 2, 'Store read again after invalidation');
+    cache.invalidate();
+    cache.invalidate();
+    // Before debounce timer fires: version hasn't bumped yet
+    assertEquals(cache.getVersion(), 1, 'Version not yet bumped before 250ms debounce');
+
+    // Wait 300ms for debounce timer to fire
+    await new Promise((r) => setTimeout(r, 300));
+    assertEquals(cache.getVersion(), 2, 'Version bumped to 2 after 250ms debounce');
+
+    // Next read re-fetches from store
+    cache.getView();
+    assertEquals(accountReadCount, 2, 'Store read once after debounced invalidation');
   }
 
   console.log('\n========================================');

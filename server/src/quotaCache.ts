@@ -1,127 +1,226 @@
 import { createHash } from 'node:crypto';
 import type { ServerAccount } from './store';
 import type { QuotaBucket } from '../../src/models/types';
+import type { RoutingConfig, WeightPlan } from '../../src/services/cpa/routingPlanner';
+import { headroom } from '../../src/services/cpa/routingPlanner';
+import { dualRingData } from '../../src/services/capacity';
+import { forecastWindow, type StatPoint } from '../../src/services/stats';
 import type { CpaLink } from '../../src/services/cpa/reconcile';
-import type { WeightPlan, RoutingConfig } from '../../src/services/cpa/routingPlanner';
+import type { CpaSyncStatus } from './cpaSync';
 
 export interface QuotaContext {
+  intervalSec?: number;
+  cpaStatus?: CpaSyncStatus | null;
   cpaLinks?: CpaLink[];
   cpaRouting?: {
     config?: RoutingConfig;
     activeWeights?: Record<string, number>;
     plans?: WeightPlan[];
+    writesCount?: { ok: number; error: number; skipped: number };
+    blockedReason?: string | null;
   };
+  getHistory?: (accountId: string) => StatPoint[];
 }
 
 export interface QuotaQuery {
-  provider?: string;
-  auth_index?: string;
-  source?: 'cpa' | 'native';
-  include_exhausted?: boolean;
+  provider?: string[]; // repeatable: claude, chatgpt, antigravity
+  source?: 'cpa' | 'native' | 'all';
 }
 
-export interface QuotaBucketSummary {
+export interface QuotaWindowItem {
   id: string;
-  window_type: string;
-  utilization_percent: number | null;
-  remaining_percent: number | null;
-  resets_at: string | null;
+  type: string;
+  usedPct: number | null;
+  remainingPct: number | null;
+  resetsAt: string | null;
+  resetInSec: number | null;
+  burnPctPerHour: number | null;
+  exhaustAt: string | null;
+  exhausted: boolean;
+  severity: string;
+}
+
+export interface QuotaCpaAccountInfo {
+  authIndex: string | null;
+  name: string;
+  linkState: string;
+}
+
+export interface QuotaRoutingAccountInfo {
+  planned: number | null;
+  applied: number | null;
+  managed: boolean;
+  cooldown: boolean;
+  reason: string;
 }
 
 export interface QuotaAccountItem {
   id: string;
-  provider: string;
   name: string;
-  email: string | null;
-  auth_index: string | null;
+  provider: string;
   source: 'cpa' | 'native';
+  cpa: QuotaCpaAccountInfo | null;
+  email: string | null;
+  plan: string;
   status: string;
-  binding_window: {
-    id: string;
-    label: string;
-    remaining_percent: number | null;
-    resets_at: string | null;
-    severity: string;
-  } | null;
-  effective_remaining_percent: number | null;
-  headroom_score: number | null;
-  current_weight: number | null;
-  target_weight: number | null;
-  cooldown: boolean;
-  buckets: QuotaBucketSummary[];
+  error: string | null;
+  fetchedAt: string | null;
+  ageSeconds: number;
+  stale: boolean;
+  headroom: number | null;
+  effectiveRemainingPct: number | null;
+  windows: QuotaWindowItem[];
+  routing: QuotaRoutingAccountInfo;
 }
 
 export interface QuotaView {
-  generated_at: string;
   version: 1;
-  accounts: QuotaAccountItem[];
-  totals: {
-    total_accounts: number;
-    active_accounts: number;
-    headroom_available: number;
-    providers: Record<string, { total: number; active: number }>;
+  generatedAt: string;
+  intervalSec: number;
+  cpa: {
+    enabled: boolean;
+    lastDiscoveryAt: string | null;
+    lastDiscoveryOk: boolean;
+    routingMode: string;
+    routingBlocked: string | null;
   };
+  accounts: QuotaAccountItem[];
 }
 
-export function buildQuotaView(accounts: ServerAccount[], ctx?: QuotaContext, now?: number): QuotaView {
+/**
+ * Maps bucket id/window to canonical window label/name per §5.4:
+ * five_hour, seven_day, monthly, or antigravity family + _ + suffix
+ */
+export function canonicalWindowName(bucket: QuotaBucket, provider: string): string {
+  if (provider === 'antigravity') {
+    const family = (bucket.details?.family || 'gemini').toLowerCase();
+    if (bucket.id.includes('5h') || bucket.windowType === 'session_5h') return `${family}_5h`;
+    if (bucket.id.includes('weekly') || bucket.windowType === 'weekly_7d') return `${family}_weekly`;
+    return `${family}_quota`;
+  }
+  if (bucket.windowType === 'session_5h') return 'five_hour';
+  if (bucket.windowType === 'weekly_7d') return 'seven_day';
+  if (bucket.windowType === 'monthly_30d') return 'monthly';
+  return bucket.id;
+}
+
+export function buildQuotaView(
+  accounts: ServerAccount[],
+  ctx?: QuotaContext,
+  now?: number
+): QuotaView {
   const t = now ?? Date.now();
-  const generated_at = new Date(t).toISOString();
+  const generatedAt = new Date(t).toISOString();
+  const intervalSec = ctx?.intervalSec ?? 300;
 
-  const providerCounts: Record<string, { total: number; active: number }> = {};
-  let totalAccounts = 0;
-  let activeAccounts = 0;
-  let headroomSum = 0;
+  const cpaStatus = ctx?.cpaStatus;
+  const routingCfg = ctx?.cpaRouting?.config;
 
-  const items: QuotaAccountItem[] = [];
+  const cpaRoot = {
+    enabled: Boolean(cpaStatus?.enabled),
+    lastDiscoveryAt: cpaStatus?.lastDiscoveryAt ?? null,
+    lastDiscoveryOk: Boolean(cpaStatus?.lastDiscoveryOk),
+    routingMode: routingCfg?.mode ?? cpaStatus?.routingMode ?? 'off',
+    routingBlocked: ctx?.cpaRouting?.blockedReason ?? null,
+  };
+
+  const accountItems: QuotaAccountItem[] = [];
 
   for (const acc of accounts) {
-    totalAccounts++;
     const provider = acc.providerType;
-    if (!providerCounts[provider]) {
-      providerCounts[provider] = { total: 0, active: 0 };
-    }
-    providerCounts[provider].total++;
-
     const link = ctx?.cpaLinks?.find((l) => l.accountId === acc.id);
     const isCpa = Boolean(link);
     const source: 'cpa' | 'native' = isCpa ? 'cpa' : 'native';
 
-    let authIndex: string | null = null;
-    if (link && link.authIndex !== undefined && link.authIndex !== null) {
-      authIndex = String(link.authIndex);
+    let cpaInfo: QuotaCpaAccountInfo | null = null;
+    if (link) {
+      cpaInfo = {
+        authIndex: link.authIndex !== undefined && link.authIndex !== null ? String(link.authIndex) : null,
+        name: link.cpaName,
+        linkState: link.state,
+      };
     }
 
     const snapshot = acc.latestSnapshot;
+    const fetchedAt = snapshot?.fetchedAt || acc.lastSyncAt || null;
+    const fetchedAtMs = fetchedAt ? new Date(fetchedAt).getTime() : NaN;
+    const ageSeconds = !Number.isNaN(fetchedAtMs)
+      ? Math.max(0, Math.round((t - fetchedAtMs) / 1000))
+      : 0;
+
+    const isStale = Boolean(snapshot?.isStale);
+    const stale = isStale || ageSeconds > 3 * intervalSec;
+
     const status = snapshot?.status || acc.lastStatus || 'not_configured';
+    const error = snapshot?.errorMessage || acc.lastError || null;
 
-    // Binding window
-    let bindingWindow: QuotaAccountItem['binding_window'] = null;
-    let effectiveRemaining: number | null = null;
-
-    if (snapshot?.buckets && snapshot.buckets.length > 0) {
-      let candidate: QuotaBucket | null = null;
-      for (const b of snapshot.buckets) {
-        if (b.remainingPercent !== null && b.remainingPercent !== undefined) {
-          if (!candidate) {
-            candidate = b;
-          } else if (b.remainingPercent < candidate.remainingPercent!) {
-            candidate = b;
-          }
-        }
-      }
-      if (candidate) {
-        bindingWindow = {
-          id: candidate.id,
-          label: candidate.label,
-          remaining_percent: candidate.remainingPercent,
-          resets_at: candidate.resetsAt,
-          severity: candidate.severity,
-        };
-        effectiveRemaining = candidate.remainingPercent;
-      }
+    // Headroom calculation using §4.2 headroom function
+    const history = ctx?.getHistory ? ctx.getHistory(acc.id) : [];
+    let headroomScore: number | null = null;
+    if (snapshot && snapshot.status === 'ok' && !stale) {
+      headroomScore = headroom(snapshot, history, t);
     }
 
-    // Weights & cooldown
+    // Effective remaining from dualRingData
+    const dualRing = dualRingData(snapshot);
+    const effectiveRemainingPct = dualRing.effectiveRemaining;
+
+    // Windows
+    const windows: QuotaWindowItem[] = (snapshot?.buckets || []).map((b) => {
+      const remainingPct = b.remainingPercent !== undefined ? b.remainingPercent : null;
+      const usedPct =
+        b.utilizationPercent !== undefined && b.utilizationPercent !== null
+          ? b.utilizationPercent
+          : remainingPct !== null
+          ? 100 - remainingPct
+          : null;
+
+      let resetInSec: number | null = null;
+      if (b.resetsAt) {
+        const resetMs = new Date(b.resetsAt).getTime();
+        if (!Number.isNaN(resetMs)) {
+          resetInSec = Math.max(0, Math.round((resetMs - t) / 1000));
+        }
+      }
+
+      // Burn and forecast
+      let burnPctPerHour: number | null = null;
+      let exhaustAt: string | null = null;
+
+      if (history.length > 0 && provider !== 'antigravity') {
+        const points =
+          b.windowType === 'session_5h'
+            ? history
+                .filter((p) => p.session !== null && p.session !== undefined)
+                .map((p) => ({ t: p.t, value: p.session }))
+            : b.windowType === 'weekly_7d'
+            ? history
+                .filter((p) => p.weekly !== null && p.weekly !== undefined)
+                .map((p) => ({ t: p.t, value: p.weekly }))
+            : [];
+
+        if (points.length >= 2 && usedPct !== null) {
+          const fc = forecastWindow(points, usedPct, b.resetsAt, { now: t });
+          burnPctPerHour = fc.burnRatePerHour;
+          exhaustAt = fc.exhaustAt ? new Date(fc.exhaustAt).toISOString() : null;
+        }
+      }
+
+      return {
+        id: canonicalWindowName(b, provider),
+        type: b.windowType,
+        usedPct,
+        remainingPct,
+        resetsAt: b.resetsAt,
+        resetInSec,
+        burnPctPerHour,
+        exhaustAt,
+        exhausted: b.isExhausted,
+        severity: b.severity,
+      };
+    });
+
+    // Routing info
     const routingPlan = ctx?.cpaRouting?.plans?.find((p) => p.accountId === acc.id);
     let routingState: any = null;
     if (link && link.routingJson) {
@@ -132,148 +231,85 @@ export function buildQuotaView(accounts: ServerAccount[], ctx?: QuotaContext, no
       }
     }
 
-    const currentWeight =
+    const applied =
       ctx?.cpaRouting?.activeWeights?.[acc.id] ??
-      (routingPlan ? routingPlan.target : (routingState?.applied !== undefined ? routingState.applied : null));
+      (routingState?.applied !== undefined ? routingState.applied : null);
+    const planned = routingPlan ? routingPlan.target : applied;
+    const managed = routingState?.managed ?? true;
+    const cooldown = routingPlan ? routingPlan.cooldown : (routingState?.cooldown ?? false);
+    const reason = routingPlan ? routingPlan.reason : (routingState?.reason ?? (cooldown ? 'exhausted' : 'headroom'));
 
-    const targetWeight: number | null = routingPlan ? routingPlan.target : (routingState?.applied !== undefined ? routingState.applied : null);
-    const cooldown: boolean = routingPlan ? routingPlan.cooldown : (routingState?.cooldown ?? false);
-
-    // Headroom score
-    let headroomScore: number | null = null;
-    if (effectiveRemaining !== null) {
-      headroomScore = Math.max(0, Math.min(1, Math.round((effectiveRemaining / 100) * 1000) / 1000));
-    }
-
-    const isActive = acc.isActive !== false;
-    if (isActive) {
-      activeAccounts++;
-      providerCounts[provider].active++;
-      if (headroomScore !== null) {
-        headroomSum += headroomScore;
-      }
-    }
-
-    const bucketSummaries: QuotaBucketSummary[] = (snapshot?.buckets || []).map((b) => ({
-      id: b.id,
-      window_type: b.windowType,
-      utilization_percent: b.utilizationPercent,
-      remaining_percent: b.remainingPercent,
-      resets_at: b.resetsAt,
-    }));
-
-    items.push({
+    accountItems.push({
       id: acc.id,
-      provider,
       name: acc.name,
-      email: acc.email || null,
-      auth_index: authIndex,
+      provider,
       source,
+      cpa: cpaInfo,
+      email: acc.email || null,
+      plan: acc.plan || snapshot?.planName || '',
       status,
-      binding_window: bindingWindow,
-      effective_remaining_percent: effectiveRemaining,
-      headroom_score: headroomScore,
-      current_weight: currentWeight,
-      target_weight: targetWeight,
-      cooldown,
-      buckets: bucketSummaries,
+      error,
+      fetchedAt,
+      ageSeconds,
+      stale,
+      headroom: headroomScore,
+      effectiveRemainingPct,
+      windows,
+      routing: {
+        planned,
+        applied,
+        managed,
+        cooldown,
+        reason,
+      },
     });
   }
 
-  const headroomAvailable = Math.round(headroomSum * 1000) / 1000;
-
   return {
-    generated_at,
     version: 1,
-    accounts: items,
-    totals: {
-      total_accounts: totalAccounts,
-      active_accounts: activeAccounts,
-      headroom_available: headroomAvailable,
-      providers: providerCounts,
-    },
+    generatedAt,
+    intervalSec,
+    cpa: cpaRoot,
+    accounts: accountItems,
   };
 }
 
-export function filterQuotaView(view: QuotaView, query: QuotaQuery): QuotaView {
-  let filtered = view.accounts;
-
-  if (query.provider) {
-    const prov = query.provider.toLowerCase();
-    filtered = filtered.filter((a) => a.provider.toLowerCase() === prov);
-  }
-
-  if (query.auth_index !== undefined) {
-    const idx = query.auth_index;
-    filtered = filtered.filter((a) => a.auth_index === idx);
-  }
-
-  if (query.source) {
-    const src = query.source;
-    filtered = filtered.filter((a) => a.source === src);
-  }
-
-  if (query.include_exhausted === false) {
-    filtered = filtered.filter((a) => {
-      if (a.effective_remaining_percent === null) return true;
-      return a.effective_remaining_percent > 0;
-    });
-  }
-
-  const providerCounts: Record<string, { total: number; active: number }> = {};
-  let totalAccounts = 0;
-  let activeAccounts = 0;
-  let headroomSum = 0;
-
-  for (const a of filtered) {
-    totalAccounts++;
-    const provider = a.provider;
-    if (!providerCounts[provider]) {
-      providerCounts[provider] = { total: 0, active: 0 };
-    }
-    providerCounts[provider].total++;
-
-    // To know if active in filtered: status is not disabled or if it has non-exhausted
-    // The account object in view doesn't explicitly store isActive, but let's check
-    // Actually all items in view.accounts came from accounts, let's treat accounts with status !== 'disabled'
-    // Or we can check if it contributes to headroomSum
-    activeAccounts++;
-    providerCounts[provider].active++;
-    if (a.headroom_score !== null) {
-      headroomSum += a.headroom_score;
-    }
-  }
-
-  return {
-    generated_at: view.generated_at,
-    version: 1,
-    accounts: filtered,
-    totals: {
-      total_accounts: totalAccounts,
-      active_accounts: activeAccounts,
-      headroom_available: Math.round(headroomSum * 1000) / 1000,
-      providers: providerCounts,
-    },
-  };
-}
-
-export function computeETag(view: QuotaView): string {
-  // Hash content without generated_at to avoid invalidating 304 if data didn't change
-  const content = JSON.stringify({
-    version: view.version,
-    accounts: view.accounts,
-    totals: view.totals,
+/**
+ * Filter QuotaView by repeatable provider and source.
+ * Dynamically re-evaluates ageSeconds and stale at request time.
+ */
+export function filterQuotaView(view: QuotaView, query?: QuotaQuery, now?: number): QuotaView {
+  const t = now ?? Date.now();
+  let accounts = view.accounts.map((a) => {
+    const fetchedAtMs = a.fetchedAt ? new Date(a.fetchedAt).getTime() : NaN;
+    const ageSeconds = !Number.isNaN(fetchedAtMs)
+      ? Math.max(0, Math.round((t - fetchedAtMs) / 1000))
+      : a.ageSeconds;
+    const stale = a.stale || ageSeconds > 3 * view.intervalSec;
+    return { ...a, ageSeconds, stale };
   });
-  const hash = createHash('sha256').update(content).digest('hex').slice(0, 16);
-  return `"${hash}"`;
+
+  if (query?.provider && query.provider.length > 0) {
+    const allowed = new Set(query.provider.map((p) => p.toLowerCase()));
+    accounts = accounts.filter((a) => allowed.has(a.provider.toLowerCase()));
+  }
+
+  if (query?.source && query.source !== 'all') {
+    accounts = accounts.filter((a) => a.source === query.source);
+  }
+
+  return {
+    ...view,
+    accounts,
+  };
 }
 
 export class QuotaCache {
+  private version: number = 1;
   private cachedView: QuotaView | null = null;
-  private cachedETag: string | null = null;
   private cachedMetricsText: string | null = null;
-  private cachedMetricsAt: number = 0;
-  private lastInvalidatedAt: number = 0;
+  private cachedMetricsVersion: number = 0;
+  private debounceTimer: NodeJS.Timeout | null = null;
   private getAccounts: () => ServerAccount[];
   private getContext: () => QuotaContext | undefined;
   private renderMetricsFn?: (view: QuotaView, now: number) => string;
@@ -292,52 +328,71 @@ export class QuotaCache {
     this.renderMetricsFn = fn;
   }
 
+  /**
+   * Debounced 250ms invalidation per §5.2
+   */
   invalidate(): void {
-    this.cachedView = null;
-    this.cachedETag = null;
-    this.cachedMetricsText = null;
-    this.cachedMetricsAt = 0;
-    this.lastInvalidatedAt = Date.now();
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+    }
+    this.debounceTimer = setTimeout(() => {
+      this.doInvalidate();
+      this.debounceTimer = null;
+    }, 250);
   }
 
-  getView(now?: number): { view: QuotaView; etag: string } {
+  /**
+   * Immediate invalidation without debounce (useful for tests and shutdown)
+   */
+  invalidateImmediate(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.doInvalidate();
+  }
+
+  private doInvalidate(): void {
+    this.cachedView = null;
+    this.cachedMetricsText = null;
+    this.version++;
+  }
+
+  getVersion(): number {
+    return this.version;
+  }
+
+  getETag(): string {
+    return `W/"${this.version}"`;
+  }
+
+  getView(now?: number): { view: QuotaView; version: number; etag: string } {
     const t = now ?? Date.now();
-    if (!this.cachedView || !this.cachedETag) {
+    if (!this.cachedView) {
       const accounts = this.getAccounts();
       const ctx = this.getContext();
-      const view = buildQuotaView(accounts, ctx, t);
-      const etag = computeETag(view);
-      this.cachedView = view;
-      this.cachedETag = etag;
+      this.cachedView = buildQuotaView(accounts, ctx, t);
     }
-    return { view: this.cachedView, etag: this.cachedETag };
+    return {
+      view: this.cachedView,
+      version: this.version,
+      etag: this.getETag(),
+    };
   }
 
-  get(query?: QuotaQuery, now?: number): { view: QuotaView; etag: string; isFiltered: boolean } {
+  get(query?: QuotaQuery, now?: number): { view: QuotaView; version: number; etag: string } {
     const base = this.getView(now);
-    if (!query || (Object.keys(query).length === 0)) {
-      return { view: base.view, etag: base.etag, isFiltered: false };
-    }
-
-    const hasFilter =
-      query.provider !== undefined ||
-      query.auth_index !== undefined ||
-      query.source !== undefined ||
-      query.include_exhausted !== undefined;
-
-    if (!hasFilter) {
-      return { view: base.view, etag: base.etag, isFiltered: false };
-    }
-
-    const filtered = filterQuotaView(base.view, query);
-    const etag = computeETag(filtered);
-    return { view: filtered, etag, isFiltered: true };
+    const filtered = filterQuotaView(base.view, query, now);
+    return {
+      view: filtered,
+      version: this.version,
+      etag: this.getETag(),
+    };
   }
 
-  getMetricsText(now?: number): string {
+  metricsText(now?: number): string {
     const t = now ?? Date.now();
-    // Cache metrics for up to 5 seconds if not invalidated
-    if (this.cachedMetricsText && t - this.cachedMetricsAt < 5000) {
+    if (this.cachedMetricsText && this.cachedMetricsVersion === this.version) {
       return this.cachedMetricsText;
     }
 
@@ -347,7 +402,7 @@ export class QuotaCache {
     }
     const rendered = this.renderMetricsFn(view, t);
     this.cachedMetricsText = rendered;
-    this.cachedMetricsAt = t;
+    this.cachedMetricsVersion = this.version;
     return rendered;
   }
 }

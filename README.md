@@ -177,24 +177,22 @@ AI Limits Tracker exposes machine-readable endpoints for external schedulers, ro
 
 ### 1. Unified Quota Endpoint (`GET /api/quota`)
 
-Returns normalized quota state, binding windows, headroom scores, and active weights for all accounts. Requires Bearer authentication (`API_TOKEN`).
+Returns normalized quota state, binding windows, headroom scores, age/staleness, and active weights for all accounts. Requires Bearer authentication (`API_TOKEN`).
 
 ```bash
 curl -H "Authorization: Bearer <API_TOKEN>" \
-  "https://tracker.example.com/api/quota?provider=claude&include_exhausted=false"
+  "https://tracker.example.com/api/quota?provider=claude&source=all"
 ```
 
 Supported query parameters:
-- `provider`: Filter by provider (`claude`, `chatgpt`, `gemini`, `antigravity`, etc.)
-- `auth_index`: Filter by CPA auth index
-- `source`: Filter by source (`cpa` or `native`)
-- `include_exhausted`: Include accounts with 0% remaining quota (`true` or `false`, defaults to `true`)
+- `provider`: Filter by provider (`claude`, `chatgpt`, `antigravity`, etc.; repeatable: `?provider=claude&provider=chatgpt`)
+- `source`: Filter by source (`cpa`, `native`, or `all`, defaults to `all`)
 
-Supports conditional requests via HTTP `ETag` and `304 Not Modified` headers.
+Supports conditional requests via HTTP `ETag: W/"<version>"` and `304 Not Modified` headers with `Cache-Control: private, max-age=15`.
 
 ### 2. Prometheus Metrics (`GET /metrics`)
 
-Exports Prometheus-compatible metrics (version 0.0.4) prefixed with `alt_`. Requires dedicated `METRICS_TOKEN` or `API_TOKEN` bearer authentication. Cookie authentication is explicitly rejected.
+Exports Prometheus-compatible metrics (version 0.0.4) prefixed with `alt_`. Requires dedicated `METRICS_TOKEN` or `API_TOKEN` bearer authentication (throttled by bearer login limiter). Cookie authentication is explicitly rejected.
 
 Sample Prometheus scrape job (`prometheus.yml`):
 ```yaml
@@ -210,16 +208,21 @@ scrape_configs:
 ```
 
 Exported metric series:
-- `alt_headroom_score{provider, account, auth_index, email}`: Normalized headroom score `[0, 1]`
-- `alt_effective_remaining_ratio{provider, account, auth_index, email}`: Effective quota fraction remaining `[0, 1]`
-- `alt_current_weight{provider, account, auth_index, email}`: Active proxy weight
-- `alt_target_weight{provider, account, auth_index, email}`: Target weight computed by routing planner
-- `alt_cooldown{provider, account, auth_index, email}`: Binary cooldown flag (`1` or `0`)
-- `alt_window_remaining_ratio{provider, account, auth_index, email, window}`: Remaining fraction per window
-- `alt_window_reset_timestamp_seconds{provider, account, auth_index, email, window}`: Window reset timestamp in epoch seconds
-- `alt_accounts_total{provider}`: Total registered accounts
-- `alt_accounts_active{provider}`: Total active syncing accounts
-- `alt_headroom_available_total`: Aggregate headroom units across all accounts
+- `alt_quota_used_ratio{provider, account, auth_index, email, window}`: Quota used fraction `[0, 1]`
+- `alt_quota_remaining_ratio{provider, account, auth_index, email, window}`: Quota remaining fraction `[0, 1]`
+- `alt_quota_reset_timestamp_seconds{provider, account, auth_index, email, window}`: Window reset timestamp in epoch seconds
+- `alt_quota_burn_ratio_per_hour{provider, account, auth_index, email, window}`: Burn rate per hour `[0, 1]` (omitted when null)
+- `alt_quota_exhaust_timestamp_seconds{provider, account, auth_index, email, window}`: Predicted quota exhaustion epoch seconds (omitted when null)
+- `alt_account_headroom_ratio{provider, account, auth_index, email}`: Normalized headroom score `[0, 1]`
+- `alt_account_up{provider, account, auth_index, email, status}`: Binary indicator (`1` if `status==ok && !stale`, `0` otherwise)
+- `alt_account_last_success_timestamp_seconds{provider, account, auth_index, email}`: Timestamp of last successful sync
+- `alt_cpa_routing_weight{provider, account, auth_index, kind="planned|applied"}`: Routing weight
+- `alt_cpa_routing_writes_total{result="ok|error|skipped"}`: Counter of routing write attempts
+- `alt_cpa_routing_blocked{reason}`: Gauge set when enforce mode is blocked
+- `alt_cpa_discovery_last_success_timestamp_seconds`: Timestamp of last successful discovery pass
+- `alt_cpa_credentials{provider, link_state}`: Total CPA credentials by link state
+- `alt_cpa_ignored_credentials{provider}`: Total ignored credentials
+- `alt_cpa_requests_total{endpoint, outcome}`: Total CPA API requests performed
 
 ### 3. LiteLLM Proxy Integration Example
 
