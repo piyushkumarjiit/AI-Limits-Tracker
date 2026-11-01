@@ -47,7 +47,12 @@ export class CpaTransport {
     }
     this.baseUrl = cleanBase;
     this.managementKey = opts.managementKey;
-    this.timeoutMs = opts.timeoutMs ?? 10000;
+    let safeTimeout = 10000;
+    const parsed = Number(opts.timeoutMs);
+    if (!Number.isNaN(parsed) && parsed >= 1000 && parsed <= 120000) {
+      safeTimeout = parsed;
+    }
+    this.timeoutMs = safeTimeout;
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   }
 
@@ -74,7 +79,13 @@ export class CpaTransport {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+    const MAX_TIMEOUT_MS = 120000;
+    const MIN_TIMEOUT_MS = 1000;
+    let timeout = this.timeoutMs;
+    if (typeof timeout !== 'number' || Number.isNaN(timeout) || timeout < MIN_TIMEOUT_MS || timeout > MAX_TIMEOUT_MS) {
+      timeout = 10000;
+    }
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
       const response = await this.fetchImpl(url, {

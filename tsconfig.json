@@ -37,6 +37,7 @@
     "tests/family_rn_tests.ts",
     "tests/cpa_transport_tests.ts",
     "tests/cpa_routing_planner_tests.ts",
-    "tests/cpa_provider_tests.ts"
+    "tests/cpa_provider_tests.ts",
+    "tests/cpa_sync_tests.ts"
   ]
 }
