@@ -1,10 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { ProviderType, QuotaBucket } from '../../src/models/types';
 import { Colors, PROVIDER_NAMES, remainingColor, severityColor } from '../../src/constants/theme';
-import { arcPath, familySlots, type FamilySummary, type Weighting } from '../../src/services/capacity';
+import {
+  arcPath,
+  DualRingData,
+  familySlots,
+  type FamilySummary,
+  resolveRingWindows,
+  ringA11yLabel,
+  severityOf,
+  type Weighting,
+} from '../../src/services/capacity';
 import { formatTimeRemaining } from '../../src/utils/formatters';
 import type { Forecast } from '../../src/services/stats';
-import { arcPath, DualRingData, resolveRingWindows, ringA11yLabel, severityOf } from '../../src/services/capacity';
 import type { Account } from './api';
 
 /* ---------- Provider logos ---------- */
