@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { ProviderType } from '../../src/models/types';
-import { Colors, PROVIDER_NAMES, remainingColor } from '../../src/constants/theme';
+import { Colors, PROVIDER_NAMES, remainingColor, severityColor } from '../../src/constants/theme';
+import { arcPath, familySlots, type FamilySummary, type Weighting } from '../../src/services/capacity';
+import { formatTimeRemaining } from '../../src/utils/formatters';
+import type { Forecast } from '../../src/services/stats';
 import type { Account } from './api';
 
 /* ---------- Provider logos ---------- */
@@ -336,3 +339,199 @@ export const Icon: React.FC<{ name: keyof typeof ICON_PATHS | string; size?: num
     <path d={ICON_PATHS[name] || ''} />
   </svg>
 );
+
+/* ---------- Family Aggregator ---------- */
+
+export interface FamilyDonutProps {
+  summary: FamilySummary;
+  size?: number;
+  colors: Record<string, string>;
+  weighting: Weighting;
+}
+
+export const FamilyDonut: React.FC<FamilyDonutProps> = ({
+  summary,
+  size = 112,
+  colors,
+  weighting,
+}) => {
+  const members = summary.members;
+  const isSingle = members.length === 1;
+  const singleMember = members[0];
+  const singlePct =
+    singleMember && singleMember.effectiveRemaining !== null && singleMember.effectiveRemaining !== undefined
+      ? Math.round(singleMember.effectiveRemaining)
+      : null;
+
+  const fmtUnits = (v: number) =>
+    v < 10 ? (Math.round(v * 10) / 10).toFixed(1) : String(Math.round(v));
+
+  const a11yLabel = isSingle
+    ? `${PROVIDER_NAMES[summary.family] || summary.family}: ${singlePct !== null ? `${singlePct}%` : 'no data'} left`
+    : `${PROVIDER_NAMES[summary.family] || summary.family}: ${fmtUnits(summary.poolUnits)} of ${summary.poolMax} ${
+        weighting === 'plan' ? 'Pro-equivalent estimated units' : 'accounts'
+      }`;
+
+  const slots = familySlots(members, 3);
+
+  return (
+    <div className="ring" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 100 100" width={size} height={size} role="img" aria-label={a11yLabel}>
+        {slots.map((s) => {
+          const m = members.find((x) => x.id === s.id);
+          const eff = m?.effectiveRemaining ?? null;
+          const trackColor = colors[s.id] ? `${colors[s.id]}2e` : undefined;
+          return (
+            <g key={s.id}>
+              <path
+                d={arcPath(50, 50, 42, s.start, s.end)}
+                className={`fd-slot ${weighting === 'plan' ? 'est' : ''}`}
+                strokeWidth={12}
+                fill="none"
+                style={trackColor ? { stroke: trackColor } : undefined}
+              />
+              {s.fillEnd > s.start && (
+                <path
+                  d={arcPath(50, 50, 42, s.start, s.fillEnd)}
+                  stroke={severityColor(eff)}
+                  strokeWidth={12}
+                  strokeLinecap="butt"
+                  fill="none"
+                />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="ring-center">
+        {isSingle ? (
+          <>
+            <b style={{ fontSize: Math.round(size * 0.22) }}>{singlePct === null ? '—' : `${singlePct}%`}</b>
+            <span style={{ fontSize: size >= 140 ? 11 : 9.5 }}>left</span>
+          </>
+        ) : (
+          <>
+            <b style={{ fontSize: Math.round(size * 0.20) }}>{fmtUnits(summary.poolUnits)}</b>
+            <span style={{ fontSize: size >= 140 ? 10.5 : 9 }}>
+              of {summary.poolMax} {weighting === 'plan' ? 'Pro-eq. est.' : (summary.poolMax === 1 ? 'account' : 'accounts')}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export interface FamilyCardProps {
+  summary: FamilySummary;
+  weighting: Weighting;
+  colors: Record<string, string>;
+  forecasts?: Record<string, Forecast>;
+  active?: boolean;
+  onSelect?: (family: ProviderType) => void;
+  variant?: 'compact' | 'detailed';
+}
+
+export const FamilyCard: React.FC<FamilyCardProps> = ({
+  summary,
+  weighting,
+  colors,
+  forecasts,
+  active,
+  onSelect,
+  variant = 'compact',
+}) => {
+  let runwayText: string | null = null;
+  if (forecasts) {
+    const activeMembers = summary.members.filter((m) => (m.effectiveRemaining ?? 0) > 0);
+    if (
+      activeMembers.length > 0 &&
+      activeMembers.every((m) => {
+        const f = forecasts[m.id];
+        return f && f.burnRatePerHour !== null && f.burnRatePerHour !== undefined && f.burnRatePerHour > 0;
+      })
+    ) {
+      const totalHours = activeMembers.reduce((sum, m) => {
+        const burn = forecasts[m.id].burnRatePerHour!;
+        return sum + (m.effectiveRemaining ?? 0) / burn;
+      }, 0);
+      runwayText = `Runway ~${Math.round(totalHours)}h at current pace`;
+    }
+  }
+
+  if (variant === 'detailed') {
+    return (
+      <div className="card family-card detailed">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Logo type={summary.family} size={24} />
+            <b style={{ fontSize: 15 }}>{PROVIDER_NAMES[summary.family] || summary.family}</b>
+          </div>
+          <span className="muted small">{summary.members.length} {summary.members.length === 1 ? 'account' : 'accounts'}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}>
+          <FamilyDonut summary={summary} size={140} colors={colors} weighting={weighting} />
+        </div>
+        {runwayText && (
+          <div className="muted small" style={{ textAlign: 'center', marginBottom: 4 }}>
+            {runwayText}
+          </div>
+        )}
+        <div className="fd-legend">
+          {summary.members.map((m) => {
+            const eff = m.effectiveRemaining !== null && m.effectiveRemaining !== undefined
+              ? `${Math.round(m.effectiveRemaining)}%`
+              : '—';
+            const hasReset = m.bindingResetsAt && new Date(m.bindingResetsAt).getTime() > Date.now();
+            return (
+              <div key={m.id} className="fd-legend-row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '12.5px' }}>
+                <i style={{ width: 9, height: 9, borderRadius: '50%', background: colors[m.id] || 'var(--track)', flex: 'none' }} />
+                <span className="ellipsis" style={{ flex: 1, minWidth: 0 }}>{m.name}</span>
+                <b style={{ fontVariantNumeric: 'tabular-nums' }}>{eff}</b>
+                {hasReset && (
+                  <span className="muted small" style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                    {formatTimeRemaining(m.bindingResetsAt)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // Compact variant for Home horizontal strip
+  const resetAcct = summary.earliestReset
+    ? summary.members.find((m) => m.id === summary.earliestReset?.accountId)
+    : null;
+
+  return (
+    <button
+      type="button"
+      className="card family-card"
+      onClick={onSelect ? () => onSelect(summary.family) : undefined}
+      aria-pressed={active}
+    >
+      <FamilyDonut summary={summary} size={104} colors={colors} weighting={weighting} />
+      <div className="meta">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13 }}>
+          <Logo type={summary.family} size={18} />
+          <span>{PROVIDER_NAMES[summary.family] || summary.family}</span>
+        </div>
+        {summary.useNext && (
+          <span className="ellipsis">
+            Use next: <b>{summary.useNext.name}</b> · {Math.round(summary.useNext.effectiveRemaining ?? 0)}%
+          </span>
+        )}
+        {summary.earliestReset ? (
+          <span className="muted ellipsis">
+            Next reset {formatTimeRemaining(summary.earliestReset.at)}{resetAcct ? ` · ${resetAcct.name}` : ''}
+          </span>
+        ) : !summary.useNext ? (
+          <span className="muted">{summary.members.length} {summary.members.length === 1 ? 'account' : 'accounts'}</span>
+        ) : null}
+      </div>
+    </button>
+  );
+};

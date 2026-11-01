@@ -3,10 +3,11 @@ import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES } from '../../src/constants/theme';
+import { familySummaries, type Weighting } from '../../src/services/capacity';
 import { formatTimeRemaining, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
 import { Account, api, ApiError } from './api';
 import { isInsecurePage } from './session';
-import { BarChart, Donut, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
+import { BarChart, Donut, FamilyCard, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
 
 /* ---------------- Router ---------------- */
 
@@ -273,6 +274,15 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
   const [filter, setFilter] = useState<'all' | ProviderType>('all');
   const [bars, setBars] = useState<Record<string, Array<number | null>>>({});
   const [streak, setStreak] = useState<number | null>(null);
+  const colors = useColors(accounts);
+
+  const [weighting] = useState<Weighting>(() => {
+    try {
+      return localStorage.getItem('alt:weighting') === 'plan' ? 'plan' : 'equal';
+    } catch {
+      return 'equal';
+    }
+  });
 
   useEffect(() => {
     api.history(2).then(({ points }) => {
@@ -284,22 +294,33 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
     api.stats(60).then(({ stats }) => setStreak(stats.currentStreak)).catch(() => {});
   }, [state.lastSyncAllAt, accounts.length]);
 
-  let sum = 0, n = 0, low = 0, healthy = 0;
+  let low = 0, healthy = 0;
   let nearest: string | null = null;
   for (const a of accounts) {
     if (a.latestSnapshot?.status === 'ok') healthy++;
     const b = headlineBucket(a.latestSnapshot);
-    if (b?.utilizationPercent != null) {
-      sum += b.utilizationPercent;
-      n++;
+    if (b) {
       if ((b.remainingPercent ?? 100) <= 20) low++;
       if (b.resetsAt && new Date(b.resetsAt).getTime() > Date.now() && (!nearest || b.resetsAt < nearest)) nearest = b.resetsAt;
     }
   }
-  const avg = n ? Math.round(sum / n) : null;
+
+  const summaries = useMemo(() => familySummaries(accounts, weighting), [accounts, weighting]);
+  const showFamilyStrip = summaries.some((s) => s.members.length >= 2) || summaries.length >= 2;
+
+  const totalUnits = summaries.reduce((s, fam) => s + fam.poolUnits, 0);
+  const totalMax = summaries.reduce((s, fam) => s + fam.poolMax, 0);
+  const capacityLeft = totalMax > 0 ? Math.round((totalUnits / totalMax) * 100) : null;
+
   const counts: Record<string, number> = {};
   accounts.forEach((a) => (counts[a.providerType] = (counts[a.providerType] || 0) + 1));
-  const filters = ['all', ...(['claude', 'chatgpt', 'gemini'] as ProviderType[]).filter((p) => counts[p])] as Array<'all' | ProviderType>;
+  const presentProviders = Object.keys(counts) as ProviderType[];
+  const standardOrder: ProviderType[] = ['claude', 'chatgpt', 'gemini', 'antigravity'];
+  const orderedProviders = [
+    ...standardOrder.filter((p) => counts[p]),
+    ...presentProviders.filter((p) => !standardOrder.includes(p)),
+  ];
+  const filters = ['all', ...orderedProviders] as Array<'all' | ProviderType>;
   const visible = accounts.filter((a) => filter === 'all' || a.providerType === filter);
   const attention = accounts.some((a) => ['reauth_required', 'error'].includes(a.latestSnapshot?.status || a.lastStatus));
 
@@ -328,8 +349,8 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
       <section className="card summary">
         <div className="summary-top">
           <div>
-            <p className="label">Overall usage</p>
-            <p className="big">{avg === null ? '—' : `${avg}%`}</p>
+            <p className="label">Capacity left</p>
+            <p className="big">{capacityLeft === null ? '—' : `${capacityLeft}%`}</p>
           </div>
           {streak !== null && streak > 0 && (
             <div className="streak-pill" title="Days in a row with activity">
@@ -337,7 +358,7 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
             </div>
           )}
         </div>
-        <div className="track"><i style={{ width: `${Math.min(100, avg ?? 0)}%` }} /></div>
+        <div className="track"><i style={{ width: `${Math.min(100, capacityLeft ?? 0)}%` }} /></div>
         <div className="stats4">
           <Stat v={String(accounts.length)} l={accounts.length === 1 ? 'account' : 'accounts'} />
           <Stat v={String(healthy)} l="active" />
@@ -346,12 +367,26 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
         </div>
       </section>
 
+      {showFamilyStrip && (
+        <div className="family-strip">
+          {summaries.map((summary) => (
+            <FamilyCard
+              key={summary.family}
+              summary={summary}
+              weighting={weighting}
+              colors={colors}
+              active={filter === summary.family}
+              onSelect={(f) => setFilter((curr) => (curr === f ? 'all' : f))}
+            />
+          ))}
+        </div>
+      )}
 
       {accounts.length > 0 && (
         <div className="chips">
           {filters.map((f) => (
             <button key={f} className={`chip ${f === filter ? 'active' : ''}`} onClick={() => setFilter(f)}>
-              {f === 'all' ? 'All' : PROVIDER_NAMES[f]} <i>{f === 'all' ? accounts.length : counts[f]}</i>
+              {f === 'all' ? 'All' : (PROVIDER_NAMES[f] || f)} <i>{f === 'all' ? accounts.length : counts[f]}</i>
             </button>
           ))}
         </div>
@@ -597,18 +632,27 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
   const [data, setData] = useState<{ stats: UsageStats; forecasts: Record<string, Forecast> } | null>(null);
   const colors = useColors(accounts);
 
+  const [weighting, setWeighting] = useState<Weighting>(() => {
+    try {
+      return localStorage.getItem('alt:weighting') === 'plan' ? 'plan' : 'equal';
+    } catch {
+      return 'equal';
+    }
+  });
+
+  const handleWeightingChange = (w: Weighting) => {
+    setWeighting(w);
+    try {
+      localStorage.setItem('alt:weighting', w);
+    } catch {}
+  };
+
+  const summaries = useMemo(() => familySummaries(accounts, weighting), [accounts, weighting]);
+
   useEffect(() => {
     setData(null);
     api.stats(Number(range)).then(setData).catch(() => {});
   }, [range]);
-
-  const dist = useMemo(() => {
-    const items = accounts
-      .map((a) => ({ a, used: bindingBucket(a.latestSnapshot)?.utilizationPercent ?? null }))
-      .filter((x): x is { a: Account; used: number } => x.used !== null);
-    const total = items.reduce((s, x) => s + x.used, 0);
-    return { avg: items.length ? Math.round(total / items.length) : 0, items: items.map((x) => ({ ...x, share: total ? Math.round((x.used / total) * 100) : 0 })) };
-  }, [accounts]);
 
   const s = data?.stats;
   const maxHour = s ? Math.max(1, ...s.byHour) : 1;
@@ -638,16 +682,30 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
 
           <div className="two-col">
             <div className="card">
-              <h2>Load distribution</h2>
-              <div className="dist">
-                <Donut segments={dist.items.map((x) => ({ value: x.used, color: colors[x.a.id] }))} value={`${dist.avg}%`} label="on average" />
-                <div className="legend">
-                  {dist.items.map((x) => (
-                    <div key={x.a.id}><i style={{ background: colors[x.a.id] }} /><span className="ellipsis">{x.a.name}</span><b>{x.share}%</b></div>
-                  ))}
-                  {!dist.items.length && <p className="muted small">No current data</p>}
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+                <h2 style={{ margin: 0 }}>Capacity by family</h2>
+                <Segmented
+                  value={weighting}
+                  onChange={handleWeightingChange}
+                  options={[
+                    ['equal', 'Equal'],
+                    ['plan', 'By plan (est.)'],
+                  ]}
+                />
               </div>
+              <div className="family-grid">
+                {summaries.map((summary) => (
+                  <FamilyCard
+                    key={summary.family}
+                    summary={summary}
+                    weighting={weighting}
+                    colors={colors}
+                    forecasts={data?.forecasts}
+                    variant="detailed"
+                  />
+                ))}
+              </div>
+              {!summaries.length && <p className="muted small">No current data</p>}
             </div>
             <div className="card">
               <h2>Forecast (5-hour window)</h2>
