@@ -28,11 +28,16 @@ export class Tracker {
   private pending = new Map<string, PendingLogin>();
   private inFlight = new Map<string, Promise<void>>();
   private timer: NodeJS.Timeout | null = null;
+  private onSyncAllCallbacks: Array<() => void | Promise<void>> = [];
   lastSyncAllAt: string | null = null;
   cpaJitterEnabled: boolean = true;
   cpaJitterMaxMs?: number;
 
   constructor(private store: Store, private cpaProvider?: UsageProvider) {}
+
+  onSyncAll(cb: () => void | Promise<void>): void {
+    this.onSyncAllCallbacks.push(cb);
+  }
 
   setCpaProvider(provider: UsageProvider): void {
     this.cpaProvider = provider;
@@ -86,6 +91,14 @@ export class Tracker {
 
     await Promise.allSettled([...nativePromises, cpaPromise]);
     this.lastSyncAllAt = new Date().toISOString();
+
+    for (const cb of this.onSyncAllCallbacks) {
+      try {
+        await cb();
+      } catch (err) {
+        console.error('[tracker] onSyncAll callback failed:', err);
+      }
+    }
   }
 
   private async syncCpaAccounts(accounts: ServerAccount[]): Promise<void> {
