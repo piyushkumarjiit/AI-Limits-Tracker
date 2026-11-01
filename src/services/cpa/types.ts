@@ -20,6 +20,15 @@ export interface CpaCredential {
   disabled?: boolean;
   cooldowns?: Record<string, CpaCooldownView>;
   metadata?: Record<string, unknown>;
+  label?: string;
+  account?: string;
+  account_type?: string;
+  runtime_only?: boolean;
+  source?: string;
+  status_message?: string;
+  requires_sign_in?: boolean;
+  id_token?: { chatgpt_account_id?: string; plan_type?: string; [key: string]: unknown };
+  plan?: string;
   [key: string]: unknown;
 }
 

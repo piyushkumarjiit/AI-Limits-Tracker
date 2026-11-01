@@ -17,6 +17,7 @@ import {
 import { serveStatic } from './static';
 import { Store } from './store';
 import { Tracker } from './tracker';
+import type { CpaSyncEngine } from './cpaSync';
 
 export interface AppConfig {
   adminPassword: string;
@@ -38,6 +39,7 @@ export interface AppConfig {
 export interface AppDeps {
   store: Store;
   tracker: Tracker;
+  cpaSync?: CpaSyncEngine;
 }
 
 /* ---------------- HTTP helpers ---------------- */
@@ -191,7 +193,7 @@ async function handleApi(
   url: URL,
   config: AppConfig,
   auth: AuthConfig,
-  { store, tracker }: AppDeps,
+  { store, tracker, cpaSync }: AppDeps,
   limiter: ReturnType<typeof createLoginLimiter>,
   bearerLimiter: ReturnType<typeof createLoginLimiter>
 ) {
@@ -271,6 +273,21 @@ async function handleApi(
   if (path === '/api/refresh' && method === 'POST') {
     await tracker.syncAll();
     return send(res, 200, { ok: true });
+  }
+
+  if (path === '/api/cpa/sync' && method === 'POST') {
+    if (!cpaSync) {
+      return send(res, 404, { error: 'CPA integration not configured' });
+    }
+    const actions = await cpaSync.runOnce();
+    return send(res, 200, { ok: true, actions });
+  }
+
+  if (path === '/api/cpa/status' && method === 'GET') {
+    if (!cpaSync) {
+      return send(res, 200, { enabled: false, lastDiscoveryAt: null, lastDiscoveryOk: false });
+    }
+    return send(res, 200, cpaSync.status());
   }
 
   if (path === '/api/settings' && method === 'PUT') {
