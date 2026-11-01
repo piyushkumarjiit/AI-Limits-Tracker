@@ -30,7 +30,7 @@ export type QuotaWindowType = 'session_5h' | 'weekly_7d' | 'monthly_30d' | 'slid
 
 export type LimitSeverity = 'normal' | 'warning' | 'critical' | 'exhausted' | 'unavailable';
 
-export type SyncStatus = 'ok' | 'error' | 'reauth_required' | 'rate_limited' | 'not_configured';
+export type SyncStatus = 'ok' | 'error' | 'reauth_required' | 'rate_limited' | 'not_configured' | 'quarantined';
 
 export interface QuotaBucket {
   id: string;
@@ -122,6 +122,12 @@ export interface AccountCredentials {
   cpaSignals?: Record<string, string>;
   cpaObservedAt?: string;
   cpaQuota?: { observed_at?: string; signals?: Record<string, string> };
+
+  /** Terminal error quarantine flags (§2.3 / B3) */
+  quarantined?: boolean;
+  quarantinedAt?: string;
+  quarantineReason?: string;
+  cpaRisk?: 'ok' | 'flagged' | 'suspended';
 
   cookies?: string;
   sessionKey?: string;

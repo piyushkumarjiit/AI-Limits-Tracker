@@ -98,8 +98,14 @@ export function canonicalWindowName(bucket: QuotaBucket, provider: string): stri
     if (bucket.id.includes('weekly') || bucket.windowType === 'weekly_7d') return `${family}_weekly`;
     return `${family}_quota`;
   }
-  if (bucket.windowType === 'session_5h') return 'five_hour';
-  if (bucket.windowType === 'weekly_7d') return 'seven_day';
+  // Disambiguate multi-model windows and non-primary buckets per §5.4 / B5
+  if (bucket.id === 'seven_day_opus') return 'seven_day_opus';
+  if (bucket.id === 'seven_day_sonnet') return 'seven_day_sonnet';
+  if (bucket.id === 'code_review') return 'code_review';
+  if (bucket.id === 'extra_usage') return 'extra_usage';
+
+  if (bucket.id === 'primary' || bucket.id === 'five_hour' || bucket.windowType === 'session_5h') return 'five_hour';
+  if (bucket.id === 'secondary' || bucket.id === 'seven_day' || bucket.windowType === 'weekly_7d') return 'seven_day';
   if (bucket.windowType === 'monthly_30d') return 'monthly';
   return bucket.id;
 }
@@ -166,6 +172,7 @@ export function buildQuotaView(
     const effectiveRemainingPct = dualRing.effectiveRemaining;
 
     // Windows
+    const seenWindowIds = new Set<string>();
     const windows: QuotaWindowItem[] = (snapshot?.buckets || []).map((b) => {
       const remainingPct = b.remainingPercent !== undefined ? b.remainingPercent : null;
       const usedPct =
@@ -206,8 +213,21 @@ export function buildQuotaView(
         }
       }
 
+      let winId = canonicalWindowName(b, provider);
+      if (seenWindowIds.has(winId)) {
+        winId = `${winId}_${b.id}`;
+        if (seenWindowIds.has(winId)) {
+          let suffix = 2;
+          while (seenWindowIds.has(`${winId}_${suffix}`)) {
+            suffix++;
+          }
+          winId = `${winId}_${suffix}`;
+        }
+      }
+      seenWindowIds.add(winId);
+
       return {
-        id: canonicalWindowName(b, provider),
+        id: winId,
         type: b.windowType,
         usedPct,
         remainingPct,
