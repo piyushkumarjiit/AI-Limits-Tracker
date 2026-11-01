@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { ProviderType } from '../../src/models/types';
-import { Colors, PROVIDER_NAMES, remainingColor } from '../../src/constants/theme';
+import type { ProviderType, QuotaBucket } from '../../src/models/types';
+import { Colors, PROVIDER_NAMES, remainingColor, severityColor } from '../../src/constants/theme';
+import { arcPath, DualRingData, resolveRingWindows, ringA11yLabel, severityOf } from '../../src/services/capacity';
 import type { Account } from './api';
 
 /* ---------- Provider logos ---------- */
@@ -59,6 +60,109 @@ export const Logo: React.FC<{ type: ProviderType; size?: number }> = ({ type, si
 };
 
 /* ---------- Ring ---------- */
+
+export interface DualRingProps {
+  buckets?: QuotaBucket[];
+  data?: DualRingData;
+  size?: number;
+  stroke?: number;
+  provider?: ProviderType;
+  dim?: boolean;
+  badge?: React.ReactNode;
+  showLabel?: boolean;
+}
+
+export const DualRing: React.FC<DualRingProps> = ({
+  buckets,
+  data: dataProp,
+  size = 96,
+  provider,
+  dim,
+  badge,
+  showLabel = true,
+}) => {
+  const data = dataProp ?? resolveRingWindows(buckets);
+
+  const c = size / 2;
+  const isSingle = !data.inner;
+
+  // Geometry
+  const outerStroke = Math.round(size * 0.075);
+  const innerStroke = Math.round(size * 0.094);
+  const gap = Math.max(3, Math.round(size * 0.04));
+
+  const wOuter = isSingle ? innerStroke : outerStroke;
+  const rOuter = (size - wOuter) / 2;
+  const rInner = rOuter - outerStroke / 2 - gap - innerStroke / 2;
+
+  const deg = (p: number) => (p <= 0 ? 0 : (360 * Math.max(p, 3)) / 100);
+  const cap = (p: number): 'butt' | 'round' => (p < 3 || p > 97 ? 'butt' : 'round');
+
+  const eff = data.effectiveRemaining;
+  const sev = data.severity ?? severityOf(eff);
+
+  return (
+    <div
+      className={`ring dual sev-${sev}`}
+      style={{ width: size, height: size, opacity: dim ? 0.55 : 1 }}
+      role="img"
+      aria-label={ringA11yLabel(data)}
+    >
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {/* Outer track and arc */}
+        <circle
+          className={`dr-track ${data.outer && data.outer.remaining <= 0 ? 'dr-exhausted' : ''}`}
+          cx={c}
+          cy={c}
+          r={rOuter}
+          strokeWidth={wOuter}
+        />
+        {data.outer && data.outer.remaining > 0 && (
+          <path
+            className="dr-arc"
+            d={arcPath(c, c, rOuter, 0, deg(data.outer.remaining))}
+            stroke={severityColor(data.outer.remaining, provider)}
+            strokeWidth={wOuter}
+            strokeLinecap={cap(data.outer.remaining)}
+          />
+        )}
+
+        {/* Inner track and arc (only when two windows exist) */}
+        {!isSingle && data.inner && (
+          <>
+            <circle
+              className={`dr-track ${data.inner.remaining <= 0 ? 'dr-exhausted' : ''}`}
+              cx={c}
+              cy={c}
+              r={rInner}
+              strokeWidth={innerStroke}
+            />
+            {data.inner.remaining > 0 && (
+              <path
+                className="dr-arc"
+                d={arcPath(c, c, rInner, 0, deg(data.inner.remaining))}
+                stroke={severityColor(data.inner.remaining, provider)}
+                strokeWidth={innerStroke}
+                strokeLinecap={cap(data.inner.remaining)}
+              />
+            )}
+          </>
+        )}
+      </svg>
+      <div className="ring-center">
+        <b style={{ fontSize: Math.round(size * 0.22) }}>
+          {eff === null ? '—' : `${Math.round(eff)}%`}
+        </b>
+        {showLabel && (
+          <span>
+            {data.binding ? `${data.binding.short} left` : 'no data'}
+          </span>
+        )}
+        {badge}
+      </div>
+    </div>
+  );
+};
 
 export const Ring: React.FC<{
   remaining: number | null;
