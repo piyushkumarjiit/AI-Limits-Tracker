@@ -604,6 +604,18 @@ async function runTests() {
       });
       const allBody = await allRes.json();
       assertEquals(allBody.accounts.length, 3, '3 accounts returned for source=all');
+
+      // 7. Invalid provider validation -> 400
+      const invalidProvRes = await fetch(`${base}/api/quota?provider=unknown`, {
+        headers: { Authorization: `Bearer ${API_TOKEN}` },
+      });
+      assertEquals(invalidProvRes.status, 400, 'Invalid provider returns 400');
+
+      // 8. Invalid source validation -> 400
+      const invalidSrcRes = await fetch(`${base}/api/quota?source=invalid`, {
+        headers: { Authorization: `Bearer ${API_TOKEN}` },
+      });
+      assertEquals(invalidSrcRes.status, 400, 'Invalid source returns 400');
     } finally {
       app.close();
       store.close();
