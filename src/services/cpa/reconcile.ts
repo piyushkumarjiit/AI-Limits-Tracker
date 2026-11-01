@@ -98,7 +98,8 @@ export function reconcile(
   links: CpaLink[],
   accounts: ServerAccount[],
   now: number,
-  opts: { purgeDays: number; adoptExisting: boolean; emptyStreak: number }
+  opts: { purgeDays: number; adoptExisting: boolean; emptyStreak: number },
+  existingCreds?: Map<string, AccountCredentials>
 ): ReconcileResult {
   const actions: ReconcileAction[] = [];
   const accountUpserts: ServerAccount[] = [];
@@ -114,6 +115,10 @@ export function reconcile(
 
   const seen = new Set<string>();
   const matchedLinkAccountIds = new Set<string>();
+  const seenIdentityKeys = new Set<string>();
+  for (const l of currentLinks) {
+    seenIdentityKeys.add(l.identityKey);
+  }
 
   // Determine maximum order index for positioning new accounts
   let maxOrderIndex = currentAccounts.reduce(
@@ -122,7 +127,7 @@ export function reconcile(
   );
 
   for (const entry of filteredEntries) {
-    const entryIdentityKey = buildIdentityKey(entry);
+    let entryIdentityKey = buildIdentityKey(entry);
 
     // Matching order per §3.2:
     // (1) cpa_links.auth_index == entry.auth_index
@@ -146,15 +151,25 @@ export function reconcile(
       matchedLinkAccountIds.add(matchedLink.accountId);
       seen.add(matchedLink.accountId);
 
+      // If updating identity key, ensure no conflict with another link
+      if (
+        matchedLink.identityKey !== entryIdentityKey &&
+        seenIdentityKeys.has(entryIdentityKey)
+      ) {
+        entryIdentityKey = `${entryIdentityKey}:${entry.name.toLowerCase().trim()}`;
+      }
+
       const isUnlinked = matchedLink.state === 'unlinked';
       const wasRenamedOrReindexed =
         matchedLink.authIndex !== entry.auth_index ||
         matchedLink.cpaName !== entry.name ||
         matchedLink.identityKey !== entryIdentityKey;
 
+      seenIdentityKeys.delete(matchedLink.identityKey);
       matchedLink.authIndex = entry.auth_index;
       matchedLink.cpaName = entry.name;
       matchedLink.identityKey = entryIdentityKey;
+      seenIdentityKeys.add(entryIdentityKey);
       matchedLink.lastSeenAt = now;
 
       let acc = currentAccounts.find((a) => a.id === matchedLink.accountId);
@@ -204,12 +219,23 @@ export function reconcile(
           cpaName: entry.name,
         });
       } else {
-        let changed = wasRenamedOrReindexed;
+        const existingCred = existingCreds?.get(matchedLink.accountId);
+        const statusChanged = !existingCred || existingCred.cpaStatus !== cpaStatus;
+        let changed = wasRenamedOrReindexed || statusChanged;
         if (acc) {
           if (statusHintRequiresReauth && acc.lastStatus !== 'reauth_required') {
             acc.lastStatus = 'reauth_required';
             acc.lastError =
               entry.status_message || 'Re-authentication required in CLIProxy';
+            accountUpserts.push({ ...acc });
+            changed = true;
+          } else if (
+            !statusHintRequiresReauth &&
+            acc.lastStatus === 'reauth_required' &&
+            statusChanged
+          ) {
+            acc.lastStatus = 'idle';
+            acc.lastError = undefined;
             accountUpserts.push({ ...acc });
             changed = true;
           }
@@ -244,6 +270,12 @@ export function reconcile(
     if (adoptedAccount) {
       seen.add(adoptedAccount.id);
       matchedLinkAccountIds.add(adoptedAccount.id);
+
+      // Avoid duplicate identityKey across links
+      if (seenIdentityKeys.has(entryIdentityKey)) {
+        entryIdentityKey = `${entryIdentityKey}:${entry.name.toLowerCase().trim()}`;
+      }
+      seenIdentityKeys.add(entryIdentityKey);
 
       const statusHintRequiresReauth =
         entry.requires_sign_in === true || entry.status === 'error';
@@ -309,6 +341,12 @@ export function reconcile(
 
     seen.add(newId);
     matchedLinkAccountIds.add(newId);
+
+    // Avoid duplicate identityKey across links
+    if (seenIdentityKeys.has(entryIdentityKey)) {
+      entryIdentityKey = `${entryIdentityKey}:${entry.name.toLowerCase().trim()}`;
+    }
+    seenIdentityKeys.add(entryIdentityKey);
 
     const statusHintRequiresReauth =
       entry.requires_sign_in === true || entry.status === 'error';

@@ -326,6 +326,18 @@ export class Store {
   }
 
   /** Flushes the write-ahead log into the database file (used on shutdown). */
+  transaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN TRANSACTION');
+    try {
+      const res = fn();
+      this.db.exec('COMMIT');
+      return res;
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
   checkpoint(): void {
     this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   }

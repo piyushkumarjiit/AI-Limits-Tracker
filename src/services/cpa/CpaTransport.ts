@@ -47,7 +47,7 @@ export class CpaTransport {
     }
     this.baseUrl = cleanBase;
     this.managementKey = opts.managementKey;
-    this.timeoutMs = opts.timeoutMs ?? 10000;
+    this.timeoutMs = Math.min(Math.max(1000, Number(opts.timeoutMs) || 10000), 120000);
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   }
 
