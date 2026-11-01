@@ -35,6 +35,7 @@ export interface CpaResolvedConfig {
   managementKey: string;
   timeoutMs: number;
   pollIntervalSec: number;
+  routingMode?: 'off' | 'shadow' | 'enforce';
 }
 
 function isLoopbackOrPrivateIPv4(host: string): boolean {
@@ -133,6 +134,18 @@ export function validateCpaConfig(env: Env): string[] {
     }
   }
 
+  const rawRoutingMode = (env.CPA_ROUTING_MODE ?? '').trim();
+  if (
+    rawRoutingMode &&
+    rawRoutingMode !== 'off' &&
+    rawRoutingMode !== 'shadow' &&
+    rawRoutingMode !== 'enforce'
+  ) {
+    errors.push(
+      `CPA_ROUTING_MODE must be one of 'off', 'shadow', or 'enforce'. Got ${JSON.stringify(rawRoutingMode)}.`
+    );
+  }
+
   return errors;
 }
 
@@ -167,12 +180,19 @@ export function resolveCpaConfig(env: Env): CpaResolvedConfig | null {
     ? Number((env.CPA_SYNC_INTERVAL_SEC ?? env.CPA_POLL_INTERVAL_SEC)!.trim())
     : 60;
 
-  return {
+  const res: CpaResolvedConfig = {
     baseUrl: cleanBaseUrl,
     managementKey: rawMgmtKey,
     timeoutMs,
     pollIntervalSec,
   };
+
+  const rawRoutingMode = env.CPA_ROUTING_MODE?.trim();
+  if (rawRoutingMode === 'off' || rawRoutingMode === 'shadow' || rawRoutingMode === 'enforce') {
+    res.routingMode = rawRoutingMode;
+  }
+
+  return res;
 }
 
 function isPlaceholderPassword(value: string): boolean {

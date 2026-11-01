@@ -18,6 +18,8 @@ import { serveStatic } from './static';
 import { Store } from './store';
 import { Tracker } from './tracker';
 import type { CpaSyncEngine } from './cpaSync';
+import type { CpaRoutingExecutor } from './cpaRouting';
+import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
 
 export interface AppConfig {
   adminPassword: string;
@@ -40,6 +42,7 @@ export interface AppDeps {
   store: Store;
   tracker: Tracker;
   cpaSync?: CpaSyncEngine;
+  cpaRouting?: CpaRoutingExecutor;
 }
 
 /* ---------------- HTTP helpers ---------------- */
@@ -193,7 +196,7 @@ async function handleApi(
   url: URL,
   config: AppConfig,
   auth: AuthConfig,
-  { store, tracker, cpaSync }: AppDeps,
+  { store, tracker, cpaSync, cpaRouting }: AppDeps,
   limiter: ReturnType<typeof createLoginLimiter>,
   bearerLimiter: ReturnType<typeof createLoginLimiter>
 ) {
@@ -267,6 +270,7 @@ async function handleApi(
       lastSyncAllAt: tracker.lastSyncAllAt,
       intervalMin: tracker.intervalMin(),
       telegram: Boolean(config.telegram),
+      cpaRouting: store.getCpaRoutingConfig(),
     });
   }
 
@@ -293,7 +297,20 @@ async function handleApi(
   if (path === '/api/settings' && method === 'PUT') {
     const body = await readBody(req);
     if (typeof body.intervalMin === 'number') tracker.setIntervalMin(body.intervalMin);
-    return send(res, 200, { ok: true, intervalMin: tracker.intervalMin() });
+    let routingConfig: RoutingConfig | undefined;
+    if (body.cpaRouting !== undefined) {
+      try {
+        routingConfig = validateRoutingConfig(body.cpaRouting);
+        store.setCpaRoutingConfig(routingConfig);
+      } catch (err) {
+        return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return send(res, 200, {
+      ok: true,
+      intervalMin: tracker.intervalMin(),
+      ...(routingConfig ? { cpaRouting: routingConfig } : {}),
+    });
   }
 
   if (path === '/api/oauth/start' && method === 'POST') {
