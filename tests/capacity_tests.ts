@@ -637,6 +637,80 @@ console.log('\nSuite 9: arcPath & familySlots geometry');
   assert(label.includes('binding: 5h'), 'ringA11yLabel: includes binding');
 }
 
+// ----------------------------------------------------
+// Suite 10: Family Aggregator & Web P3 checks
+// ----------------------------------------------------
+console.log('\nSuite 10: Family Aggregator & Web P3 checks');
+{
+  // 1. Home family-strip visibility check:
+  // Visible when: summaries.some(s => s.members.length >= 2) || summaries.length >= 2
+  const singleAccount = [
+    { id: 'c1', name: 'Claude 1', providerType: 'claude' as const, isActive: true, latestSnapshot: { buckets: [{ windowType: 'session_5h' as const, remainingPercent: 80 }] } as any },
+  ];
+  const sSingle = groupFamilies(singleAccount);
+  const showSingle = sSingle.some((s) => s.members.length >= 2) || sSingle.length >= 2;
+  assert(!showSingle, 'Family strip hidden for a user with exactly one account');
+
+  const multiSame = [
+    { id: 'c1', name: 'Claude 1', providerType: 'claude' as const, isActive: true, latestSnapshot: { buckets: [{ windowType: 'session_5h' as const, remainingPercent: 80 }] } as any },
+    { id: 'c2', name: 'Claude 2', providerType: 'claude' as const, isActive: true, latestSnapshot: { buckets: [{ windowType: 'session_5h' as const, remainingPercent: 40 }] } as any },
+  ];
+  const sMultiSame = groupFamilies(multiSame);
+  const showMultiSame = sMultiSame.some((s) => s.members.length >= 2) || sMultiSame.length >= 2;
+  assert(showMultiSame, 'Family strip shown for multiple accounts of same family');
+
+  const multiDiff = [
+    { id: 'c1', name: 'Claude 1', providerType: 'claude' as const, isActive: true, latestSnapshot: { buckets: [{ windowType: 'session_5h' as const, remainingPercent: 80 }] } as any },
+    { id: 'g1', name: 'GPT 1', providerType: 'chatgpt' as const, isActive: true, latestSnapshot: { buckets: [{ windowType: 'session_5h' as const, remainingPercent: 50 }] } as any },
+  ];
+  const sMultiDiff = groupFamilies(multiDiff);
+  const showMultiDiff = sMultiDiff.some((s) => s.members.length >= 2) || sMultiDiff.length >= 2;
+  assert(showMultiDiff, 'Family strip shown for multiple families');
+
+  // 2. Capacity left formula Σeff / Σn:
+  // Claude 1: 80%, Claude 2: 40% -> total units = 1.20, totalMax = 2 -> 60%
+  const totalUnits = sMultiSame.reduce((s, fam) => s + fam.poolUnits, 0);
+  const totalMax = sMultiSame.reduce((s, fam) => s + fam.poolMax, 0);
+  const capacityLeft = totalMax > 0 ? Math.round((totalUnits / totalMax) * 100) : null;
+  assert(capacityLeft === 60, 'Capacity left equals Σeff / Σn in equal mode (60%)');
+
+  // 3. Plan weighting toggle calculation:
+  const weightedDiff = [
+    { id: 'c1', name: 'Pro 1', providerType: 'claude' as const, plan: 'Pro', isActive: true, latestSnapshot: { buckets: [{ windowType: 'session_5h' as const, remainingPercent: 50 }] } as any },
+    { id: 'c2', name: 'Max 5x', providerType: 'claude' as const, plan: 'Max 5x', isActive: true, latestSnapshot: { buckets: [{ windowType: 'session_5h' as const, remainingPercent: 80 }] } as any },
+  ];
+  const sPlan = groupFamilies(weightedDiff, 'plan');
+  // Pro (w=1, eff=50) -> 0.5 Pro-eq
+  // Max 5x (w=5, eff=80) -> 4.0 Pro-eq
+  // poolUnits = 4.5, poolMax = 6
+  assert(sPlan[0].poolMax === 6, 'Plan weighting sets poolMax to sum of plan weights (6 Pro-eq)');
+  assert(approxEqual(sPlan[0].poolUnits, 4.5), 'Plan weighting poolUnits matches Pro-equivalents (4.5)');
+
+  // 4. fmtUnits helper behavior:
+  const fmtUnits = (v: number) => (v < 10 ? (Math.round(v * 10) / 10).toFixed(1) : String(Math.round(v)));
+  assert(fmtUnits(1.4) === '1.4', 'fmtUnits: 1.4 formatted with one decimal');
+  assert(fmtUnits(2) === '2.0', 'fmtUnits: <10 formatted with one decimal (2.0)');
+  assert(fmtUnits(12.3) === '12', 'fmtUnits: >=10 formatted as integer (12)');
+
+  // 5. Runway formula:
+  // 2 members: eff=60, burn=20/h -> 3h; eff=80, burn=40/h -> 2h; total = 5h
+  const sampleForecasts: Record<string, { burnRatePerHour: number | null }> = {
+    m1: { burnRatePerHour: 20 },
+    m2: { burnRatePerHour: 40 },
+  };
+  const membersWithEff = [
+    { id: 'm1', effectiveRemaining: 60 },
+    { id: 'm2', effectiveRemaining: 80 },
+  ];
+  const allHaveBurn = membersWithEff.every((m) => {
+    const f = sampleForecasts[m.id];
+    return f && f.burnRatePerHour !== null && f.burnRatePerHour > 0;
+  });
+  assert(allHaveBurn, 'Runway helper detects all members have positive burn rate');
+  const runwayH = membersWithEff.reduce((sum, m) => sum + m.effectiveRemaining / sampleForecasts[m.id].burnRatePerHour!, 0);
+  assert(runwayH === 5, 'Runway hours calculated accurately (5h)');
+}
+
 console.log(`\n========================================`);
 console.log(`SUMMARY: Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`);
 console.log(`========================================\n`);
