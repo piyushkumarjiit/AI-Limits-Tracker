@@ -271,7 +271,15 @@ export class CpaTransport {
    * Force refresh credential(s) in CPA.
    * Path: POST /v8/management/credentials/refresh (fallback to POST /v0/management/auth-files/refresh).
    */
-  async forceRefresh(req: CpaForceRefreshRequest): Promise<CpaForceRefreshResult> {
+  async forceRefresh(
+    nameOrReq?: string | CpaForceRefreshRequest,
+    authIndex?: string
+  ): Promise<CpaForceRefreshResult> {
+    const req: CpaForceRefreshRequest =
+      typeof nameOrReq === 'string'
+        ? { name: nameOrReq, auth_index: authIndex }
+        : nameOrReq ?? (authIndex ? { auth_index: authIndex } : {});
+
     let response: Response;
     try {
       response = await this.cpaFetch('/v8/management/credentials/refresh', {
