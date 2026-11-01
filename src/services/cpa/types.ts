@@ -60,6 +60,15 @@ export interface CpaPatchFieldsRequest {
   [key: string]: unknown;
 }
 
+export interface LinkRoutingState {
+  applied?: number;
+  at?: number;
+  cooldown?: boolean;
+  managed?: boolean;
+  reason?: string;
+  [key: string]: unknown;
+}
+
 export interface CpaForceRefreshRequest {
   name?: string;
   auth_index?: string;

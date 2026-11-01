@@ -14,6 +14,7 @@ import { Tracker } from './tracker';
 import { CpaTransport } from '../../src/services/cpa/CpaTransport';
 import { CpaUsageProvider } from '../../src/services/cpa/CpaUsageProvider';
 import { CpaSyncEngine } from './cpaSync';
+import { CpaRoutingExecutor } from './cpaRouting';
 import { resolveCpaConfig } from './config';
 
 // Server-only SSRF guard: resolve hostnames and cap outbound response bodies.
@@ -78,6 +79,7 @@ const tracker = new Tracker(store);
 
 const cpaConfig = resolveCpaConfig(process.env);
 let cpaSync: CpaSyncEngine | undefined;
+let cpaRouting: CpaRoutingExecutor | undefined;
 
 if (cpaConfig) {
   const cpaTransport = new CpaTransport({
@@ -87,9 +89,16 @@ if (cpaConfig) {
   });
   const cpaUsageProvider = new CpaUsageProvider(cpaTransport);
   tracker.setCpaProvider(cpaUsageProvider);
-  cpaSync = new CpaSyncEngine(store, tracker, cpaTransport, {
-    syncIntervalSec: cpaConfig.pollIntervalSec,
-  });
+  cpaRouting = new CpaRoutingExecutor(store, cpaTransport);
+  cpaSync = new CpaSyncEngine(
+    store,
+    tracker,
+    cpaTransport,
+    {
+      syncIntervalSec: cpaConfig.pollIntervalSec,
+    },
+    cpaRouting
+  );
 }
 
 const server = createApp(
@@ -105,7 +114,7 @@ const server = createApp(
     allowedHosts: ALLOWED_HOSTS,
     maxHeaderSize: 8192,
   },
-  { store, tracker, cpaSync }
+  { store, tracker, cpaSync, cpaRouting }
 );
 
 // Explicit resource bounds: slow/malicious clients cannot hold sockets or headers forever.
