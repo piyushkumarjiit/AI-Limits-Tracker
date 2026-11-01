@@ -3,10 +3,12 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { History } from 'lucide-react-native';
-import { BarChart, Donut, MiniBars, MiniLine } from '../../components/Charts';
+import { BarChart, MiniBars, MiniLine } from '../../components/Charts';
+import { FamilyCard } from '../../components/FamilyCard';
 import { Card, EmptyState, ScreenHeader, SectionTitle, Segmented } from '../../components/ui';
 import { accountChartColor, Colors } from '../../constants/theme';
 import { UsageHistoryPoint } from '../../models/types';
+import { groupFamilies } from '../../services/capacity';
 import { getHistorySince } from '../../services/db';
 import { bindingBucket } from '../../services/notificationService';
 import { useAppStore } from '../../store/useAppStore';
@@ -94,22 +96,13 @@ export default function AnalyticsScreen() {
     return { labels, series, avg, peak, avgLine, peakBars, measurements: allValues.length };
   }, [points, range, accounts, colorFor]);
 
-  // Current distribution of load between accounts
-  const distribution = useMemo(() => {
-    const items = accounts
-      .map((a) => ({ account: a, used: bindingBucket(snapshots[a.id])?.utilizationPercent ?? null }))
-      .filter((x) => x.used !== null) as Array<{ account: (typeof accounts)[number]; used: number }>;
-    const total = items.reduce((s, x) => s + x.used, 0);
-    const avg = items.length ? Math.round(total / items.length) : 0;
-    return {
-      avg,
-      items: items.map((x) => ({
-        ...x,
-        share: total > 0 ? Math.round((x.used / total) * 100) : 0,
-        color: colorFor[x.account.id],
-      })),
-    };
-  }, [accounts, snapshots, colorFor]);
+  const families = useMemo(() => {
+    const enriched = accounts.map((a) => ({
+      ...a,
+      latestSnapshot: snapshots[a.id],
+    }));
+    return groupFamilies(enriched);
+  }, [accounts, snapshots]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -154,26 +147,23 @@ export default function AnalyticsScreen() {
               </Card>
             </View>
 
-            <SectionTitle>Usage distribution</SectionTitle>
-            <Card style={styles.distCard}>
-              <Donut
-                segments={distribution.items.map((x) => ({ value: x.used, color: x.color }))}
-                centerValue={`${distribution.avg}%`}
-                centerLabel="on average"
-              />
-              <View style={styles.legend}>
-                {distribution.items.length === 0 && <Text style={styles.legendEmpty}>No current data</Text>}
-                {distribution.items.map((x) => (
-                  <View key={x.account.id} style={styles.legendRow}>
-                    <View style={[styles.legendDot, { backgroundColor: x.color }]} />
-                    <Text style={styles.legendName} numberOfLines={1}>
-                      {x.account.name}
-                    </Text>
-                    <Text style={styles.legendValue}>{x.share}%</Text>
-                  </View>
+            <SectionTitle>Family quota distribution</SectionTitle>
+            {families.length === 0 ? (
+              <Card>
+                <Text style={styles.emptyFamilyText}>No current quota data</Text>
+              </Card>
+            ) : (
+              <View style={styles.familyGrid}>
+                {families.map((fam) => (
+                  <FamilyCard
+                    key={fam.family}
+                    summary={fam}
+                    colors={colorFor}
+                    variant="detailed"
+                  />
                 ))}
               </View>
-            </Card>
+            )}
 
             <SectionTitle>Peak load by {range === '7' ? 'day' : 'period'}</SectionTitle>
             <Card>
@@ -221,34 +211,14 @@ const styles = StyleSheet.create({
     color: Colors.text,
     letterSpacing: -0.6,
   },
-  distCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  legend: {
-    flex: 1,
+  familyGrid: {
     gap: 12,
   },
-  legendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  legendName: {
-    flex: 1,
+  emptyFamilyText: {
     fontSize: 12.5,
-    color: Colors.text,
-  },
-  legendValue: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: Colors.text,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    paddingVertical: 16,
   },
   legendEmpty: {
     fontSize: 12.5,
