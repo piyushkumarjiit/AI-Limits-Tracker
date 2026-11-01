@@ -8,9 +8,10 @@ import {
 } from '../oauth/chatgptOAuth';
 import { failureSnapshot, makeBucket, needsRefresh } from './common';
 import { ProviderFetchResult, UsageProvider } from './UsageProvider';
+import { CODEX_USER_AGENT } from '../cpa/clientIdentity';
 
 const BASE_HEADERS = {
-  'User-Agent': 'codex_cli_rs/0.50.0',
+  'User-Agent': CODEX_USER_AGENT,
   Accept: 'application/json',
   originator: 'codex_cli_rs',
 };

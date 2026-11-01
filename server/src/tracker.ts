@@ -7,7 +7,7 @@ import { buildChatGPTAuthorizeUrl, exchangeChatGPTCode } from '../../src/service
 import { buildClaudeAuthorizeUrl, exchangeClaudeCode } from '../../src/services/oauth/claudeOAuth';
 import { bindingBucket, mergeWithPrevious } from '../../src/services/providers/common';
 import { getProvider } from '../../src/services/providers';
-import type { UsageProvider } from '../../src/services/providers/UsageProvider';
+import type { ProviderFetchResult, UsageProvider } from '../../src/services/providers/UsageProvider';
 import { PROVIDER_NAMES } from '../../src/constants/theme';
 import { notify } from './notify';
 import { ServerAccount, Store } from './store';
@@ -55,17 +55,23 @@ export class Tracker {
   /* ---------------- Polling ---------------- */
 
   intervalMin(): number {
-    return Number(this.store.getSetting('interval_min')) || Number(process.env.POLL_INTERVAL_MIN) || 5;
+    const raw = Number(this.store.getSetting('interval_min')) || Number(process.env.POLL_INTERVAL_MIN) || 5;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 5) {
+      return raw;
+    }
+    return 5;
   }
 
   setIntervalMin(min: number): void {
-    this.store.setSetting('interval_min', String(Math.max(1, Math.min(120, Math.round(min)))));
+    const safeMin = typeof min === 'number' && Number.isFinite(min) ? min : 5;
+    const clamped = Math.max(5, Math.min(120, Math.round(safeMin)));
+    this.store.setSetting('interval_min', String(clamped));
     this.start();
   }
 
   start(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = setInterval(() => this.syncAll().catch(() => {}), this.intervalMin() * 60 * 1000);
+    this.stop();
+    this.scheduleNextSync();
     this.syncAll().catch(() => {});
     // Keep roughly 13 months of history
     this.store.pruneHistory(Date.now() - 400 * 86400 * 1000);
@@ -73,28 +79,104 @@ export class Tracker {
 
   /** Stops the polling timer (shutdown); in-flight syncs are left to finish or be cut by the hard timeout. */
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private scheduleNextSync(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const baseMs = this.intervalMin() * 60 * 1000;
+    let intervalMs = baseMs;
+    if (this.cpaJitterEnabled) {
+      // ±20-30% jitter: random factor between 0.70 and 1.30
+      const jitterFactor = 0.70 + Math.random() * 0.60;
+      intervalMs = Math.round(baseMs * jitterFactor);
+    }
+    this.timer = setTimeout(async () => {
+      try {
+        await this.syncAll();
+      } catch (err) {
+        console.error('[tracker] syncAll failed during scheduled cycle:', err);
+      } finally {
+        this.scheduleNextSync();
+      }
+    }, intervalMs);
+  }
+
+  private activeProbeCount = 0;
+  private probeQueue: Array<() => void> = [];
+  static readonly GLOBAL_CONCURRENCY_CAP = 2;
+
+  private async acquireProbeSlot(): Promise<() => void> {
+    if (this.activeProbeCount < Tracker.GLOBAL_CONCURRENCY_CAP) {
+      this.activeProbeCount++;
+      let released = false;
+      return () => {
+        if (!released) {
+          released = true;
+          this.releaseProbeSlot();
+        }
+      };
+    }
+    return new Promise<() => void>((resolve) => {
+      this.probeQueue.push(() => {
+        let released = false;
+        resolve(() => {
+          if (!released) {
+            released = true;
+            this.releaseProbeSlot();
+          }
+        });
+      });
+    });
+  }
+
+  private releaseProbeSlot(): void {
+    const next = this.probeQueue.shift();
+    if (next) {
+      next();
+    } else {
+      this.activeProbeCount = Math.max(0, this.activeProbeCount - 1);
+    }
   }
 
   async syncAll(): Promise<void> {
     const accounts = this.store.listAccounts().filter((a) => a.isActive);
-    const nativeAccounts: ServerAccount[] = [];
-    const cpaAccounts: ServerAccount[] = [];
-
-    for (const a of accounts) {
+    const eligibleAccounts = accounts.filter((a) => {
+      if (a.lastStatus === 'quarantined') return false;
       const creds = this.store.getCredentials(a.id);
+      if (creds?.quarantined || creds?.cpaRisk === 'suspended') return false;
       if (creds?.authType === 'cpa') {
-        cpaAccounts.push(a);
-      } else {
-        nativeAccounts.push(a);
+        const link = this.store.getCpaLink(a.id);
+        if (link && link.state === 'unlinked') return false;
+        if (creds.cpaStatus === 'disabled') return false;
       }
-    }
+      return true;
+    });
 
-    const nativePromises = nativeAccounts.map((a) => this.sync(a.id));
-    const cpaPromise = this.syncCpaAccounts(cpaAccounts);
+    const intervalMs = this.intervalMin() * 60 * 1000;
+    const maxJitter = this.cpaJitterMaxMs !== undefined ? this.cpaJitterMaxMs : Math.min(intervalMs * 0.1, 5000);
 
-    await Promise.allSettled([...nativePromises, cpaPromise]);
+    const promises = eligibleAccounts.map(async (acc, idx) => {
+      if (this.cpaJitterEnabled && idx > 0) {
+        const jitter = Math.floor(Math.random() * maxJitter) + (idx * 200);
+        if (jitter > 0) {
+          await new Promise((res) => setTimeout(res, jitter));
+        }
+      }
+      try {
+        await this.sync(acc.id);
+      } catch {
+        // Handled inside sync()
+      }
+    });
+
+    await Promise.allSettled(promises);
     this.lastSyncAllAt = new Date().toISOString();
 
     for (const cb of this.onSyncAllCallbacks) {
@@ -104,35 +186,6 @@ export class Tracker {
         console.error('[tracker] onSyncAll callback failed:', err);
       }
     }
-  }
-
-  private async syncCpaAccounts(accounts: ServerAccount[]): Promise<void> {
-    if (accounts.length === 0) return;
-    const CONCURRENCY_CAP = 4;
-    const intervalMs = this.intervalMin() * 60 * 1000;
-    let index = 0;
-
-    const workers = Array.from({ length: Math.min(CONCURRENCY_CAP, accounts.length) }, async () => {
-      while (index < accounts.length) {
-        const acc = accounts[index++];
-        if (!acc) break;
-        if (this.cpaJitterEnabled) {
-          const maxJitter =
-            this.cpaJitterMaxMs !== undefined ? this.cpaJitterMaxMs : intervalMs * 0.1;
-          const jitter = Math.floor(Math.random() * maxJitter);
-          if (jitter > 0) {
-            await new Promise((res) => setTimeout(res, jitter));
-          }
-        }
-        try {
-          await this.sync(acc.id);
-        } catch {
-          // Handled inside sync()
-        }
-      }
-    });
-
-    await Promise.allSettled(workers);
   }
 
   /** One sync per account at a time — refresh tokens rotate and must not race. */
@@ -149,6 +202,11 @@ export class Tracker {
     if (!account) return;
     const creds = this.store.getCredentials(accountId) || {};
 
+    // Skip quota fetching if account is quarantined, suspended, disabled, or unlinked
+    if (creds.quarantined || account.lastStatus === 'quarantined' || creds.cpaRisk === 'suspended') {
+      return;
+    }
+
     // For CPA accounts: skip quota fetch if link is unlinked or cpaStatus === 'disabled'
     if (creds.authType === 'cpa') {
       const link = this.store.getCpaLink(accountId);
@@ -164,8 +222,20 @@ export class Tracker {
       creds.authType === 'cpa' && this.cpaProvider
         ? this.cpaProvider
         : getProvider(account.providerType);
-    const result = await provider.fetchUsage(accountId, creds);
-    if (result.updatedCredentials) this.store.setCredentials(accountId, result.updatedCredentials);
+
+    const release = await this.acquireProbeSlot();
+    let result: ProviderFetchResult;
+    try {
+      result = await provider.fetchUsage(accountId, creds);
+    } finally {
+      release();
+    }
+
+    if (result.updatedCredentials) {
+      const existingCreds = this.store.getCredentials(accountId) || creds;
+      const mergedCreds = { ...existingCreds, ...result.updatedCredentials };
+      this.store.setCredentials(accountId, mergedCreds);
+    }
 
     const snapshot = mergeWithPrevious(result.snapshot, account.latestSnapshot);
     const previousStatus = account.lastStatus;
@@ -209,6 +279,12 @@ export class Tracker {
   }
 
   private async checkAlerts(account: ServerAccount, snapshot: UsageSnapshot, previousStatus: string) {
+    if (snapshot.status === 'quarantined') {
+      if (previousStatus !== 'quarantined') {
+        await this.alert(account, 'reauth', 'Account quarantined', `${account.name}: terminal error (${snapshot.errorMessage || 'quarantined'}), polling halted.`);
+      }
+      return;
+    }
     if (snapshot.status === 'reauth_required') {
       if (previousStatus !== 'reauth_required') {
         await this.alert(account, 'reauth', 'Authorization required', `${account.name}: session expired, please sign in again.`);
