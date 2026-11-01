@@ -34,6 +34,7 @@
     "tests/antigravity_parser_tests.ts",
     "tests/antigravity_provider_tests.ts",
     "tests/capacity_tests.ts",
-    "tests/family_rn_tests.ts"
+    "tests/family_rn_tests.ts",
+    "tests/cpa_transport_tests.ts"
   ]
 }
