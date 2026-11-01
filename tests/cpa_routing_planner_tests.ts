@@ -784,6 +784,197 @@ console.log('\nSuite 10: Mode "off" returns empty list');
   assert(plans.length === 0, 'Mode "off" returns empty plan array');
 }
 
+// ----------------------------------------------------
+// Suite 11: Review Audit Regression Tests (F1, F2, F3)
+// ----------------------------------------------------
+console.log('\nSuite 11: Review Audit Regression Tests (F1, F2, F3)');
+{
+  const now = 10000000;
+  const resetIso = new Date(now + 2 * 3600000).toISOString();
+
+  // Baseline healthy peer for independent tests
+  const healthyPartner: PlannerInput = {
+    accountId: 'acc-healthy-11',
+    provider: 'anthropic',
+    cpaName: 'cpa-healthy-11',
+    plan: 'Pro',
+    snapshot: makeSnapshot('acc-healthy-11', 'anthropic', 'Pro', [
+      makeBucket('b_h11', 'Session', 'session_5h', 80, resetIso),
+    ]),
+    history: [],
+    currentWeight: 100,
+    managed: true,
+  };
+
+  // --- F1: status 'ok' but no buckets with valid remaining figure -> stale, write: false ---
+  // Case A: buckets exist but remainingPercent is null/undefined
+  const nullRemainingSnap = makeSnapshot('acc-null-rem', 'anthropic', 'Pro', [
+    {
+      id: 'b_null',
+      label: 'Session',
+      windowType: 'session_5h',
+      utilizationPercent: null,
+      remainingPercent: null,
+      resetsAt: null,
+      resetDescription: null,
+      periodLimit: null,
+      currentUsage: null,
+      unit: null,
+      isExhausted: false,
+    },
+  ]);
+  const f1InputA: PlannerInput = {
+    accountId: 'acc-null-rem',
+    provider: 'anthropic',
+    cpaName: 'cpa-null-rem',
+    plan: 'Pro',
+    snapshot: nullRemainingSnap,
+    history: [],
+    currentWeight: 100,
+    managed: true,
+  };
+
+  // Case B: buckets array is empty
+  const emptyBucketsSnap = makeSnapshot('acc-empty-b', 'anthropic', 'Pro', []);
+  const f1InputB: PlannerInput = {
+    accountId: 'acc-empty-b',
+    provider: 'anthropic',
+    cpaName: 'cpa-empty-b',
+    plan: 'Pro',
+    snapshot: emptyBucketsSnap,
+    history: [],
+    currentWeight: 100,
+    managed: true,
+  };
+
+  const f1Plans = planWeights([healthyPartner, f1InputA, f1InputB], DEFAULT_ROUTING, now);
+  const planF1A = f1Plans.find((p) => p.accountId === 'acc-null-rem')!;
+  const planF1B = f1Plans.find((p) => p.accountId === 'acc-empty-b')!;
+
+  assert(planF1A.reason === 'stale', 'F1: null remaining bucket classified as stale');
+  assert(planF1A.write === false, 'F1: null remaining bucket write is false');
+  assert(planF1A.target === 0, 'F1: null remaining bucket target is 0');
+  assert(planF1A.headroom === 0, 'F1: null remaining bucket headroom is 0');
+
+  assert(planF1B.reason === 'stale', 'F1: empty buckets classified as stale');
+  assert(planF1B.write === false, 'F1: empty buckets write is false');
+  assert(planF1B.target === 0, 'F1: empty buckets target is 0');
+
+  // --- F2: Starvation guard does not trigger if unmanaged or stale peer has active currentWeight ---
+  // Acc-1 (managed, exhausted, target 0) + Acc-2 (stale, but currentWeight 50 > 0)
+  const exhaustedSnap = makeSnapshot('acc-exh-f2', 'openai', 'Plus', [
+    makeBucket('b_exh', 'Session', 'session_5h', 0, resetIso, true),
+  ]);
+  const stalePeerSnap = makeSnapshot('acc-stale-f2', 'openai', 'Plus', [], { isStale: true });
+
+  const f2InputsStaleActive: PlannerInput[] = [
+    {
+      accountId: 'acc-exh-f2',
+      provider: 'openai',
+      cpaName: 'cpa-exh-f2',
+      plan: 'Plus',
+      snapshot: exhaustedSnap,
+      history: [],
+      currentWeight: 50,
+      managed: true,
+    },
+    {
+      accountId: 'acc-stale-f2',
+      provider: 'openai',
+      cpaName: 'cpa-stale-f2',
+      plan: 'Plus',
+      snapshot: stalePeerSnap,
+      history: [],
+      currentWeight: 50, // still routing traffic in CPA!
+      managed: true,
+    },
+  ];
+
+  const f2PlansStale = planWeights(f2InputsStaleActive, DEFAULT_ROUTING, now);
+  const planExhStale = f2PlansStale.find((p) => p.accountId === 'acc-exh-f2')!;
+  assert(
+    planExhStale.target === 0,
+    'F2: starvation guard does NOT boost when stale peer has active currentWeight > 0'
+  );
+  assert(
+    planExhStale.reason === 'exhausted',
+    'F2: exhausted peer preserves exhausted reason when stale peer has currentWeight > 0'
+  );
+
+  // Acc-1 (managed, exhausted, target 0) + Acc-2 (unmanaged, currentWeight 80 > 0)
+  const f2InputsUnmanagedActive: PlannerInput[] = [
+    {
+      accountId: 'acc-exh-f2-u',
+      provider: 'openai',
+      cpaName: 'cpa-exh-f2-u',
+      plan: 'Plus',
+      snapshot: exhaustedSnap,
+      history: [],
+      currentWeight: 50,
+      managed: true,
+    },
+    {
+      accountId: 'acc-unman-f2',
+      provider: 'openai',
+      cpaName: 'cpa-unman-f2',
+      plan: 'Plus',
+      snapshot: makeSnapshot('acc-unman-f2', 'openai', 'Plus', [
+        makeBucket('b_unman', 'Session', 'session_5h', 70, resetIso),
+      ]),
+      history: [],
+      currentWeight: 80, // unmanaged peer has active weight
+      managed: false,
+    },
+  ];
+
+  const f2PlansUnman = planWeights(f2InputsUnmanagedActive, DEFAULT_ROUTING, now);
+  const planExhUnman = f2PlansUnman.find((p) => p.accountId === 'acc-exh-f2-u')!;
+  assert(
+    planExhUnman.target === 0,
+    'F2: starvation guard does NOT boost when unmanaged peer has active currentWeight > 0'
+  );
+  assert(
+    planExhUnman.reason === 'exhausted',
+    'F2: exhausted peer preserves exhausted reason when unmanaged peer has currentWeight > 0'
+  );
+
+  // --- F3: Preserve unmanaged / stale reasons without overwriting to starvation_guard ---
+  // All accounts in provider are unmanaged or stale; none should become starvation_guard or write: true
+  const f3InputsAllUnmanagedOrStale: PlannerInput[] = [
+    {
+      accountId: 'acc-unman-f3',
+      provider: 'gemini',
+      cpaName: 'cpa-unman-f3',
+      plan: 'Pro',
+      snapshot: makeSnapshot('acc-unman-f3', 'gemini', 'Pro', [
+        makeBucket('b_u', 'Session', 'session_5h', 0, resetIso, true),
+      ]),
+      history: [],
+      currentWeight: 0,
+      managed: false,
+    },
+    {
+      accountId: 'acc-stale-f3',
+      provider: 'gemini',
+      cpaName: 'cpa-stale-f3',
+      plan: 'Pro',
+      snapshot: makeSnapshot('acc-stale-f3', 'gemini', 'Pro', [], { isStale: true }),
+      history: [],
+      currentWeight: 0,
+      managed: true,
+    },
+  ];
+
+  const f3Plans = planWeights(f3InputsAllUnmanagedOrStale, DEFAULT_ROUTING, now);
+  const planUnmanF3 = f3Plans.find((p) => p.accountId === 'acc-unman-f3')!;
+  const planStaleF3 = f3Plans.find((p) => p.accountId === 'acc-stale-f3')!;
+
+  assert(planUnmanF3.reason === 'unmanaged', 'F3: unmanaged reason preserved, not overwritten');
+  assert(planUnmanF3.write === false, 'F3: unmanaged write is false');
+  assert(planStaleF3.reason === 'stale', 'F3: stale reason preserved, not overwritten');
+  assert(planStaleF3.write === false, 'F3: stale write is false');
+}
+
 console.log(`\n========================================`);
 console.log(`SUMMARY: Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`);
 console.log(`========================================\n`);
