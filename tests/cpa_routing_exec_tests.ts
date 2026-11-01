@@ -849,6 +849,164 @@ async function runTests() {
     }
   }
 
+  // Suite 10: Single-flight serialization of concurrent run() calls
+  console.log('\nSuite 10: Single-flight serialization of concurrent run() calls');
+  {
+    const dir = createTempDir();
+    const store = new Store(dir, 'test.db', APP_SECRET);
+    let strategyCalls = 0;
+    let listCalls = 0;
+    let patchCalls = 0;
+
+    const mockTransport = {
+      async getRoutingStrategy() {
+        strategyCalls++;
+        await new Promise((r) => setTimeout(r, 20));
+        return 'weighted-round-robin';
+      },
+      async listCredentials() {
+        listCalls++;
+        await new Promise((r) => setTimeout(r, 20));
+        return [
+          {
+            name: 'claude-sf',
+            type: 'claude',
+            weight: 50,
+          },
+        ];
+      },
+      async patchCredentialWeight(_name: string, _weight: number) {
+        patchCalls++;
+        return { ok: true };
+      },
+    } as unknown as CpaTransport;
+
+    store.setCpaRoutingConfig({ mode: 'enforce' });
+    const executor = new CpaRoutingExecutor(store, mockTransport);
+
+    const accountId = 'acc-claude-sf';
+    const now = Date.now();
+    store.upsertAccount({
+      id: accountId,
+      name: 'Claude Pro',
+      providerType: 'claude',
+      plan: 'Pro',
+      email: 'sf@example.com',
+      isActive: true,
+      orderIndex: 0,
+      createdAt: new Date().toISOString(),
+      latestSnapshot: {
+        timestamp: now,
+        status: 'ok',
+        planName: 'Pro',
+        buckets: [
+          {
+            id: '5h',
+            label: '5-hour',
+            windowType: 'session_5h',
+            utilizationPercent: 0,
+            remainingPercent: 100,
+            resetsAt: new Date(now + 3600000).toISOString(),
+            isExhausted: false,
+          },
+        ],
+      },
+    });
+    store.upsertCpaLink({
+      accountId,
+      cpaName: 'claude-sf',
+      identityKey: 'claude:claude-sf',
+      authIndex: 'claude-sf',
+      state: 'linked',
+    });
+
+    // Fire 3 concurrent run() calls
+    const [res1, res2, res3] = await Promise.all([
+      executor.run(),
+      executor.run(),
+      executor.run(),
+    ]);
+
+    assertEquals(res1, res2, 'Concurrent run calls return identical result promise');
+    assertEquals(res2, res3, 'Third concurrent call returns identical result');
+    assertEquals(strategyCalls, 1, 'Only 1 getRoutingStrategy call made');
+    assertEquals(listCalls, 1, 'Only 1 listCredentials call made');
+    assertEquals(patchCalls, 1, 'Only 1 patchCredentialWeight call made');
+
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Suite 11: Fail-safe handling on listCredentials() error in run()
+  console.log('\nSuite 11: Fail-safe handling on listCredentials() error in run()');
+  {
+    const dir = createTempDir();
+    const store = new Store(dir, 'test.db', APP_SECRET);
+    let patchAttempted = 0;
+
+    const mockTransport = {
+      async getRoutingStrategy() {
+        return 'weighted-round-robin';
+      },
+      async listCredentials() {
+        throw new Error('Network timeout connecting to CPA management API');
+      },
+      async patchCredentialWeight(_name: string, _weight: number) {
+        patchAttempted++;
+        return { ok: true };
+      },
+    } as unknown as CpaTransport;
+
+    store.setCpaRoutingConfig({ mode: 'enforce' });
+    const executor = new CpaRoutingExecutor(store, mockTransport);
+
+    const accountId = 'acc-claude-fail';
+    const now = Date.now();
+    store.upsertAccount({
+      id: accountId,
+      name: 'Claude Pro',
+      providerType: 'claude',
+      plan: 'Pro',
+      email: 'fail@example.com',
+      isActive: true,
+      orderIndex: 0,
+      createdAt: new Date().toISOString(),
+      latestSnapshot: {
+        timestamp: now,
+        status: 'ok',
+        planName: 'Pro',
+        buckets: [
+          {
+            id: '5h',
+            label: '5-hour',
+            windowType: 'session_5h',
+            utilizationPercent: 0,
+            remainingPercent: 100,
+            resetsAt: new Date(now + 3600000).toISOString(),
+            isExhausted: false,
+          },
+        ],
+      },
+    });
+    store.upsertCpaLink({
+      accountId,
+      cpaName: 'claude-fail',
+      identityKey: 'claude:claude-fail',
+      authIndex: 'claude-fail',
+      state: 'linked',
+    });
+
+    const res = await executor.run();
+    assertEquals(res.blocked, 'list_failed', 'blocked reason is "list_failed"');
+    assertEquals(res.applied, false, 'applied is false when listCredentials fails');
+    assertEquals(res.plans.length, 0, 'No plans computed on listCredentials failure');
+    assertEquals(res.writes, 0, '0 writes executed');
+    assertEquals(patchAttempted, 0, '0 PATCH attempts made');
+
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+
   console.log(`\n========================================`);
   console.log(`SUMMARY: Total: ${totalTests} | Passed: ${totalTests - failedTests} | Failed: ${failedTests}`);
   console.log(`========================================\n`);
