@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
-import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES } from '../../src/constants/theme';
+import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES, severityColor, severityOf } from '../../src/constants/theme';
 import { familySummaries, type Weighting } from '../../src/services/capacity';
 import { formatTimeRemaining, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
+import { dualRingData } from '../../src/services/capacity';
 import { Account, api, ApiError } from './api';
 import { isInsecurePage } from './session';
-import { BarChart, Donut, FamilyCard, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
+import { BarChart, Donut, FamilyCard, DualRing, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
 
 /* ---------------- Router ---------------- */
 
@@ -394,25 +395,65 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
 
       <div className="cards-grid">
         {visible.map((a) => {
-          const b = headlineBucket(a.latestSnapshot);
+          const ringData = dualRingData(a.latestSnapshot);
+          const windows = [ringData.inner, ringData.outer].filter(
+            (w): w is NonNullable<typeof w> =>
+              Boolean(w && w.remaining < 100 && w.bucket.resetsAt)
+          );
+          // If inner and outer point to the same bucket in single-window, dedupe by bucket id
+          const uniqueWindows = Array.from(new Map(windows.map((w) => [w.bucket.id, w])).values());
+
           return (
             <button key={a.id} className="card account-card" onClick={() => go(`/account/${a.id}`)}>
               <div className="ac-left">
                 <Logo type={a.providerType} size={44} />
                 <div className="ac-meta">
-                  <b>{a.name}</b>
+                  <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                    <b>{a.name}</b>
+                    {/* slot for badge in the name row */}
+                  </div>
                   <span className="muted small ellipsis">{[a.latestSnapshot?.planName || a.plan, a.email].filter(Boolean).join(' · ') || '—'}</span>
-                  <StatusDot account={a} />
+                  <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <StatusDot account={a} />
+                    {ringData.extras.slice(0, 2).map((ex) => (
+                      <span key={ex.bucket.id} className={`pill sev-${severityOf(ex.remaining)}`}>
+                        {ex.short} {Math.round(ex.remaining)}%
+                      </span>
+                    ))}
+                    {ringData.extras.length > 2 && (
+                      <span className="pill" style={{ background: 'var(--card-hi)', color: 'var(--muted)' }}>
+                        +{ringData.extras.length - 2}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-              <Ring remaining={b?.remainingPercent ?? null} provider={a.providerType} dim={a.latestSnapshot?.isStale} />
-              <div className="ac-right">
-                {b && b.remainingPercent != null && b.remainingPercent < 100 && b.resetsAt && (
-                  <>
-                    <span className="muted small">Resets in</span>
-                    <b className="reset"><Icon name="clock" size={13} stroke={2.4} /> {formatTimeRemaining(b.resetsAt)}</b>
-                  </>
-                )}
+              <DualRing data={ringData} provider={a.providerType} dim={a.latestSnapshot?.isStale} size={96} />
+              <div className="ac-foot">
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {uniqueWindows.length > 0 ? (
+                    uniqueWindows.map((w, idx) => {
+                      const isBinding = ringData.binding?.bucket.id === w.bucket.id;
+                      const timeStr = formatTimeRemaining(w.bucket.resetsAt);
+                      return (
+                        <span key={w.bucket.id} className="reset-item">
+                          {idx > 0 && <span style={{ opacity: 0.4, margin: '0 4px' }}>·</span>}
+                          {isBinding ? (
+                            <b>
+                              {w.short} <span className="long">resets in </span>{timeStr}
+                            </b>
+                          ) : (
+                            <span className="muted">
+                              {w.short} <span className="long">resets in </span>{timeStr}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="muted small">—</span>
+                  )}
+                </div>
                 {a.latestSnapshot?.isStale ? (
                   <span className="stale">data from {clock(a.latestSnapshot.fetchedAt)}</span>
                 ) : (
