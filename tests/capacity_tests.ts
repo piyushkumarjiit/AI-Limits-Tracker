@@ -178,6 +178,34 @@ console.log('\nSuite 3: Single-ring fallbacks');
   assert(res7d.outer?.short === '7d', 'Single weekly: outer short is 7d');
   assert(res7d.inner === null, 'Single weekly: inner is null');
 
+  // Single monthly_30d
+  const singleMo: QuotaBucket = {
+    id: 'sMo',
+    label: 'Monthly Extra',
+    windowType: 'monthly_30d',
+    windowSeconds: 2592000,
+    utilizationPercent: 15,
+    remainingPercent: 85,
+  };
+  const resMo = resolveRingWindows([singleMo]);
+  assert(resMo.outer?.remaining === 85, 'Single monthly: outer has remaining 85%');
+  assert(resMo.outer?.short === 'mo', 'Single monthly: outer short is mo');
+  assert(resMo.inner === null, 'Single monthly: inner is null');
+  assert(resMo.effectiveRemaining === 85, 'Single monthly: effective is 85%');
+
+  // Single balance
+  const singleBal: QuotaBucket = {
+    id: 'sBal',
+    label: 'Cursor Credits',
+    windowType: 'balance',
+    utilizationPercent: 50,
+    remainingPercent: 50,
+  };
+  const resBal = resolveRingWindows([singleBal]);
+  assert(resBal.outer?.remaining === 50, 'Single balance: outer has remaining 50%');
+  assert(resBal.outer?.short === 'limit', 'Single balance: outer short is limit');
+  assert(resBal.inner === null, 'Single balance: inner is null');
+
   // Empty / undefined buckets
   const emptyRes = resolveRingWindows([]);
   assert(emptyRes.outer === null && emptyRes.inner === null, 'Empty buckets: null rings');
