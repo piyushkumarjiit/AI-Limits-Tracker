@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowDown, ArrowUp, Bell, Plus } from 'lucide-react-native';
 import { AccountCard } from '../../components/AccountCard';
+import { FamilyCard } from '../../components/FamilyCard';
 import { Card, EmptyState, PrimaryButton } from '../../components/ui';
-import { Colors, PROVIDER_NAMES, Radius } from '../../constants/theme';
+import { accountChartColor, Colors, PROVIDER_NAMES, Radius } from '../../constants/theme';
 import { ProviderType } from '../../models/types';
+import { groupFamilies } from '../../services/capacity';
 import { getHistorySince } from '../../services/db';
 import { headlineBucket } from '../../services/notificationService';
 import { useAppStore } from '../../store/useAppStore';
@@ -69,7 +71,34 @@ export default function DashboardScreen() {
     return c;
   }, [accounts]);
 
-  const filters: Filter[] = ['all', ...(['claude', 'chatgpt', 'gemini'] as ProviderType[]).filter((p) => counts[p])];
+  const colors = useMemo(() => {
+    const seen: Record<string, number> = {};
+    const map: Record<string, string> = {};
+    for (const a of accounts) {
+      const i = seen[a.providerType] || 0;
+      seen[a.providerType] = i + 1;
+      map[a.id] = accountChartColor(a.providerType, i);
+    }
+    return map;
+  }, [accounts]);
+
+  const families = useMemo(() => {
+    const enriched = accounts.map((a) => ({
+      ...a,
+      latestSnapshot: snapshots[a.id],
+    }));
+    return groupFamilies(enriched);
+  }, [accounts, snapshots]);
+
+  // Extend filter chips to include all active provider types present in accounts
+  const filters = useMemo<Filter[]>(() => {
+    const activeTypes = Array.from(new Set(accounts.map((a) => a.providerType)));
+    return ['all', ...activeTypes];
+  }, [accounts]);
+
+  const showFamilyStrip = families.some((f) => f.members.length >= 2) || families.length >= 2;
+  const screenWidth = Dimensions.get('window').width;
+  const cardWidth = Math.min(260, Math.round(screenWidth * 0.72));
   const visible = accounts.filter((a) => filter === 'all' || a.providerType === filter);
   const needsAttention = accounts.some((a) => {
     const s = snapshots[a.id]?.status || a.lastStatus;
@@ -140,6 +169,29 @@ export default function DashboardScreen() {
             <Stat value={stats.nearestReset ? formatTimeRemaining(stats.nearestReset) : '—'} label="until reset" />
           </View>
         </Card>
+
+        {showFamilyStrip && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            snapToInterval={cardWidth + 10}
+            decelerationRate="fast"
+            contentContainerStyle={styles.familyStrip}
+          >
+            {families.map((fam) => (
+              <View key={fam.family} style={{ width: cardWidth }}>
+                <FamilyCard
+                  summary={fam}
+                  colors={colors}
+                  active={filter === fam.family}
+                  onSelect={(selectedFamily) =>
+                    setFilter((prev) => (prev === selectedFamily ? 'all' : selectedFamily))
+                  }
+                />
+              </View>
+            ))}
+          </ScrollView>
+        )}
 
         {accounts.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -333,6 +385,10 @@ const styles = StyleSheet.create({
   },
   chips: {
     gap: 8,
+    paddingBottom: 16,
+  },
+  familyStrip: {
+    gap: 10,
     paddingBottom: 16,
   },
   chip: {
