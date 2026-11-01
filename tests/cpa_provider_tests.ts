@@ -294,7 +294,7 @@ async function runTests() {
     const transport = createMockTransport({
       apiCallMock: async (req) => {
         requestedUrls.push(req.url);
-        if (req.url.includes('daily-cloudcode-pa')) {
+        if (new URL(req.url).hostname === 'daily-cloudcode-pa.googleapis.com') {
           return { status_code: 404, header: {}, body: 'Not found' };
         }
         return {
@@ -328,8 +328,8 @@ async function runTests() {
     };
     const res = await provider.fetchUsage('acc-antigravity', creds);
     assertEquals(requestedUrls.length, 2, 'Fallback should trigger second request');
-    assert(requestedUrls[0].includes('daily-cloudcode-pa'), 'First url was daily endpoint');
-    assert(requestedUrls[1].includes('cloudcode-pa.googleapis.com'), 'Second url was prod endpoint');
+    assert(new URL(requestedUrls[0]).hostname === 'daily-cloudcode-pa.googleapis.com', 'First url was daily endpoint');
+    assert(new URL(requestedUrls[1]).hostname === 'cloudcode-pa.googleapis.com', 'Second url was prod endpoint');
     assertEquals(res.snapshot.status, 'ok', 'Status ok after fallback');
     assert(Boolean(res.snapshot.buckets), 'res.snapshot.buckets exists');
     assertEquals(res.snapshot.buckets.length, 1, 'Parsed Antigravity bucket');
