@@ -20,11 +20,14 @@ import { Tracker } from './tracker';
 import type { CpaSyncEngine } from './cpaSync';
 import type { CpaRoutingExecutor } from './cpaRouting';
 import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
+import { QuotaCache, QuotaQuery } from './quotaCache';
+import { renderMetrics } from './metrics';
 
 export interface AppConfig {
   adminPassword: string;
   appSecret: string;
   apiToken: string;
+  metricsToken?: string;
   secureCookies: boolean;
   trustProxy: boolean;
   webDir: string;
@@ -43,6 +46,7 @@ export interface AppDeps {
   tracker: Tracker;
   cpaSync?: CpaSyncEngine;
   cpaRouting?: CpaRoutingExecutor;
+  quotaCache?: QuotaCache;
 }
 
 /* ---------------- HTTP helpers ---------------- */
@@ -196,10 +200,11 @@ async function handleApi(
   url: URL,
   config: AppConfig,
   auth: AuthConfig,
-  { store, tracker, cpaSync, cpaRouting }: AppDeps,
+  deps: AppDeps,
   limiter: ReturnType<typeof createLoginLimiter>,
   bearerLimiter: ReturnType<typeof createLoginLimiter>
 ) {
+  const { store, tracker, cpaSync, cpaRouting, quotaCache } = deps;
   const path = url.pathname;
   const method = req.method || 'GET';
 
@@ -272,6 +277,30 @@ async function handleApi(
       telegram: Boolean(config.telegram),
       cpaRouting: store.getCpaRoutingConfig(),
     });
+  }
+
+  if (path === '/api/quota' && method === 'GET') {
+    const q: QuotaQuery = {};
+    const prov = url.searchParams.get('provider');
+    if (prov) q.provider = prov;
+    const authIdx = url.searchParams.get('auth_index');
+    if (authIdx !== null) q.auth_index = authIdx;
+    const src = url.searchParams.get('source');
+    if (src === 'cpa' || src === 'native') q.source = src;
+    const inclExh = url.searchParams.get('include_exhausted');
+    if (inclExh !== null) q.include_exhausted = inclExh === 'true' || inclExh === '1';
+
+    const cache = quotaCache ?? new QuotaCache(() => store.listAccounts());
+    const { view, etag } = cache.get(q);
+
+    const clientETag = req.headers['if-none-match'];
+    if (clientETag && clientETag === etag) {
+      res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'no-cache' });
+      res.end();
+      return;
+    }
+
+    return send(res, 200, view, { 'ETag': etag, 'Cache-Control': 'no-cache' });
   }
 
   if (path === '/api/refresh' && method === 'POST') {
@@ -479,6 +508,30 @@ export function createApp(config: AppConfig, deps: AppDeps) {
       if (url.pathname.startsWith('/api/') && method !== 'GET' && method !== 'HEAD') {
         const csrf = csrfError(req, auth);
         if (csrf) return send(res, csrf.status, { error: csrf.error });
+      }
+      if (url.pathname === '/metrics' && method === 'GET') {
+        const effectiveMetricsToken = config.metricsToken || config.apiToken;
+        if (!effectiveMetricsToken) {
+          return send(res, 404, { error: 'Metrics endpoint not configured' });
+        }
+        // Strict bearer token authentication: rejects cookie auth
+        const authHeader = req.headers.authorization || '';
+        const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
+        if (!match) {
+          return send(res, 401, { error: 'unauthorized' });
+        }
+        const providedToken = match[1];
+        if (!safeEqual(providedToken, effectiveMetricsToken)) {
+          return send(res, 401, { error: 'unauthorized' });
+        }
+        const cache = deps.quotaCache ?? new QuotaCache(() => deps.store.listAccounts(), undefined, renderMetrics);
+        const metricsText = cache.getMetricsText();
+        res.writeHead(200, {
+          'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+          'Cache-Control': 'no-cache',
+        });
+        res.end(metricsText);
+        return;
       }
       if (url.pathname.startsWith('/api/')) await handleApi(req, res, url, config, auth, deps, limiter, bearerLimiter);
       else serveStatic(req, res, url.pathname, config.webDir);

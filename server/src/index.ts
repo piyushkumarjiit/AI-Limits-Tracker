@@ -16,6 +16,8 @@ import { CpaUsageProvider } from '../../src/services/cpa/CpaUsageProvider';
 import { CpaSyncEngine } from './cpaSync';
 import { CpaRoutingExecutor } from './cpaRouting';
 import { resolveCpaConfig } from './config';
+import { QuotaCache } from './quotaCache';
+import { renderMetrics } from './metrics';
 
 // Server-only SSRF guard: resolve hostnames and cap outbound response bodies.
 installServerNetworking();
@@ -59,6 +61,7 @@ const PORT = Number(process.env.PORT) || 8795;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const APP_SECRET = process.env.APP_SECRET || '';
 const API_TOKEN = process.env.API_TOKEN || '';
+const METRICS_TOKEN = process.env.METRICS_TOKEN || '';
 const SESSION_DAYS = resolveSessionDays(process.env, DEFAULT_SESSION_DAYS);
 const DATA_DIR = resolve(process.env.DATA_DIR || 'data');
 const WEB_DIR = resolve(process.env.WEB_DIR || 'public');
@@ -101,11 +104,29 @@ if (cpaConfig) {
   );
 }
 
+const quotaCache = new QuotaCache(
+  () => store.listAccounts(),
+  () => ({
+    cpaLinks: store.listCpaLinks(),
+    cpaRouting: {
+      config: store.getCpaRoutingConfig(),
+      plans: cpaRouting ? cpaRouting.lastPlans() : [],
+    },
+  }),
+  renderMetrics
+);
+
+// Invalidate quota cache after tracker sync
+tracker.onSyncAll(() => {
+  quotaCache.invalidate();
+});
+
 const server = createApp(
   {
     adminPassword: ADMIN_PASSWORD,
     appSecret: APP_SECRET,
     apiToken: API_TOKEN,
+    metricsToken: METRICS_TOKEN,
     secureCookies: true,
     trustProxy: process.env.TRUST_PROXY === '1',
     webDir: WEB_DIR,
@@ -114,7 +135,7 @@ const server = createApp(
     allowedHosts: ALLOWED_HOSTS,
     maxHeaderSize: 8192,
   },
-  { store, tracker, cpaSync, cpaRouting }
+  { store, tracker, cpaSync, cpaRouting, quotaCache }
 );
 
 // Explicit resource bounds: slow/malicious clients cannot hold sockets or headers forever.

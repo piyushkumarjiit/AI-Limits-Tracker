@@ -39,6 +39,7 @@
     "tests/cpa_routing_planner_tests.ts",
     "tests/cpa_provider_tests.ts",
     "tests/cpa_sync_tests.ts",
-    "tests/cpa_routing_exec_tests.ts"
+    "tests/cpa_routing_exec_tests.ts",
+    "tests/quota_endpoints_tests.ts"
   ]
 }
