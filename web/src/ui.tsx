@@ -1,6 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { ProviderType, QuotaBucket } from '../../src/models/types';
-import { Colors, PROVIDER_NAMES, remainingColor, severityColor } from '../../src/constants/theme';
+import {
+  Colors,
+  getAccessibleSegmentTextColor,
+  getProviderAccountShades,
+  LAB_BRAND_PALETTES,
+  PROVIDER_NAMES,
+  remainingColor,
+  severityColor,
+} from '../../src/constants/theme';
 import {
   arcPath,
   DualRingData,
@@ -14,6 +22,8 @@ import {
 import { formatTimeRemaining } from '../../src/utils/formatters';
 import type { Forecast } from '../../src/services/stats';
 import type { Account } from './api';
+import type { AccountTelemetry } from '../../src/services/telemetryService';
+import { formatTokenCount } from '../../src/services/telemetryService';
 
 /* ---------- Provider logos ---------- */
 
@@ -41,7 +51,7 @@ export const Logo: React.FC<{ type: ProviderType; size?: number }> = ({ type, si
     );
   }
 
-  const bg = type === 'claude' ? '#e2683c' : type === 'chatgpt' ? '#18181b' : '#eef1fd';
+  const bg = type === 'claude' ? '#d97757' : type === 'chatgpt' ? '#10a37f' : '#eef1fd';
   return (
     <div className="logo" style={{ width: size, height: size, borderRadius: radius, background: bg }}>
       <svg width={inner} height={inner} viewBox="0 0 24 24" aria-hidden>
@@ -645,5 +655,401 @@ export const FamilyCard: React.FC<FamilyCardProps> = ({
         ) : null}
       </div>
     </button>
+  );
+};
+
+/* ---------- Web Multi-Provider Stacked Quota Bar ---------- */
+
+export interface WebProviderStackedBarProps {
+  provider: ProviderType;
+  accounts: Account[];
+  windowMode: 'weekly' | 'rolling5h';
+  onSelectAccount?: (accountId: string) => void;
+  onNavigateFleet?: (provider: ProviderType) => void;
+}
+
+export const WebProviderStackedBar: React.FC<WebProviderStackedBarProps> = ({
+  provider,
+  accounts,
+  windowMode,
+  onSelectAccount,
+  onNavigateFleet,
+}) => {
+  if (!accounts.length) return null;
+
+  const shades = getProviderAccountShades(provider, accounts.length);
+  const providerTitle = PROVIDER_NAMES[provider] || provider;
+  const brand = LAB_BRAND_PALETTES[provider] || { primary: '#8b5cf6' };
+
+  let healthy = 0;
+  let low = 0;
+  let exhausted = 0;
+
+  const items = accounts.map((acc, idx) => {
+    const buckets = acc.latestSnapshot?.buckets || [];
+    const bucket =
+      windowMode === 'rolling5h'
+        ? buckets.find((b) => b.windowType === 'session_5h') || buckets[0]
+        : buckets.find((b) => b.windowType === 'weekly_7d') || buckets[0];
+    const rem = Math.max(0, Math.min(100, bucket?.remainingPercent ?? 100));
+    const isExhausted = (acc.latestSnapshot?.status === 'ok' ? false : acc.latestSnapshot?.status === 'rate_limited') || rem <= 10;
+
+    if (isExhausted) exhausted++;
+    else if (rem <= 50) low++;
+    else healthy++;
+
+    const shade = shades[idx] || brand.primary;
+    const textColor = getAccessibleSegmentTextColor(shade);
+
+    return {
+      acc,
+      rem,
+      isExhausted,
+      shade,
+      textColor,
+    };
+  });
+
+  const avgRemaining = Math.round(items.reduce((sum, item) => sum + item.rem, 0) / accounts.length);
+
+  return (
+    <div className="card web-stacked-bar-card" style={{ marginBottom: 14, padding: '16px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <button
+          type="button"
+          onClick={() => onNavigateFleet?.(provider)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textAlign: 'left' }}
+          title={`View all ${providerTitle} accounts`}
+        >
+          <span style={{ width: 12, height: 12, borderRadius: '50%', background: brand.primary, display: 'inline-block' }} />
+          <b style={{ fontSize: 16 }}>{providerTitle}</b>
+          <span className="muted small">({accounts.length})</span>
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {items.map(({ acc, rem, isExhausted }) => {
+              const color = isExhausted ? 'var(--bad)' : rem <= 50 ? 'var(--warn)' : 'var(--ok)';
+              return (
+                <span
+                  key={acc.id}
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: color,
+                    display: 'inline-block',
+                  }}
+                  title={`${acc.name}: ${Math.round(rem)}% remaining`}
+                />
+              );
+            })}
+          </div>
+          <span className="small muted" style={{ fontWeight: 600 }}>
+            {exhausted > 0 ? `${exhausted} exhausted` : low > 0 ? `${low} low` : 'All Healthy'}
+          </span>
+        </div>
+      </div>
+
+      <div
+        className="stacked-bar-track"
+        style={{
+          height: 28,
+          background: 'var(--track)',
+          borderRadius: 8,
+          display: 'flex',
+          overflow: 'hidden',
+          width: '100%',
+        }}
+      >
+        {items.map(({ acc, rem, shade, textColor }, idx) => (
+          <button
+            key={acc.id}
+            type="button"
+            onClick={() => onSelectAccount?.(acc.id)}
+            style={{
+              flex: Math.max(0.1, rem),
+              background: shade,
+              color: textColor,
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 6px',
+              borderRight: '1px solid rgba(255,255,255,0.25)',
+              cursor: 'pointer',
+              fontSize: 11,
+              fontWeight: 700,
+              minWidth: 20,
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              textOverflow: 'ellipsis',
+            }}
+            title={`${acc.name} (${Math.round(rem)}% left)`}
+          >
+            {accounts.length <= 4 && `#${idx + 1} (${Math.round(rem)}%)`}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+        <span className="small muted">
+          Fleet capacity: <b>{avgRemaining}%</b> left ({windowMode === 'weekly' ? 'Weekly' : '5-Hour'})
+        </span>
+      </div>
+    </div>
+  );
+};
+
+/* ---------- Web Slide-Over Drawer Panel ---------- */
+
+export interface WebAccountDrawerProps {
+  account: Account | null;
+  telemetry?: AccountTelemetry;
+  onClose: () => void;
+  onViewFleet?: (provider: string, accountId: string) => void;
+}
+
+export const WebAccountDrawer: React.FC<WebAccountDrawerProps> = ({
+  account,
+  telemetry,
+  onClose,
+  onViewFleet,
+}) => {
+  const [copied, setCopied] = useState(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  if (!account) return null;
+
+  const brand = LAB_BRAND_PALETTES[account.providerType] || { primary: '#8b5cf6' };
+  const providerTitle = PROVIDER_NAMES[account.providerType] || account.providerType;
+  const buckets = account.latestSnapshot?.buckets || [];
+  const weekly = buckets.find((b) => b.windowType === 'weekly_7d') || buckets[0];
+  const rolling = buckets.find((b) => b.windowType === 'session_5h') || buckets[1] || buckets[0];
+
+  const weeklyRem = Math.round(weekly?.remainingPercent ?? 100);
+  const rollingRem = Math.round(rolling?.remainingPercent ?? 100);
+  const isExhausted = (account.latestSnapshot?.status === 'ok' ? false : account.latestSnapshot?.status === 'rate_limited') || weeklyRem <= 10 || rollingRem <= 10;
+  const nearestReset = weekly?.resetsAt || rolling?.resetsAt;
+
+  const handleCopy = () => {
+    if (account.email) {
+      navigator.clipboard?.writeText(account.email).catch(() => {});
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const slotId = telemetry?.slotId || `${account.providerType}_slot_01`;
+  const proxyPort = telemetry?.proxyPort || 8317;
+
+  return (
+    <div
+      className="web-drawer-backdrop"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(15, 23, 42, 0.45)',
+        display: 'flex',
+        justifyContent: 'flex-end',
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        ref={drawerRef}
+        className="web-drawer-content"
+        style={{
+          width: '100%',
+          maxWidth: 440,
+          height: '100%',
+          background: 'var(--card)',
+          borderLeft: '1px solid var(--border)',
+          padding: 24,
+          boxShadow: '-4px 0 24px rgba(0,0,0,0.15)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          overflowY: 'auto',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span
+              style={{
+                background: brand.primary,
+                color: '#fff',
+                padding: '3px 8px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {providerTitle}
+            </span>
+            <b style={{ fontSize: 18 }}>{account.name}</b>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '6px 10px',
+              borderRadius: '50%',
+              background: 'var(--card-hi)',
+              fontSize: 16,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="muted small">{account.email || 'No email associated'}</span>
+          {account.email && (
+            <button
+              type="button"
+              onClick={handleCopy}
+              style={{
+                background: 'var(--card-hi)',
+                padding: '4px 8px',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: copied ? 'var(--ok)' : 'var(--muted)',
+                cursor: 'pointer',
+              }}
+            >
+              {copied ? 'Copied' : 'Copy email'}
+            </button>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            background: isExhausted ? 'var(--bad-soft)' : 'var(--ok-soft)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: isExhausted ? 'var(--bad)' : 'var(--ok)',
+                display: 'inline-block',
+              }}
+            />
+            <b style={{ color: isExhausted ? 'var(--bad)' : 'var(--ok)', fontSize: 13 }}>
+              {isExhausted ? 'Cooldown Active' : 'Ready & Healthy'}
+            </b>
+          </div>
+          {nearestReset && (
+            <span className="small muted">
+              Resets in {formatTimeRemaining(nearestReset)}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Meter 1: Weekly */}
+          <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Weekly Quota Cap</span>
+              <b style={{ fontSize: 13 }}>{weeklyRem}% remaining</b>
+            </div>
+            <div style={{ height: 8, background: 'var(--track)', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${weeklyRem}%`, background: brand.primary, borderRadius: 4 }} />
+            </div>
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
+              {weekly?.resetsAt ? `Resets ${formatTimeRemaining(weekly.resetsAt)}` : '7-day rolling window'}
+            </div>
+          </div>
+
+          {/* Meter 2: 5-Hour */}
+          <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>5-Hour Rolling Limit</span>
+              <b style={{ fontSize: 13 }}>{rollingRem}% remaining</b>
+            </div>
+            <div style={{ height: 8, background: 'var(--track)', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${rollingRem}%`, background: brand.primary, borderRadius: 4 }} />
+            </div>
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
+              {rolling?.resetsAt ? `Resets in ${formatTimeRemaining(rolling.resetsAt)}` : 'Active session window'}
+            </div>
+          </div>
+        </div>
+
+        {/* Telemetry info */}
+        <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <b style={{ fontSize: 13, marginBottom: 2 }}>Proxy Router Telemetry</b>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <span className="muted">Auth Slot:</span>
+            <b>{slotId}</b>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <span className="muted">Proxy Port:</span>
+            <b>{proxyPort} (CLIProxy pool)</b>
+          </div>
+          {telemetry && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span className="muted">Total Routed:</span>
+                <b>{formatTokenCount(telemetry.totalTokens)} tokens</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span className="muted">Prompt / Completion:</span>
+                <b>{formatTokenCount(telemetry.promptTokens)} / {formatTokenCount(telemetry.completionTokens)}</b>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span className="muted">Request Count:</span>
+                <b>{telemetry.requestCount} requests</b>
+              </div>
+            </>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            onViewFleet?.(account.providerType, account.id);
+          }}
+          style={{
+            marginTop: 'auto',
+            background: 'var(--ink)',
+            color: '#fff',
+            padding: '14px',
+            borderRadius: 12,
+            fontWeight: 700,
+            fontSize: 15,
+            textAlign: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          View in Fleet Tab ➔
+        </button>
+      </div>
+    </div>
   );
 };

@@ -3,12 +3,14 @@ export type ProviderType =
   | 'chatgpt'
   | 'gemini'
   | 'antigravity'
+  | 'deepseek'
+  | 'qwen'
+  | 'mistral'
+  | 'groq'
   | 'cursor'
   | 'copilot'
   | 'perplexity'
   | 'grok'
-  | 'mistral'
-  | 'deepseek'
   | 'poe'
   | 'custom';
 
@@ -23,6 +25,8 @@ export const RECIPE_PROVIDERS: ProviderType[] = [
   'grok',
   'mistral',
   'deepseek',
+  'qwen',
+  'groq',
   'poe',
 ];
 
