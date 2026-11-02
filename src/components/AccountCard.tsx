@@ -11,14 +11,16 @@ import { MiniBars } from './Charts';
 import { DualRing } from './CircularProgress';
 import { ProviderLogo } from './ProviderLogo';
 import { Card, StatusDot, accountStatus } from './ui';
+import { AccountTelemetry, formatTokenCount } from '../services/telemetryService';
 
 export interface AccountCardProps {
   account: AccountEntity;
   snapshot?: UsageSnapshot;
   badge?: React.ReactNode;
+  telemetry?: AccountTelemetry;
 }
 
-export const AccountCard: React.FC<AccountCardProps> = ({ account, snapshot, badge }) => {
+export const AccountCard: React.FC<AccountCardProps> = ({ account, snapshot, badge, telemetry }) => {
   const router = useRouter();
   const [bars, setBars] = useState<Array<number | null>>([]);
 
@@ -63,6 +65,12 @@ export const AccountCard: React.FC<AccountCardProps> = ({ account, snapshot, bad
             <Text style={styles.plan} numberOfLines={1}>
               {subtitle || '—'}
             </Text>
+
+            {telemetry && telemetry.totalTokens > 0 && (
+              <Text style={styles.telemetryText} numberOfLines={1}>
+                Routed: {formatTokenCount(telemetry.totalTokens)} tokens ({telemetry.proxySource === 'cliproxy' ? 'CLIProxy' : 'LiteLLM'})
+              </Text>
+            )}
 
             <View style={styles.statusPillsRow}>
               <StatusDot status={status} />
@@ -181,6 +189,12 @@ const styles = StyleSheet.create({
   plan: {
     fontSize: 12,
     color: Colors.textMuted,
+  },
+  telemetryText: {
+    fontSize: 11,
+    color: Colors.textSubtle,
+    fontWeight: '600',
+    marginTop: 2,
   },
   statusPillsRow: {
     flexDirection: 'row',
