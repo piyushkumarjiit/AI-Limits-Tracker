@@ -56,7 +56,7 @@ function isLoopbackIPv6(host: string): boolean {
   return host === '::1' || host === '0:0:0:0:0:0:0:1';
 }
 
-function isAllowedHttpHost(host: string): boolean {
+export function isAllowedHttpHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (h === 'localhost' || h.endsWith('.localhost')) return true;
   if (isLoopbackOrPrivateIPv4(h)) return true;

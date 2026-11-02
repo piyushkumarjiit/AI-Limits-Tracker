@@ -22,6 +22,7 @@ import type { CpaRoutingExecutor } from './cpaRouting';
 import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
 import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
+import { TelemetryService } from './telemetry';
 
 export interface AppConfig {
   adminPassword: string;
@@ -47,6 +48,7 @@ export interface AppDeps {
   cpaSync?: CpaSyncEngine;
   cpaRouting?: CpaRoutingExecutor;
   quotaCache?: QuotaCache;
+  telemetryService?: TelemetryService;
 }
 
 /* ---------------- HTTP helpers ---------------- */
@@ -330,6 +332,13 @@ async function handleApi(
       return send(res, 200, { enabled: false, lastDiscoveryAt: null, lastDiscoveryOk: false });
     }
     return send(res, 200, cpaSync.status());
+  }
+
+  if (path === '/api/telemetry' && method === 'GET') {
+    const service = deps.telemetryService ?? new TelemetryService();
+    const accounts = store.listAccounts().map((a) => a.id);
+    const telemetry = await service.getTelemetry(accounts);
+    return send(res, 200, telemetry);
   }
 
   if (path === '/api/settings' && method === 'PUT') {

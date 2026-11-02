@@ -1,18 +1,18 @@
 :root {
-  --bg: #f2f1ed;
-  --card: #fbfaf8;
-  --card-hi: #eceae4;
-  --border: #e8e6e0;
-  --border-subtle: #efede8;
-  --track: #e9e7e1;
-  --text: #18181b;
-  --muted: #71717a;
-  --subtle: #a1a1aa;
-  --ink: #18181b;
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --card-hi: #f1f5f9;
+  --border: #cbd5e1;
+  --border-subtle: #e2e8f0;
+  --track: #e2e8f0;
+  --text: #0f172a;
+  --muted: #475569;
+  --subtle: #64748b;
+  --ink: #0f172a;
   --ok: #16a34a;
   --ok-soft: #e7f6ec;
-  --warn: #f59e0b;
-  --bad: #ef4444;
+  --warn: #d97706;
+  --bad: #dc2626;
   --bad-soft: #fdecec;
   --ring: #1f9d74;
   --sev-healthy: #1f9d74;
@@ -29,8 +29,33 @@
   --sev-exhausted-soft: #fdecec;
   --ring-size: 88px;
   --radius: 22px;
-  --shadow: 0 3px 12px rgba(63, 58, 46, 0.06);
-  color-scheme: light;
+  --shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0f19;
+    --card: #111827;
+    --card-hi: #1f2937;
+    --border: #374151;
+    --border-subtle: #1f2937;
+    --track: #1f2937;
+    --text: #f9fafb;
+    --muted: #9ca3af;
+    --subtle: #6b7280;
+    --ink: #f9fafb;
+    --shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
+  }
+  input, textarea, select {
+    background: #111827;
+    color: #f9fafb;
+    border-color: #374151;
+  }
+  .web-stacked-bar-card, .family-card, .account-card, .card {
+    background: #111827;
+    border-color: #374151;
+  }
 }
 @media (min-width: 960px) { :root { --ring-size: 96px; } }
 @media (max-width: 380px) { :root { --ring-size: 80px; } }

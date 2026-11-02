@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronRight, Plus, RefreshCw } from 'lucide-react-native';
 import { ProviderLogo } from '../../components/ProviderLogo';
 import { accountStatus, Card, EmptyState, PrimaryButton, ScreenHeader, StatusDot } from '../../components/ui';
@@ -12,7 +12,12 @@ import { formatRelative } from '../../utils/formatters';
 
 export default function AccountsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ provider?: string; id?: string }>();
   const { accounts, snapshots, moveAccount, deleteAccount, refreshAll, isSyncing } = useAppStore();
+
+  const filteredAccounts = params.provider
+    ? accounts.filter((a) => a.providerType === params.provider)
+    : accounts;
 
   const openActions = (account: AccountEntity, index: number) => {
     const buttons: any[] = [];
@@ -52,13 +57,14 @@ export default function AccountsScreen() {
           style={{ marginBottom: 16 }}
         />
 
-        {accounts.map((account, index) => {
+        {filteredAccounts.map((account, index) => {
           const snap = snapshots[account.id];
           const status = accountStatus(account, snap);
+          const isTarget = params.id === account.id;
           return (
             <Card
               key={account.id}
-              style={styles.row}
+              style={[styles.row, isTarget && styles.highlightedRow]}
               onPress={() => router.push({ pathname: '/account/[id]', params: { id: account.id } })}
             >
               <TouchableOpacity onLongPress={() => openActions(account, index)} delayLongPress={300}>
@@ -106,6 +112,11 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 10,
     paddingVertical: 16,
+  },
+  highlightedRow: {
+    borderColor: Colors.borderActive,
+    borderWidth: 2,
+    backgroundColor: Colors.cardHighlight,
   },
   name: {
     fontSize: 15,
