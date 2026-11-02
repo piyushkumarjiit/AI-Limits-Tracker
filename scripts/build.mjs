@@ -49,7 +49,7 @@ async function buildServer() {
     outfile: join(root, 'server/dist/server.mjs'),
     platform: 'node',
     format: 'esm',
-    target: 'node22',
+    target: 'node24',
     define: {},
   });
 }
