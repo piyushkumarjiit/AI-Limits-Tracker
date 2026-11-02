@@ -5,9 +5,11 @@ import { useRouter } from 'expo-router';
 import { ArrowDown, ArrowUp, Bell, Plus } from 'lucide-react-native';
 import { AccountCard } from '../../components/AccountCard';
 import { FamilyCard } from '../../components/FamilyCard';
-import { Card, EmptyState, PrimaryButton } from '../../components/ui';
+import { Card, EmptyState, PrimaryButton, Segmented } from '../../components/ui';
+import { ProviderStackedBar } from '../../components/ProviderStackedBar';
+import { AccountDetailDrawer } from '../../components/AccountDetailDrawer';
 import { accountChartColor, Colors, PROVIDER_NAMES, Radius } from '../../constants/theme';
-import { ProviderType } from '../../models/types';
+import { AccountEntity, ProviderType } from '../../models/types';
 import { groupFamilies } from '../../services/capacity';
 import { getHistorySince } from '../../services/db';
 import { headlineBucket } from '../../services/notificationService';
@@ -18,9 +20,19 @@ type Filter = 'all' | ProviderType;
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const { accounts, snapshots, isSyncing, refreshAll, userName } = useAppStore();
+  const {
+    accounts,
+    snapshots,
+    isSyncing,
+    refreshAll,
+    userName,
+    quotaWindowMode,
+    setQuotaWindowMode,
+    telemetry,
+  } = useAppStore();
   const [filter, setFilter] = useState<Filter>('all');
   const [trend, setTrend] = useState<number | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   useNow(30000);
 
   const stats = useMemo(() => {
@@ -124,7 +136,7 @@ export default function DashboardScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.hello}>{greeting()}</Text>
             <Text style={styles.name}>
-              {userName || 'friend'} <Text style={styles.wave}>👋</Text>
+              {userName || 'friend'}
             </Text>
             <Text style={styles.sub}>All your AI accounts in one place{'\n'}and under control</Text>
           </View>
@@ -138,6 +150,66 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Global Proxy Telemetry Status Banner */}
+        <View style={styles.telemetryStatusRow}>
+          <View
+            style={[
+              styles.telemetryStatusPill,
+              telemetry.global.connected ? styles.telemetryConnected : styles.telemetryStandby,
+            ]}
+          >
+            <View
+              style={[
+                styles.telemetryDot,
+                { backgroundColor: telemetry.global.connected ? Colors.normal : Colors.warning },
+              ]}
+            />
+            <Text
+              style={[
+                styles.telemetryStatusText,
+                { color: telemetry.global.connected ? Colors.normal : Colors.warning },
+              ]}
+            >
+              {telemetry.global.statusText}
+            </Text>
+          </View>
+        </View>
+
+        {/* Quota Window Segmented Control (Weekly Quota default vs 5-Hour Rolling) */}
+        <View style={styles.windowToggleRow}>
+          <Segmented
+            options={[
+              { key: 'weekly', label: 'Weekly Quota' },
+              { key: 'rolling5h', label: '5-Hour Rolling' },
+            ]}
+            value={quotaWindowMode}
+            onChange={(mode) => setQuotaWindowMode(mode as 'weekly' | 'rolling5h')}
+          />
+        </View>
+
+        {/* Multi-Provider Stacked Quota Bars */}
+        {accounts.length > 0 && (
+          <View style={styles.stackedBarsContainer}>
+            {Array.from(new Set(accounts.map((a) => a.providerType))).map((prov) => {
+              const provAccounts = accounts.filter((a) => a.providerType === prov);
+              return (
+                <ProviderStackedBar
+                  key={prov}
+                  provider={prov}
+                  accounts={provAccounts}
+                  snapshots={snapshots}
+                  windowMode={quotaWindowMode}
+                  onSelectAccount={(accId) => setSelectedAccountId(accId)}
+                  onNavigateFleet={(targetProv) => {
+                    setFilter(targetProv);
+                    router.push({ pathname: '/accounts', params: { provider: targetProv } });
+                  }}
+                />
+              );
+            })}
+          </View>
+        )}
 
         <Card style={styles.summary}>
           <View style={styles.summaryTop}>
@@ -212,8 +284,25 @@ export default function DashboardScreen() {
         )}
 
         {visible.map((account) => (
-          <AccountCard key={account.id} account={account} snapshot={snapshots[account.id]} />
+          <AccountCard
+            key={account.id}
+            account={account}
+            snapshot={snapshots[account.id]}
+            telemetry={telemetry.accounts[account.id]}
+          />
         ))}
+
+        {/* Account Detail Slide-Over Drawer */}
+        <AccountDetailDrawer
+          visible={Boolean(selectedAccountId)}
+          account={accounts.find((a) => a.id === selectedAccountId) || null}
+          snapshot={selectedAccountId ? snapshots[selectedAccountId] : undefined}
+          telemetry={selectedAccountId ? telemetry.accounts[selectedAccountId] : undefined}
+          onClose={() => setSelectedAccountId(null)}
+          onViewInFleet={(prov, accId) => {
+            router.push({ pathname: '/accounts', params: { provider: prov, id: accId } });
+          }}
+        />
 
         {accounts.length === 0 && (
           <EmptyState
@@ -277,6 +366,39 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 8,
     lineHeight: 20,
+  },
+  telemetryStatusRow: {
+    marginBottom: 14,
+  },
+  telemetryStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: Radius.full,
+    alignSelf: 'flex-start',
+  },
+  telemetryConnected: {
+    backgroundColor: Colors.normalSoft,
+  },
+  telemetryStandby: {
+    backgroundColor: '#fef3c7',
+  },
+  telemetryDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  telemetryStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  windowToggleRow: {
+    marginBottom: 16,
+  },
+  stackedBarsContainer: {
+    marginBottom: 10,
   },
   headerRight: {
     flexDirection: 'row',
