@@ -176,12 +176,13 @@ if (!hasDocker) {
   const built = run('docker', ['build', '--quiet', '-t', tag, '.']);
   assert(built.status === 0, 'image builds from the Dockerfile', built.stderr.slice(-400));
   const froms = (readFileSync(join(root, 'Dockerfile'), 'utf8').match(/^FROM\s+(\S+)/gm) ?? []).map((l) => l.split(/\s+/)[1]);
-  assert(froms.length > 0 && froms.every((img) => /^[\w.\-/]+:[\w.-]+@sha256:[0-9a-f]{64}$/.test(img)), 'every Dockerfile base image is pinned by tag and digest', froms.join(' '));
+  assert(froms.length > 0 && froms.every((img) => /^node:24-alpine@sha256:[0-9a-f]{64}$/.test(img)), 'every Dockerfile base image is pinned to node:24-alpine by digest', froms.join(' '));
   const exists = run('docker', ['image', 'inspect', tag, '--format', '{{.Id}}']);
   assert(built.status === 0 && exists.status === 0 && exists.stdout.trim().length > 0, 'built image exists', exists.stderr.slice(-200));
   if (built.status === 0) {
     const insp = run('docker', ['image', 'inspect', tag, '--format', '{{json .Config}}']);
     const c = insp.status === 0 ? JSON.parse(insp.stdout) : {};
+    assert(c.Labels?.['org.opencontainers.image.base.name'] === 'docker.io/library/node:24-alpine', 'image carries OCI base image label', c.Labels?.['org.opencontainers.image.base.name']);
     assert(c.Labels?.['org.opencontainers.image.source']?.includes('AI-Limits-Tracker'), 'image carries OCI source label', JSON.stringify(c.Labels));
     assert(!!c.Labels?.['org.opencontainers.image.licenses'], 'image carries OCI license label');
     assert(c.User === 'node', 'image runs as the unprivileged node user', String(c.User));
