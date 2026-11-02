@@ -82,9 +82,12 @@ jobs:
       packages: write # push to GHCR
       id-token: write # keyless cosign signing and attestations (OIDC)
       attestations: write # provenance and SBOM attestations
-    env:
-      IMAGE: ghcr.io/${{ github.repository }}
+    # Docker/OCI repository references must be strictly lowercase.
+    # Convert github.repository to lowercase before using it across publish steps.
     steps:
+      - name: Set lowercase image name
+        run: echo "IMAGE=ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       # Actions are pinned to commit SHAs (immutable); the trailing comment is the release tag.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
