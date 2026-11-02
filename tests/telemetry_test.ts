@@ -1,4 +1,4 @@
-import { TelemetryService } from '../server/src/telemetry';
+import { TelemetryService, validateTelemetryBaseUrl } from '../server/src/telemetry';
 import { formatTokenCount } from '../src/services/telemetryService';
 
 async function runTests() {
@@ -42,6 +42,59 @@ async function runTests() {
   assert(res.global.mode === 'standby', 'Mode degrades to standby');
   assert(res.global.statusText === 'Telemetry: Standby (Direct Mode)', 'Status pill shows Telemetry: Standby (Direct Mode)');
   assert(typeof res.accounts === 'object', 'Accounts map is present');
+
+  // Suite 3: Telemetry URL Validation & SSRF Guard
+  console.log('\nSuite 3: Telemetry URL Validation & SSRF Guard');
+  // Safe loopback and RFC1918 addresses
+  assert(validateTelemetryBaseUrl('http://127.0.0.1:8317') !== null, 'Accepts http://127.0.0.1:8317');
+  assert(validateTelemetryBaseUrl('http://localhost:8317') !== null, 'Accepts http://localhost:8317');
+  assert(validateTelemetryBaseUrl('http://sub.localhost:8317') !== null, 'Accepts http://sub.localhost:8317');
+  assert(validateTelemetryBaseUrl('http://[::1]:8317') !== null, 'Accepts http://[::1]:8317');
+  assert(validateTelemetryBaseUrl('http://10.0.0.1:8000') !== null, 'Accepts RFC1918 10.0.0.1');
+  assert(validateTelemetryBaseUrl('http://172.16.0.1:8000') !== null, 'Accepts RFC1918 172.16.0.1');
+  assert(validateTelemetryBaseUrl('http://192.168.1.1:8000') !== null, 'Accepts RFC1918 192.168.1.1');
+  assert(validateTelemetryBaseUrl('https://proxy.example.com') !== null, 'Accepts public https URL');
+  assert(validateTelemetryBaseUrl('https://litellm.openai.com/api') !== null, 'Accepts https with subpath');
+
+  // Plain http on public address rejected
+  assert(validateTelemetryBaseUrl('http://example.com') === null, 'Rejects plain http on public hostname');
+  assert(validateTelemetryBaseUrl('http://8.8.8.8') === null, 'Rejects plain http on public IP');
+  assert(validateTelemetryBaseUrl('http://1.1.1.1:8317') === null, 'Rejects plain http on public IP with port');
+
+  // SSRF: Cloud metadata and link-local rejected
+  assert(validateTelemetryBaseUrl('http://169.254.169.254/latest/meta-data') === null, 'Rejects http AWS metadata IP');
+  assert(validateTelemetryBaseUrl('https://169.254.169.254') === null, 'Rejects https link-local IP');
+  assert(validateTelemetryBaseUrl('http://0.0.0.0:8317') === null, 'Rejects 0.0.0.0');
+
+  // SSRF: Credentials in URL rejected
+  assert(validateTelemetryBaseUrl('http://user:pass@127.0.0.1:8317') === null, 'Rejects credentials in http URL');
+  assert(validateTelemetryBaseUrl('https://user:pass@example.com') === null, 'Rejects credentials in https URL');
+
+  // SSRF: Unsafe protocols rejected
+  assert(validateTelemetryBaseUrl('file:///etc/passwd') === null, 'Rejects file: protocol');
+  assert(validateTelemetryBaseUrl('gopher://127.0.0.1:8317') === null, 'Rejects gopher: protocol');
+  assert(validateTelemetryBaseUrl('javascript:alert(1)') === null, 'Rejects javascript: protocol');
+  assert(validateTelemetryBaseUrl('data:text/plain;base64,SGVsbG8=') === null, 'Rejects data: protocol');
+
+  // Malformed and empty inputs
+  assert(validateTelemetryBaseUrl('') === null, 'Rejects empty string');
+  assert(validateTelemetryBaseUrl('   ') === null, 'Rejects whitespace string');
+  assert(validateTelemetryBaseUrl(undefined) === null, 'Rejects undefined');
+  assert(validateTelemetryBaseUrl(null) === null, 'Rejects null');
+  assert(validateTelemetryBaseUrl('not-a-url') === null, 'Rejects unparseable URL');
+
+  // Suite 4: TelemetryService Graceful Standby with Blocked SSRF Targets
+  console.log('\nSuite 4: TelemetryService Standby with Blocked SSRF Targets');
+  const ssrfSvc = new TelemetryService({
+    cliProxyUrl: 'http://169.254.169.254/latest/meta-data',
+    liteLlmUrl: 'http://evil.com/ssrf',
+    liteLlmKey: 'sk-attack',
+  });
+  const ssrfRes = await ssrfSvc.getTelemetry(['acc-1']);
+  assert(ssrfRes.global.connected === false, 'Blocked SSRF targets do not connect');
+  assert(ssrfRes.global.mode === 'standby', 'SSRF targets degrade to standby mode');
+  assert(ssrfRes.global.providers.cliproxy === false, 'CLIProxy provider is false');
+  assert(ssrfRes.global.providers.litellm === false, 'LiteLLM provider is false');
 
   console.log(`\n========================================`);
   console.log(`SUMMARY: Total: ${passed + failed} | Passed: ${passed} | Failed: ${failed}`);
