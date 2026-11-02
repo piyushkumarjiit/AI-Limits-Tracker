@@ -28,7 +28,7 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({ type, size = 42 }) =
             width: size,
             height: size,
             borderRadius,
-            backgroundColor: '#e2683c',
+            backgroundColor: '#d97757',
           },
         ]}
       >
@@ -63,7 +63,7 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({ type, size = 42 }) =
             width: size,
             height: size,
             borderRadius,
-            backgroundColor: '#18181b',
+            backgroundColor: '#10a37f',
           },
         ]}
       >

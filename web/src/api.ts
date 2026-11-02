@@ -1,6 +1,7 @@
 import type { AlertLogEntry, ProviderType } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import type { AccountEntity } from '../../src/models/types';
+import type { TelemetryResponse } from '../../src/services/telemetryService';
 
 export type Account = AccountEntity;
 
@@ -55,4 +56,5 @@ export const api = {
   alerts: () => call<{ alerts: AlertLogEntry[] }>('/api/alerts'),
   clearAlerts: () => call('/api/alerts', { method: 'DELETE' }),
   setInterval: (intervalMin: number) => call('/api/settings', { method: 'PUT', body: json({ intervalMin }) }),
+  telemetry: () => call<TelemetryResponse>('/api/telemetry'),
 };
