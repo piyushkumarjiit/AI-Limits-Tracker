@@ -83,6 +83,9 @@ export function planOf(entry: CpaCredential): string {
   if (lower === 'plus') return 'Plus';
   if (lower === 'pro') return 'Pro';
   if (lower === 'team') return 'Team';
+  if (lower === 'business') return 'Business';
+  if (lower === 'enterprise') return 'Enterprise';
+  if (lower === 'edu') return 'Edu';
   if (lower === 'free') return 'Free';
   if (lower.startsWith('max')) {
     return raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
