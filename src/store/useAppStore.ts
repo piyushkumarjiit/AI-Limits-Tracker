@@ -15,10 +15,18 @@ import { getProvider } from '../services/providers';
 import { deleteAccountCredentials, saveAccountCredentials } from '../services/secureStore';
 import { syncAccount, syncAccounts } from '../services/syncManager';
 import { PROVIDER_NAMES } from '../constants/theme';
+import {
+  AccountTelemetry,
+  DEFAULT_TELEMETRY_RESPONSE,
+  GlobalTelemetryStatus,
+  TelemetryResponse,
+} from '../services/telemetryService';
 
 export type ConnectResult =
   | { ok: true; accountId: string; snapshot: UsageSnapshot }
   | { ok: false; error: string };
+
+export type QuotaWindowMode = 'weekly' | 'rolling5h';
 
 interface AppState {
   isReady: boolean;
@@ -28,7 +36,11 @@ interface AppState {
   lastSyncAllAt: string | null;
   refreshIntervalMin: number;
   userName: string;
+  quotaWindowMode: QuotaWindowMode;
+  telemetry: TelemetryResponse;
 
+  setQuotaWindowMode: (mode: QuotaWindowMode) => void;
+  setTelemetry: (telemetry: TelemetryResponse) => void;
   initializeStore: () => Promise<void>;
   refreshAll: () => Promise<void>;
   refreshSingle: (accountId: string) => Promise<void>;
@@ -81,14 +93,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastSyncAllAt: null,
   refreshIntervalMin: 5,
   userName: 'Piyush',
+  quotaWindowMode: 'weekly',
+  telemetry: DEFAULT_TELEMETRY_RESPONSE,
+
+  setQuotaWindowMode: (mode: QuotaWindowMode) => {
+    set({ quotaWindowMode: mode });
+    setSetting('quota_window_mode', mode).catch(() => {});
+  },
+  setTelemetry: (telemetry: TelemetryResponse) => set({ telemetry }),
 
   initializeStore: async () => {
     await initDatabase();
-    const [accounts, snapshots, interval, userName] = await Promise.all([
+    const [accounts, snapshots, interval, userName, savedWindowMode] = await Promise.all([
       getAllAccounts(),
       getLatestSnapshots(),
       getSetting('refresh_interval_min'),
       getSetting('user_name'),
+      getSetting('quota_window_mode'),
     ]);
 
     // Restore last known status on top of the last numbers, so the UI is right before the first sync
@@ -110,6 +131,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       snapshots,
       refreshIntervalMin: interval ? Number(interval) || 5 : 5,
       userName: userName ?? 'Piyush',
+      quotaWindowMode: savedWindowMode === 'rolling5h' ? 'rolling5h' : 'weekly',
     });
 
     pruneHistory(new Date(Date.now() - 400 * 86400 * 1000).toISOString()).catch(() => {});

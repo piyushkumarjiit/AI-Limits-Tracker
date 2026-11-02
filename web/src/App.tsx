@@ -7,7 +7,23 @@ import { dualRingData, familySummaries, type Weighting } from '../../src/service
 import { formatTimeRemaining, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
 import { Account, api, ApiError } from './api';
 import { isInsecurePage } from './session';
-import { BarChart, Donut, DualRing, FamilyCard, Icon, LineChart, Logo, MiniBars, Ring, Segmented, StatusDot } from './ui';
+import {
+  BarChart,
+  Donut,
+  DualRing,
+  FamilyCard,
+  Icon,
+  LineChart,
+  Logo,
+  MiniBars,
+  Ring,
+  Segmented,
+  StatusDot,
+  WebAccountDrawer,
+  WebProviderStackedBar,
+} from './ui';
+import type { TelemetryResponse } from '../../src/services/telemetryService';
+import { formatTokenCount } from '../../src/services/telemetryService';
 
 /* ---------------- Router ---------------- */
 
@@ -216,7 +232,9 @@ const InsecureBanner: React.FC = () => {
   if (!isInsecurePage()) return null;
   return (
     <div className="insecure-banner" role="alert">
-      <span aria-hidden="true">⚠️</span>
+      <span className="insecure-icon" aria-hidden="true">
+        <Icon name="alert" size={18} />
+      </span>
       <div>
         <b>This connection is not encrypted.</b>
         You are using plain HTTP, so your password and session cookie can be read by anyone on the network. Serve this panel over HTTPS.
@@ -274,7 +292,27 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
   const [filter, setFilter] = useState<'all' | ProviderType>('all');
   const [bars, setBars] = useState<Record<string, Array<number | null>>>({});
   const [streak, setStreak] = useState<number | null>(null);
+  const [windowMode, setWindowMode] = useState<'weekly' | 'rolling5h'>(() => {
+    try {
+      return (localStorage.getItem('alt:window_mode') as 'weekly' | 'rolling5h') || 'weekly';
+    } catch {
+      return 'weekly';
+    }
+  });
+  const [selectedDrawerAccountId, setSelectedDrawerAccountId] = useState<string | null>(null);
+  const [telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
   const colors = useColors(accounts);
+
+  const handleWindowChange = (mode: 'weekly' | 'rolling5h') => {
+    setWindowMode(mode);
+    try {
+      localStorage.setItem('alt:window_mode', mode);
+    } catch {}
+  };
+
+  useEffect(() => {
+    api.telemetry().then(setTelemetry).catch(() => {});
+  }, [state.lastSyncAllAt]);
 
   const [weighting] = useState<Weighting>(() => {
     try {
@@ -329,7 +367,7 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
       <header className="home-head">
         <div>
           <p className="hello">{greeting()}</p>
-          <h1 className="hero-name">Your limits 👋</h1>
+          <h1 className="hero-name">Your limits</h1>
           <p className="muted">All your AI accounts in one place, under control</p>
         </div>
         <div className="home-actions">
@@ -345,6 +383,68 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
           </button>
         </div>
       </header>
+
+      {/* Global Proxy Telemetry Status Banner */}
+      <div style={{ marginBottom: 14 }}>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 12px',
+            borderRadius: 999,
+            background: telemetry?.global.connected ? 'var(--ok-soft)' : '#fef3c7',
+            fontSize: 12,
+            fontWeight: 700,
+            color: telemetry?.global.connected ? 'var(--ok)' : 'var(--warn)',
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: telemetry?.global.connected ? 'var(--ok)' : 'var(--warn)',
+              display: 'inline-block',
+            }}
+          />
+          {telemetry?.global.statusText || 'Telemetry: Standby (Direct Mode)'}
+        </div>
+      </div>
+
+      {/* Quota Window Segmented Control Toggle */}
+      <div style={{ marginBottom: 16 }}>
+        <Segmented
+          options={[
+            ['weekly', 'Weekly Quota'],
+            ['rolling5h', '5-Hour Rolling'],
+          ]}
+          value={windowMode}
+          onChange={(m) => handleWindowChange(m as 'weekly' | 'rolling5h')}
+        />
+      </div>
+
+      {/* Multi-Provider Stacked Quota Bars */}
+      {accounts.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          {Array.from(new Set(accounts.map((a) => a.providerType))).map((prov) => {
+            const provAccounts = accounts.filter((a) => a.providerType === prov);
+            return (
+              <WebProviderStackedBar
+                key={prov}
+                provider={prov}
+                accounts={provAccounts}
+                windowMode={windowMode}
+                onSelectAccount={(id) => setSelectedDrawerAccountId(id)}
+                onNavigateFleet={(p) => {
+                  setFilter(p);
+                  go('/accounts');
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
 
       <section className="card summary">
         <div className="summary-top">
@@ -412,6 +512,11 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
                     {/* slot for badge in the name row */}
                   </div>
                   <span className="muted small ellipsis">{[a.latestSnapshot?.planName || a.plan, a.email].filter(Boolean).join(' · ') || '—'}</span>
+                  {telemetry?.accounts[a.id] && telemetry.accounts[a.id].totalTokens > 0 && (
+                    <span className="small muted" style={{ fontWeight: 600 }}>
+                      Routed: {formatTokenCount(telemetry.accounts[a.id].totalTokens)} tokens
+                    </span>
+                  )}
                   <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                     <StatusDot account={a} />
                     {ringData.extras.slice(0, 2).map((ex) => (
@@ -463,6 +568,19 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
           );
         })}
       </div>
+
+      {/* Slide-over Drawer Modal */}
+      {selectedDrawerAccountId && (
+        <WebAccountDrawer
+          account={accounts.find((a) => a.id === selectedDrawerAccountId) || null}
+          telemetry={telemetry?.accounts[selectedDrawerAccountId]}
+          onClose={() => setSelectedDrawerAccountId(null)}
+          onViewFleet={(p) => {
+            setFilter(p as ProviderType);
+            go('/accounts');
+          }}
+        />
+      )}
 
       {accounts.length === 0 && (
         <Empty title="No accounts yet" text="Connect Claude, ChatGPT or Gemini. You can add several accounts for the same service — each one has its own limits.">
@@ -1086,7 +1204,7 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
             ))}
           </div>
           <textarea rows={7} value={input} onChange={(e) => setInput(e.target.value)} placeholder={guide.placeholder} />
-          {supportsOAuth(provider) && provider !== 'antigravity' && <p className="muted tiny">⚠ cURL/sessionKey sign-in doesn't last long (about 30 min for Claude). For long-term use, choose "Sign in to account".</p>}
+          {supportsOAuth(provider) && provider !== 'antigravity' && <p className="muted tiny">cURL/sessionKey sign-in doesn't last long (about 30 min for Claude). For long-term use, choose "Sign in to account".</p>}
           {err && <p className="error">{err}</p>}
           <button className="btn dark wide" disabled={!input.trim() || busy} onClick={submit}>{busy ? 'Checking…' : 'Connect'}</button>
         </div>
@@ -1103,7 +1221,7 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
   useEffect(() => {
     api.alerts().then((r) => setItems(r.alerts)).catch(() => setItems([]));
   }, []);
-  const icon: Record<string, string> = { low20: '🔔', low10: '⚠️', exhausted: '⛔', restored: '✅', reauth: 'ℹ️' };
+  const iconKind: Record<string, string> = { low20: 'bell', low10: 'alert', exhausted: 'alert', restored: 'check', reauth: 'alert' };
   return (
     <>
       <Header
@@ -1114,7 +1232,9 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
       <div className="card list">
         {(items || []).map((n) => (
           <div key={n.id} className="alert-row">
-            <span className="alert-icon">{icon[n.kind] || '🔔'}</span>
+            <span className="alert-icon">
+              <Icon name={iconKind[n.kind] || 'bell'} size={18} />
+            </span>
             <div className="grow">
               <b>{n.title}</b>
               <p className="muted small">{n.body}</p>
