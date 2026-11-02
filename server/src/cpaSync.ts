@@ -181,16 +181,26 @@ export class CpaSyncEngine {
       }
     });
 
-    // Trigger tracker.sync(id) for newly created/relinked/adopted accounts
+    // Trigger tracker.sync(id) for newly created/relinked/adopted accounts with staggered jitter
+    const syncActions = result.actions.filter(
+      (a) => a.kind === 'created' || a.kind === 'relinked' || a.kind === 'adopted'
+    );
     const syncPromises: Promise<void>[] = [];
-    for (const a of result.actions) {
-      if (a.kind === 'created' || a.kind === 'relinked' || a.kind === 'adopted') {
-        syncPromises.push(
-          this.tracker.sync(a.accountId).catch((err) => {
-            console.error('[cpaSync] tracker.sync failed for', a.accountId, err);
-          })
-        );
-      }
+    const jitterEnabled = (this.tracker as any).cpaJitterEnabled ?? true;
+
+    for (let i = 0; i < syncActions.length; i++) {
+      const a = syncActions[i];
+      const delayMs = jitterEnabled && i > 0 ? (i * 1000) + Math.floor(Math.random() * 1000) : 0;
+      syncPromises.push(
+        (async () => {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          await this.tracker.sync(a.accountId).catch((err) => {
+            console.error('[cpaSync] tracker.sync failed:', a.accountId, err);
+          });
+        })()
+      );
     }
     await Promise.allSettled(syncPromises);
 
