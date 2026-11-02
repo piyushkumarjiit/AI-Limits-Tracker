@@ -17,9 +17,12 @@ concurrency:
 
 jobs:
   test:
-    name: Typecheck and tests
+    name: Typecheck and tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      matrix:
+        node-version: [22, 24]
     steps:
       # Actions are pinned to commit SHAs (immutable); the trailing comment is the release tag.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -28,7 +31,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       # Same flags as the Dockerfile.
@@ -52,7 +55,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
 
       # Fails on high or critical advisories in production dependencies.
       - name: npm audit

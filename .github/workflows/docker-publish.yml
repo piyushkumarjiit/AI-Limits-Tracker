@@ -56,7 +56,7 @@ jobs:
           cache-from: type=gha
 
       # Fails on fixed HIGH/CRITICAL vulnerabilities; unfixed ones are ignored.
-      # skip-dirs excludes only the Node toolchain bundled with the node:22-alpine
+      # skip-dirs excludes only the Node toolchain bundled with the node:24-alpine
       # base image (npm, corepack and the yarn distribution), which is not part of
       # our runtime application surface. Application code and its dependencies
       # under /app are still scanned, so any fixable HIGH/CRITICAL finding there
