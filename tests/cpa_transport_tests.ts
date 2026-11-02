@@ -129,6 +129,7 @@ async function testTransport() {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, 'http://127.0.0.1:8313/v8/management/requests/api-call');
     assert.equal(calls[0].headers.get('Authorization'), `Bearer ${secretKey}`);
+    assert.equal(calls[0].headers.get('X-Management-Key'), secretKey);
     const reqBody = JSON.parse(calls[0].body!);
     assert.equal(reqBody.auth_index, 'auth-1');
   }

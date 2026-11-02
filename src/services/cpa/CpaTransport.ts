@@ -72,6 +72,7 @@ export class CpaTransport {
 
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${this.managementKey}`,
+      'X-Management-Key': this.managementKey,
       ...init.headers,
     };
     if (init.body && !headers['Content-Type']) {

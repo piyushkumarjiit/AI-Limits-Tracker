@@ -41,6 +41,7 @@ export interface TelemetryConfig {
   liteLlmKey?: string;
   cliProxyPort?: number;
   cliProxyUrl?: string;
+  cliProxyKey?: string;
 }
 
 /**
@@ -113,6 +114,7 @@ export class TelemetryService {
       liteLlmKey: config.liteLlmKey || process.env.LITELLM_KEY,
       cliProxyPort: config.cliProxyPort || Number(process.env.CLIPROXY_PORT) || 8317,
       cliProxyUrl: config.cliProxyUrl || process.env.CLIPROXY_URL || 'http://127.0.0.1:8317',
+      cliProxyKey: config.cliProxyKey || process.env.CLIPROXY_KEY || process.env.CPA_MANAGEMENT_KEY,
     };
     this.ttlMs = ttlMs;
   }
@@ -135,7 +137,7 @@ export class TelemetryService {
     const validatedCliProxyBase = validateTelemetryBaseUrl(this.config.cliProxyUrl);
     if (validatedCliProxyBase) {
       try {
-        const targetUrl = new URL('/v1/management/api_call', validatedCliProxyBase);
+        const targetUrl = new URL('/v8/management/credentials', validatedCliProxyBase);
         if (
           (targetUrl.protocol === 'http:' || targetUrl.protocol === 'https:') &&
           (targetUrl.protocol !== 'http:' || isAllowedHttpHost(targetUrl.hostname)) &&
@@ -144,12 +146,27 @@ export class TelemetryService {
         ) {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 2000);
-          const res = await fetch(targetUrl, {
+          const headers: Record<string, string> = { 'Accept': 'application/json' };
+          if (this.config.cliProxyKey) {
+            headers['Authorization'] = `Bearer ${this.config.cliProxyKey}`;
+            headers['X-Management-Key'] = this.config.cliProxyKey;
+          }
+          let res = await fetch(targetUrl, {
             method: 'GET',
             signal: controller.signal,
-            headers: { 'Accept': 'application/json' },
+            headers,
             redirect: 'error',
           }).catch(() => null);
+
+          if (res && res.status === 404) {
+            const fallbackUrl = new URL('/v0/management/auth-files', validatedCliProxyBase);
+            res = await fetch(fallbackUrl, {
+              method: 'GET',
+              signal: controller.signal,
+              headers,
+              redirect: 'error',
+            }).catch(() => null);
+          }
           clearTimeout(timeout);
 
           if (res && res.ok) {
@@ -168,6 +185,23 @@ export class TelemetryService {
                     lastRoutedAt: s.last_routed_at || new Date().toISOString(),
                     proxySource: 'cliproxy',
                     slotId: s.slot_id || `${s.provider || 'proxy'}_slot_01`,
+                    proxyPort: this.config.cliProxyPort,
+                  };
+                }
+              }
+            } else if (data && Array.isArray(data.files)) {
+              for (const f of data.files) {
+                const id = f.account_id || f.name || f.auth_index;
+                if (id) {
+                  accountTelemetryMap[id] = {
+                    accountId: id,
+                    totalTokens: Number(f.total_tokens) || (Number(f.prompt_tokens) || 0) + (Number(f.completion_tokens) || 0),
+                    promptTokens: Number(f.prompt_tokens) || 0,
+                    completionTokens: Number(f.completion_tokens) || 0,
+                    requestCount: Number(f.request_count) || 1,
+                    lastRoutedAt: f.last_routed_at || (f.updated_at ? new Date(f.updated_at).toISOString() : new Date().toISOString()),
+                    proxySource: 'cliproxy',
+                    slotId: f.slot_id || `${f.provider || 'proxy'}_slot_01`,
                     proxyPort: this.config.cliProxyPort,
                   };
                 }
