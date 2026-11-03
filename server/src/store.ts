@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { CpaWatermarkStore } from './cpaWatermarkStore';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
@@ -63,6 +64,7 @@ class Vault {
 export class Store {
   private db: DatabaseSync;
   private vault: Vault;
+  public readonly watermarkStore: CpaWatermarkStore;
 
   constructor(baseDir: string, fileName: string, secret: string) {
     const base = resolve(baseDir);
@@ -77,6 +79,7 @@ export class Store {
     restrict(dir, 0o700);
     this.db = new DatabaseSync(path);
     this.vault = new Vault(secret);
+    this.watermarkStore = new CpaWatermarkStore(this.db);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS accounts (
