@@ -280,6 +280,14 @@ npm run test:security
 
 ---
 
+## Contributors & Acknowledgments
+
+- **[Piyush Kumar](https://github.com/piyushkumarjiit)** — Lead maintainer & fleet architecture
+- **[Rauan](https://github.com/Rauan228)** — Original author of [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker)
+- **Gemini (Google DeepMind Antigravity)** — AI pair programmer & engineering co-pilot
+
+---
+
 ## License & Attribution
 
 MIT License © 2026 [Piyush Kumar](https://github.com/piyushkumarjiit)
