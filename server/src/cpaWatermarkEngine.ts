@@ -99,6 +99,17 @@ function clamp(val: number, min: number, max: number): number {
   return Math.min(Math.max(val, min), max);
 }
 
+/**
+ * Pure calculation engine for CPA watermark targeting (WP-1).
+ *
+ * Evaluates multi-window quota velocity projection, two-stage watermark hysteresis,
+ * collective degraded fallback, telemetry staleness freeze (fail_static), cross-tier
+ * sequential sticky activation, anti-thundering-herd recovery ramping, and system
+ * invariant guard rails (hard floor, cooldown isolation, no accidental blackout).
+ *
+ * Side-effect free: accepts current snapshots, configuration, previous state, and epoch timestamp;
+ * returns computed targets, next state generation, invariant violations, and ordered write batch.
+ */
 export function computeWatermarkTargets(
   snapshots: WatermarkSnapshot[],
   policy: WatermarkPolicyConfig,
