@@ -668,6 +668,19 @@ export interface WebProviderStackedBarProps {
   onNavigateFleet?: (provider: ProviderType) => void;
 }
 
+export type CapacityViewMode = 'auto' | 'cell' | 'matrix' | 'aggregate';
+
+export function resolveCapacityView(
+  accountCount: number,
+  rowCount: number,
+  override: CapacityViewMode
+): 'cell' | 'matrix' | 'aggregate' {
+  if (override !== 'auto') return override;
+  if (rowCount > 2) return 'aggregate';
+  if (accountCount >= 21) return 'matrix';
+  return 'cell';
+}
+
 export const WebProviderStackedBar: React.FC<WebProviderStackedBarProps> = ({
   provider,
   accounts,
@@ -676,6 +689,16 @@ export const WebProviderStackedBar: React.FC<WebProviderStackedBarProps> = ({
   onNavigateFleet,
 }) => {
   if (!accounts.length) return null;
+
+  const [viewMode, setViewMode] = useState<CapacityViewMode>(() => {
+    try {
+      const saved = localStorage.getItem('fqd_capacity_view_mode') as CapacityViewMode;
+      if (saved && ['auto', 'cell', 'matrix', 'aggregate'].includes(saved)) return saved;
+    } catch {}
+    return 'auto';
+  });
+
+  const [inspectedAccountId, setInspectedAccountId] = useState<string>(accounts[0]?.id || '');
 
   const shades = getProviderAccountShades(provider, accounts.length);
   const providerTitle = PROVIDER_NAMES[provider] || provider;
@@ -692,7 +715,8 @@ export const WebProviderStackedBar: React.FC<WebProviderStackedBarProps> = ({
         ? buckets.find((b) => b.windowType === 'session_5h') || buckets[0]
         : buckets.find((b) => b.windowType === 'weekly_7d') || buckets[0];
     const rem = Math.max(0, Math.min(100, bucket?.remainingPercent ?? 100));
-    const isExhausted = (acc.latestSnapshot?.status === 'ok' ? false : acc.latestSnapshot?.status === 'rate_limited') || rem <= 10;
+    const isExhausted =
+      (acc.latestSnapshot?.status === 'ok' ? false : acc.latestSnapshot?.status === 'rate_limited') || rem <= 10;
 
     if (isExhausted) exhausted++;
     else if (rem <= 50) low++;
@@ -700,101 +724,387 @@ export const WebProviderStackedBar: React.FC<WebProviderStackedBarProps> = ({
 
     const shade = shades[idx] || brand.primary;
     const textColor = getAccessibleSegmentTextColor(shade);
+    const resetTime = bucket?.resetsAt ? formatTimeRemaining(bucket.resetsAt) : 'Ready';
 
     return {
       acc,
+      idx: idx + 1,
       rem,
       isExhausted,
       shade,
       textColor,
+      resetTime,
     };
   });
 
   const avgRemaining = Math.round(items.reduce((sum, item) => sum + item.rem, 0) / accounts.length);
+  const estRows = Math.ceil(accounts.length / 16);
+  const activeView = resolveCapacityView(accounts.length, estRows, viewMode);
+
+  const inspectedItem = items.find((i) => i.acc.id === inspectedAccountId) || items[0];
+
+  const handleModeChange = (mode: CapacityViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('fqd_capacity_view_mode', mode);
+    } catch {}
+  };
 
   return (
-    <div className="card web-stacked-bar-card" style={{ marginBottom: 14, padding: '16px 18px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+    <div className="card web-stacked-bar-card" style={{ marginBottom: 16, padding: '16px 18px', position: 'relative' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <button
           type="button"
           onClick={() => onNavigateFleet?.(provider)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textAlign: 'left' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textAlign: 'left', background: 'none', border: 'none', padding: 0, color: 'inherit' }}
           title={`View all ${providerTitle} accounts`}
         >
           <span style={{ width: 12, height: 12, borderRadius: '50%', background: brand.primary, display: 'inline-block' }} />
           <b style={{ fontSize: 16 }}>{providerTitle}</b>
-          <span className="muted small">({accounts.length})</span>
+          <span className="muted small">({accounts.length} Accounts)</span>
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {items.map(({ acc, rem, isExhausted }) => {
-              const color = isExhausted ? 'var(--bad)' : rem <= 50 ? 'var(--warn)' : 'var(--ok)';
-              return (
-                <span
-                  key={acc.id}
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: color,
-                    display: 'inline-block',
-                  }}
-                  title={`${acc.name}: ${Math.round(rem)}% remaining`}
-                />
-              );
-            })}
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {/* Status summary */}
           <span className="small muted" style={{ fontWeight: 600 }}>
-            {exhausted > 0 ? `${exhausted} exhausted` : low > 0 ? `${low} low` : 'All Healthy'}
+            {exhausted > 0 ? (
+              <span style={{ color: 'var(--bad)' }}>{exhausted} cooldown</span>
+            ) : low > 0 ? (
+              <span style={{ color: 'var(--warn)' }}>{low} tight</span>
+            ) : (
+              <span style={{ color: 'var(--ok)' }}>All Healthy</span>
+            )}
           </span>
+
+          {/* View mode selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <select
+              value={viewMode}
+              onChange={(e) => handleModeChange(e.target.value as CapacityViewMode)}
+              style={{
+                background: '#111827',
+                color: '#f3f4f6',
+                border: '1px solid #374151',
+                borderRadius: 6,
+                padding: '3px 8px',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+              title="Select capacity visualization layout"
+            >
+              <option value="auto">Auto (Adaptive)</option>
+              <option value="cell">Cell View (Battery)</option>
+              <option value="matrix">Matrix View (Nodes)</option>
+              <option value="aggregate">Aggregate View (Bar)</option>
+            </select>
+
+            {viewMode !== 'auto' && (
+              <button
+                type="button"
+                onClick={() => handleModeChange('auto')}
+                style={{
+                  background: 'none',
+                  border: '1px solid #3b82f6',
+                  color: '#60a5fa',
+                  borderRadius: 4,
+                  fontSize: 10,
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+                title="Reset to Auto layout"
+              >
+                Auto
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      <div
-        className="stacked-bar-track"
-        style={{
-          height: 28,
-          background: 'var(--track)',
-          borderRadius: 8,
-          display: 'flex',
-          overflow: 'hidden',
-          width: '100%',
-        }}
-      >
-        {items.map(({ acc, rem, shade, textColor }, idx) => (
-          <button
-            key={acc.id}
-            type="button"
-            onClick={() => onSelectAccount?.(acc.id)}
-            style={{
-              flex: Math.max(0.1, rem),
-              background: shade,
-              color: textColor,
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '0 6px',
-              borderRight: '1px solid rgba(255,255,255,0.25)',
-              cursor: 'pointer',
-              fontSize: 11,
-              fontWeight: 700,
-              minWidth: 20,
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
-              textOverflow: 'ellipsis',
-            }}
-            title={`${acc.name} (${Math.round(rem)}% left)`}
-          >
-            {accounts.length <= 4 && `#${idx + 1} (${Math.round(rem)}%)`}
-          </button>
-        ))}
-      </div>
+      {/* VIEW A: Individual Vertical Cells (≤20 accounts default) */}
+      {activeView === 'cell' && (
+        <div
+          className="cap-cell-track"
+          style={{
+            display: 'flex',
+            gap: 4,
+            height: 54,
+            width: '100%',
+            overflow: 'visible',
+            position: 'relative',
+          }}
+        >
+          {items.map(({ acc, idx, rem, shade, isExhausted }) => {
+            const isInspected = acc.id === inspectedItem?.acc.id;
+            return (
+              <div
+                key={acc.id}
+                onClick={() => {
+                  setInspectedAccountId(acc.id);
+                  onSelectAccount?.(acc.id);
+                }}
+                onMouseEnter={() => setInspectedAccountId(acc.id)}
+                className="cap-cell"
+                style={{
+                  flex: 1,
+                  minWidth: 16,
+                  height: '100%',
+                  background: '#0f172a',
+                  borderRadius: 6,
+                  border: isInspected ? '2px solid #60a5fa' : '1px solid rgba(255,255,255,0.08)',
+                  position: 'relative',
+                  cursor: 'pointer',
+                  boxShadow: isInspected ? '0 0 10px rgba(96,165,250,0.5)' : 'none',
+                  transition: 'transform 0.15s ease, border-color 0.15s ease',
+                }}
+                title={`${acc.name} (#${idx}): ${Math.round(rem)}% headroom`}
+              >
+                {/* Luminous Fill */}
+                <div
+                  className="cap-cell-fill"
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: `${rem}%`,
+                    background: isExhausted ? 'var(--bad)' : shade,
+                    borderRadius: '0 0 5px 5px',
+                    pointerEvents: 'none',
+                    transition: 'height 0.3s ease',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 2,
+                      background: '#fff',
+                      boxShadow: '0 0 6px currentColor',
+                    }}
+                  />
+                </div>
+                {/* Slot index label */}
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: 0,
+                    right: 0,
+                    textAlign: 'center',
+                    fontSize: 8,
+                    fontFamily: 'monospace',
+                    fontWeight: 700,
+                    color: 'rgba(255,255,255,0.7)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {idx}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
+      {/* VIEW B: Cluster Node Matrix (>20 accounts default) */}
+      {activeView === 'matrix' && (
+        <div
+          className="cap-matrix-grid"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(28px, 1fr))',
+            gap: 4,
+            width: '100%',
+          }}
+        >
+          {items.map(({ acc, idx, rem, isExhausted, shade }) => {
+            const isInspected = acc.id === inspectedItem?.acc.id;
+            return (
+              <button
+                key={acc.id}
+                type="button"
+                onClick={() => {
+                  setInspectedAccountId(acc.id);
+                  onSelectAccount?.(acc.id);
+                }}
+                onMouseEnter={() => setInspectedAccountId(acc.id)}
+                style={{
+                  height: 28,
+                  borderRadius: 5,
+                  background: isExhausted ? 'var(--bad)' : shade,
+                  border: isInspected ? '2px solid #fff' : '1px solid rgba(255,255,255,0.15)',
+                  color: '#fff',
+                  fontSize: 9,
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: isInspected ? '0 0 8px #60a5fa' : 'none',
+                  transition: 'transform 0.15s ease',
+                }}
+                title={`${acc.name} (#${idx}): ${Math.round(rem)}% remaining`}
+              >
+                {idx}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* VIEW C: Proportional Aggregate Bar (>2 rows default) */}
+      {activeView === 'aggregate' && (
+        <div
+          className="cap-agg-bar"
+          style={{
+            height: 32,
+            background: 'var(--track)',
+            borderRadius: 8,
+            display: 'flex',
+            overflow: 'hidden',
+            width: '100%',
+            border: '1px solid rgba(255,255,255,0.08)',
+          }}
+        >
+          {healthy > 0 && (
+            <div
+              style={{
+                flex: healthy,
+                background: 'var(--ok)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+              title={`${healthy} Healthy accounts`}
+            >
+              {healthy} Healthy ({Math.round((healthy / accounts.length) * 100)}%)
+            </div>
+          )}
+          {low > 0 && (
+            <div
+              style={{
+                flex: low,
+                background: 'var(--warn)',
+                color: '#000',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+              title={`${low} Tight accounts`}
+            >
+              {low} Tight
+            </div>
+          )}
+          {exhausted > 0 && (
+            <div
+              style={{
+                flex: exhausted,
+                background: 'var(--bad)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+              title={`${exhausted} Cooldown accounts`}
+            >
+              {exhausted} Cooldown
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Live Account Inspection Strip */}
+      {inspectedItem && (
+        <div
+          className="cap-inspection-strip"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'rgba(15, 23, 42, 0.75)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 8,
+            padding: '7px 12px',
+            marginTop: 10,
+            fontSize: 11,
+            flexWrap: 'wrap',
+            gap: 6,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                background: inspectedItem.shade,
+                color: inspectedItem.textColor,
+                padding: '1px 6px',
+                borderRadius: 4,
+                fontFamily: 'monospace',
+                fontWeight: 700,
+                fontSize: 10,
+              }}
+            >
+              Slot #{inspectedItem.idx}
+            </span>
+            <span style={{ fontWeight: 600, color: '#f3f4f6' }}>{inspectedItem.acc.name}</span>
+            <span
+              style={{
+                color: inspectedItem.isExhausted
+                  ? 'var(--bad)'
+                  : inspectedItem.rem <= 50
+                  ? 'var(--warn)'
+                  : 'var(--ok)',
+                fontWeight: 700,
+              }}
+            >
+              {Math.round(inspectedItem.rem)}% Headroom
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="muted" style={{ fontSize: 10 }}>
+              Reset: {inspectedItem.resetTime}
+            </span>
+            <button
+              type="button"
+              onClick={() => onSelectAccount?.(inspectedItem.acc.id)}
+              style={{
+                background: 'none',
+                border: '1px solid #3b82f6',
+                color: '#60a5fa',
+                borderRadius: 4,
+                padding: '2px 8px',
+                fontSize: 10,
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              Inspect Model Drawer →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Footer Capacity Summary */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
         <span className="small muted">
-          Fleet capacity: <b>{avgRemaining}%</b> left ({windowMode === 'weekly' ? 'Weekly' : '5-Hour'})
+          Fleet Aggregate: <b>{avgRemaining}%</b> remaining ({windowMode === 'weekly' ? '7-Day Rolling' : '5-Hour Burst'})
+        </span>
+        <span className="small muted">
+          View: <b>{activeView.toUpperCase()}</b> {viewMode === 'auto' ? '(Auto)' : '(Pinned)'}
         </span>
       </div>
     </div>
@@ -807,7 +1117,7 @@ export interface WebAccountDrawerProps {
   account: Account | null;
   telemetry?: AccountTelemetry;
   onClose: () => void;
-  onViewFleet?: (provider: string, accountId: string) => void;
+  onViewFleet?: (provider: ProviderType, accountId: string) => void;
 }
 
 export const WebAccountDrawer: React.FC<WebAccountDrawerProps> = ({
@@ -829,11 +1139,12 @@ export const WebAccountDrawer: React.FC<WebAccountDrawerProps> = ({
 
   if (!account) return null;
 
-  const brand = LAB_BRAND_PALETTES[account.providerType] || { primary: '#8b5cf6' };
-  const providerTitle = PROVIDER_NAMES[account.providerType] || account.providerType;
-  const buckets = account.latestSnapshot?.buckets || [];
-  const weekly = buckets.find((b) => b.windowType === 'weekly_7d') || buckets[0];
-  const rolling = buckets.find((b) => b.windowType === 'session_5h') || buckets[1] || buckets[0];
+  const prov = account.providerType as ProviderType;
+  const brand = LAB_BRAND_PALETTES[prov] || { primary: '#8b5cf6' };
+  const providerTitle = PROVIDER_NAMES[prov] || prov;
+  const buckets = (account.latestSnapshot?.buckets || []) as QuotaBucket[];
+  const weekly = buckets.find((b: QuotaBucket) => b.windowType === 'weekly_7d') || buckets[0];
+  const rolling = buckets.find((b: QuotaBucket) => b.windowType === 'session_5h') || buckets[1] || buckets[0];
 
   const weeklyRem = Math.round(weekly?.remainingPercent ?? 100);
   const rollingRem = Math.round(rolling?.remainingPercent ?? 100);

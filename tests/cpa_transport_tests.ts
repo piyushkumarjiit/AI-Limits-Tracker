@@ -28,6 +28,44 @@ console.log('Running CPA transport and configuration tests...');
   assert(publicHttp.some((e) => e.includes('plain http: is only allowed')), 'Rejects public http URL');
 
   // Plain http on 127.0.0.1, localhost, 10.x, 192.168.x allowed
+    // Docker service names, Tailscale, internal suffixes allowed
+  for (const host of [
+    'http://127.0.0.1:8313',
+    'http://localhost:8313',
+    'http://10.1.2.3:8000',
+    'http://192.168.1.50:8080',
+    'http://172.20.0.5:8080',
+    'http://cip_cliproxy:8317',
+    'http://cliproxy:8317',
+    'http://litellm:4000',
+    'http://100.64.1.2:8317',
+    'http://cliproxy.internal:8317',
+    'http://proxy.local:8317',
+    'http://gateway.ts.net:8317',
+    'https://cpa.example.com'
+  ]) {
+    const valid = validateCpaConfig({
+      CPA_BASE_URL: host,
+      CPA_MANAGEMENT_KEY: 'secret-key-123',
+    });
+    assert.equal(valid.length, 0, `Accepts valid URL ${host}`);
+  }
+
+  // Cloud metadata endpoints strictly rejected
+  for (const metadataHost of [
+    'http://169.254.169.254',
+    'http://169.254.170.2',
+    'http://100.100.100.200',
+    'http://metadata.google.internal',
+    'http://instance-data',
+  ]) {
+    const metaCheck = validateCpaConfig({
+      CPA_BASE_URL: metadataHost,
+      CPA_MANAGEMENT_KEY: 'secret-key-123',
+    });
+    assert(metaCheck.some((e) => e.includes('plain http: is only allowed')), `Rejects metadata host ${metadataHost}`);
+  }
+  // Legacy basic check
   for (const host of ['http://127.0.0.1:8313', 'http://localhost:8313', 'http://10.1.2.3:8000', 'http://192.168.1.50:8080', 'http://172.20.0.5:8080', 'https://cpa.example.com']) {
     const valid = validateCpaConfig({
       CPA_BASE_URL: host,

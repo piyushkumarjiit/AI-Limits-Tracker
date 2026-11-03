@@ -40,27 +40,92 @@ export interface CpaResolvedConfig {
   routingMode?: 'off' | 'shadow' | 'enforce';
 }
 
-function isLoopbackOrPrivateIPv4(host: string): boolean {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!m) return false;
-  const [a, b] = [Number(m[1]), Number(m[2])];
+/** Explicit denylist of cloud provider metadata hostnames and IPs */
+const METADATA_HOSTNAMES = new Set([
+  'metadata.google.internal',
+  'metadata.goog',
+  'metadata',
+  'instance-data',
+  'instance-data.ec2.internal',
+]);
+
+const METADATA_IPS = new Set([
+  '169.254.169.254',
+  '169.254.170.2',
+  '100.100.100.200',
+  '192.0.0.192',
+]);
+
+/** Docker single-label service names: alphanumeric, hyphens, underscores (e.g. cip_cliproxy, cliproxy, litellm) */
+const DOCKER_SERVICE_NAME_REGEX = /^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$/i;
+
+function isValidIPv4(s: string): boolean {
+  const parts = s.split('.');
+  if (parts.length !== 4) return false;
+  return parts.every((p) => {
+    if (!/^\d{1,3}$/.test(p)) return false;
+    const n = Number(p);
+    return n >= 0 && n <= 255 && (p === '0' || !p.startsWith('0'));
+  });
+}
+
+function isValidIPv6(s: string): boolean {
+  return /^[0-9a-f:]+$/i.test(s) && s.includes(':');
+}
+
+function isAllowedPrivateOrLocalIPv4(host: string): boolean {
+  if (METADATA_IPS.has(host)) return false;
+  const parts = host.split('.');
+  const [a, b] = [Number(parts[0]), Number(parts[1])];
+
+  // Disallow link-local (169.254.0.0/16)
+  if (a === 169 && b === 254) return false;
+
   return (
-    a === 127 || // Loopback
-    a === 10 || // RFC1918 10.0.0.0/8
-    (a === 172 && b >= 16 && b <= 31) || // RFC1918 172.16.0.0/12
-    (a === 192 && b === 168) // RFC1918 192.168.0.0/16
+    a === 127 || // Loopback (127.0.0.0/8)
+    a === 10 || // RFC1918 (10.0.0.0/8)
+    (a === 172 && b >= 16 && b <= 31) || // RFC1918 (172.16.0.0/12, Docker bridges)
+    (a === 192 && b === 168) || // RFC1918 (192.168.0.0/16)
+    (a === 100 && b >= 64 && b <= 127) // Tailscale / CGNAT (100.64.0.0/10)
   );
 }
 
-function isLoopbackIPv6(host: string): boolean {
-  return host === '::1' || host === '0:0:0:0:0:0:0:1';
+function isAllowedPrivateOrLocalIPv6(host: string): boolean {
+  // Unwrap IPv4-mapped IPv6 (::ffff:192.168.1.1)
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(host);
+  if (mapped && isValidIPv4(mapped[1])) return isAllowedPrivateOrLocalIPv4(mapped[1]);
+
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  // Link-local IPv6 (fe80::/10) denied
+  if (/^fe[89ab]/i.test(host)) return false;
+  // AWS IMDSv6 (fd00:ec2::254) denied
+  if (/^fd00:ec2::254$/i.test(host)) return false;
+  // Unique local addresses ULA (fc00::/7) allowed
+  if (/^f[cd][0-9a-f]{2}:/i.test(host)) return true;
+  return false;
 }
 
 export function isAllowedHttpHost(host: string): boolean {
+  if (!host) return false;
   const h = host.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+
+  // 1. Explicit metadata denylist check
+  if (METADATA_HOSTNAMES.has(h) || METADATA_IPS.has(h)) return false;
+
+  // 2. Loopback and Localhost
   if (h === 'localhost' || h.endsWith('.localhost')) return true;
-  if (isLoopbackOrPrivateIPv4(h)) return true;
-  if (isLoopbackIPv6(h)) return true;
+
+  // 3. IP validation
+  if (isValidIPv4(h)) return isAllowedPrivateOrLocalIPv4(h);
+  if (isValidIPv6(h)) return isAllowedPrivateOrLocalIPv6(h);
+
+  // 4. Docker container service names (single label with underscores/dashes, no dot)
+  if (!h.includes('.') && DOCKER_SERVICE_NAME_REGEX.test(h)) return true;
+
+  // 5. Allowed internal network domain suffixes
+  const allowedSuffixes = ['.local', '.internal', '.lan', '.ts.net'];
+  if (allowedSuffixes.some((suffix) => h.endsWith(suffix))) return true;
+
   return false;
 }
 
@@ -329,4 +394,20 @@ export function validateConfigWarnings(env: Env): string[] {
 /** True when the operator asked for the weak-secret escape hatch. */
 export function allowsWeakSecrets(env: Env): boolean {
   return env.ALLOW_WEAK_SECRETS === '1';
+}
+
+/**
+ * Normalizes environment variables, mapping new FQD_* names with legacy fallback.
+ */
+export function normalizeEnv(raw: Env): Env {
+  const env: Env = { ...raw };
+  env.PORT = raw.FQD_PORT ?? raw.PORT ?? raw.AI_LIMITS_PORT;
+  env.ADMIN_PASSWORD = raw.FQD_ADMIN_PASSWORD ?? raw.ADMIN_PASSWORD;
+  env.APP_SECRET = raw.FQD_APP_SECRET ?? raw.APP_SECRET;
+  env.DATA_DIR = raw.FQD_DATA_DIR ?? raw.DATA_DIR ?? raw.AI_LIMITS_DATA_DIR;
+  env.CPA_BASE_URL = raw.FQD_CPA_BASE_URL ?? raw.CPA_BASE_URL;
+  env.CPA_MANAGEMENT_KEY = raw.FQD_CPA_MANAGEMENT_KEY ?? raw.CPA_MANAGEMENT_KEY;
+  env.LITELLM_URL = raw.FQD_LITELLM_URL ?? raw.LITELLM_URL ?? raw.LITELLM_BASE_URL;
+  env.LITELLM_KEY = raw.FQD_LITELLM_KEY ?? raw.LITELLM_KEY ?? raw.LITELLM_MASTER_KEY;
+  return env;
 }

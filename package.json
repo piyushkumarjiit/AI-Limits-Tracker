@@ -1,5 +1,5 @@
 {
-  "name": "ai-limits-tracker",
+  "name": "fleet-quota-deck",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
@@ -62,5 +62,6 @@
   },
   "author": "Piyush Kumar <piyushkumar.jiit@gmail.com> (https://github.com/piyushkumarjiit)",
   "license": "MIT",
-  "private": true
+  "private": true,
+  "description": "Fleet Quota Deck (FQD) \u2014 Unified observability deck for AI subscription fleets, proxy pools, and API keys."
 }

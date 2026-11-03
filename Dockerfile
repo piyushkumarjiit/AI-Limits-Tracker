@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # ---------- Stage 1: build ----------
 # node:24-alpine
 FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS builder
@@ -20,9 +18,9 @@ RUN npm run build:web && npm run build:server
 # ---------- Stage 2: runtime ----------
 # node:24-alpine
 FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runner
-LABEL org.opencontainers.image.title="AI Limits Tracker" \
-      org.opencontainers.image.description="Self-hosted web panel tracking AI subscription usage limits" \
-      org.opencontainers.image.source="https://github.com/piyushkumarjiit/AI-Limits-Tracker" \
+LABEL org.opencontainers.image.title="Fleet Quota Deck" \
+      org.opencontainers.image.description="Unified observability deck for AI subscription fleets, proxy pools, and API keys" \
+      org.opencontainers.image.source="https://github.com/piyushkumarjiit/fleet-quota-deck" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.base.name="docker.io/library/node:24-alpine"
 WORKDIR /app

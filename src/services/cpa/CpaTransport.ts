@@ -142,6 +142,11 @@ export class CpaTransport {
         throw err;
       }
       let errMessage = err instanceof Error ? err.message : String(err);
+      if (err && typeof err === 'object' && 'cause' in err && (err as any).cause) {
+        const cause = (err as any).cause;
+        const causeCode = cause.code || cause.message || String(cause);
+        errMessage += ` (cause: ${causeCode})`;
+      }
       if (this.managementKey) {
         errMessage = errMessage.split(this.managementKey).join('[REDACTED]');
       }

@@ -1,18 +1,35 @@
 {
-  "name": "AI Limits Tracker",
-  "short_name": "AI Limits",
-  "description": "Usage limits of all your Claude, ChatGPT and Gemini accounts in one place.",
+  "name": "Fleet Quota Deck",
+  "short_name": "Fleet Quota",
+  "description": "Unified observability deck for AI subscription fleets, proxy pools, and API keys.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#f2f1ed",
-  "theme_color": "#f2f1ed",
-  "lang": "ru",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "lang": "en",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
   ]
 }

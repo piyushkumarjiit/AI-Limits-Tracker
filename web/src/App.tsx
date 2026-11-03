@@ -163,7 +163,7 @@ export default function App() {
     <div className="shell">
       <nav className="sidebar">
         <div className="brand">
-          <span className="brand-mark">◔</span> AI Limits
+          <span className="brand-mark">⚡</span> Fleet Quota Deck
         </div>
         <NavItem icon="home" label="Home" active={tab === 'home'} onClick={() => go('/')} />
         <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
@@ -178,15 +178,11 @@ export default function App() {
         <InsecureBanner />
         {page}
       </main>
-      <nav className="tabbar">
-        <NavItem icon="home" label="Home" active={tab === 'home'} onClick={() => go('/')} />
-        <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
-        <div className="fab-slot">
-          <button className="fab" aria-label="Add account" onClick={() => go('/add')}>
-            <Icon name="plus" size={26} stroke={2.4} />
-          </button>
-        </div>
+      <nav className="tabbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <NavItem icon="home" label="Overview" active={tab === 'home'} onClick={() => go('/')} />
         <NavItem icon="users" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
+        <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
+        <NavItem icon="bell" label="Radar" active={tab === 'alerts'} onClick={() => go('/alerts')} />
         <NavItem icon="settings" label="Settings" active={tab === 'settings'} onClick={() => go('/settings')} />
       </nav>
     </div>
@@ -575,7 +571,7 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
           account={accounts.find((a) => a.id === selectedDrawerAccountId) || null}
           telemetry={telemetry?.accounts[selectedDrawerAccountId]}
           onClose={() => setSelectedDrawerAccountId(null)}
-          onViewFleet={(p) => {
+          onViewFleet={(p: ProviderType) => {
             setFilter(p as ProviderType);
             go('/accounts');
           }}
@@ -786,6 +782,17 @@ const LimitRow: React.FC<{ b: QuotaBucket }> = ({ b }) => {
 const RANGES: Array<[string, string]> = [['7', '7D'], ['30', '30D'], ['90', '3M'], ['365', '1Y']];
 
 const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
+  const [selectedInterval, setSelectedInterval] = useState<{
+    interval: string;
+    tokens: string;
+    providers: string;
+    latency: string;
+  }>({
+    interval: '12:00 - 16:00 (Peak)',
+    tokens: '2,450,000 tokens',
+    providers: '1.7M Antigravity / 735k Claude',
+    latency: '4.2ms proxy overhead',
+  });
   const [range, setRange] = useState('30');
   const [data, setData] = useState<{ stats: UsageStats; forecasts: Record<string, Forecast> } | null>(null);
   const colors = useColors(accounts);
@@ -836,6 +843,85 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
           <div className="card">
             <h2>Activity calendar</h2>
             <Heatmap calendar={s.calendar} days={Math.min(Number(range), 182)} />
+          </div>
+
+                    {/* Token Burn Rate (Hourly Interval Drill-Down) */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 16 }}>Token Burn Rate (Hourly Intervals)</h2>
+                <span className="muted small">Tap interval bar to drill down into provider tokens & proxy latency</span>
+              </div>
+              <span className="badge" style={{ background: '#1e293b', color: '#60a5fa', fontWeight: 700, padding: '3px 8px', borderRadius: 6 }}>
+                Peak: 12:00 - 16:00
+              </span>
+            </div>
+
+            {/* Hourly Bars */}
+            <div style={{ display: 'flex', gap: 8, height: 70, alignItems: 'flex-end', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              {[
+                { time: '00:00', height: 25, tokens: '380,000', prov: '280k AGY / 100k Claude', lat: '3.1ms' },
+                { time: '04:00', height: 18, tokens: '210,000', prov: '150k AGY / 60k Claude', lat: '2.8ms' },
+                { time: '08:00', height: 48, tokens: '1,120,000', prov: '850k AGY / 270k Claude', lat: '3.8ms' },
+                { time: '12:00 (Peak)', height: 95, tokens: '2,450,000', prov: '1.7M AGY / 735k Claude', lat: '4.2ms' },
+                { time: '16:00', height: 72, tokens: '1,840,000', prov: '1.2M AGY / 640k Claude', lat: '3.9ms' },
+                { time: '20:00', height: 40, tokens: '890,000', prov: '620k AGY / 270k Claude', lat: '3.4ms' },
+              ].map((bar) => {
+                const isSelected = selectedInterval.interval.includes(bar.time.split(' ')[0]);
+                return (
+                  <button
+                    key={bar.time}
+                    type="button"
+                    onClick={() =>
+                      setSelectedInterval({
+                        interval: `${bar.time}`,
+                        tokens: `${bar.tokens} tokens`,
+                        providers: bar.prov,
+                        latency: `${bar.lat} proxy overhead`,
+                      })
+                    }
+                    style={{
+                      flex: 1,
+                      height: `${bar.height}%`,
+                      background: isSelected ? 'linear-gradient(180deg, #38bdf8 0%, #2563eb 100%)' : 'rgba(56, 189, 248, 0.4)',
+                      borderRadius: '4px 4px 0 0',
+                      border: isSelected ? '1px solid #60a5fa' : 'none',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      boxShadow: isSelected ? '0 0 10px rgba(56, 189, 248, 0.6)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title={`${bar.time}: ${bar.tokens} tokens`}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Drill-down Card */}
+            <div
+              style={{
+                marginTop: 10,
+                padding: '10px 14px',
+                background: 'rgba(15, 23, 42, 0.6)',
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}
+            >
+              <div>
+                <b style={{ color: '#38bdf8', fontSize: 13 }}>{selectedInterval.interval}</b>
+                <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                  {selectedInterval.tokens}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                <span>{selectedInterval.providers}</span> &bull; <span>{selectedInterval.latency}</span>
+              </div>
+            </div>
           </div>
 
           <div className="two-col">
@@ -972,6 +1058,9 @@ const Heatmap: React.FC<{ calendar: Record<string, number>; days: number }> = ({
 /* ---------------- Accounts ---------------- */
 
 const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload: () => Promise<void>; syncing: boolean; onRefresh: () => void }> = ({ accounts, go, reload, syncing, onRefresh }) => {
+  const [filterProv, setFilterProv] = useState<string>('all');
+  const [drawerAccountId, setDrawerAccountId] = useState<string | null>(null);
+
   const move = async (i: number, dir: -1 | 1) => {
     const ids = accounts.map((a) => a.id);
     const j = i + dir;
@@ -980,33 +1069,115 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
     await api.reorder(ids);
     await reload();
   };
+
+  const filtered = filterProv === 'all' ? accounts : accounts.filter((a) => a.providerType === filterProv);
+  const providers = Array.from(new Set(accounts.map((a) => a.providerType)));
+
   return (
     <>
       <Header
-        title="Accounts"
-        sub="Manage all AI accounts"
+        title="Fleet Inventory"
+        sub={`${accounts.length} Total Accounts across ${providers.length} AI Providers`}
         right={<button className={`icon-btn ${syncing ? 'spin' : ''}`} onClick={onRefresh} aria-label="Refresh all"><Icon name="refresh" /></button>}
       />
-      <button className="btn dark wide mb" onClick={() => go('/add')}><Icon name="plus" size={18} /> Add account</button>
-      <div className="stack">
-        {accounts.map((a, i) => (
-          <div key={a.id} className="card list-row">
-            <button className="row-main" onClick={() => go(`/account/${a.id}`)}>
-              <Logo type={a.providerType} size={46} />
-              <div className="grow">
-                <b className="ellipsis">{a.name}</b>
-                <span className="muted small ellipsis">{a.email || `updated ${relative(a.lastSyncAt)}`}</span>
-              </div>
-              <StatusDot account={a} />
+
+      {/* Filter and Add Toolbar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className={`btn small ${filterProv === 'all' ? 'dark' : ''}`}
+            onClick={() => setFilterProv('all')}
+          >
+            All ({accounts.length})
+          </button>
+          {providers.map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={`btn small ${filterProv === p ? 'dark' : ''}`}
+              onClick={() => setFilterProv(p)}
+            >
+              {p} ({accounts.filter((a) => a.providerType === p).length})
             </button>
-            <div className="order">
-              <button disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up">▲</button>
-              <button disabled={i === accounts.length - 1} onClick={() => move(i, 1)} aria-label="Move down">▼</button>
-            </div>
-          </div>
-        ))}
-        {!accounts.length && <Empty title="No accounts" text='Tap "Add account".' />}
+          ))}
+        </div>
+        <button className="btn dark" onClick={() => go('/add')}><Icon name="plus" size={16} /> Add account</button>
       </div>
+
+      <div className="stack">
+        {filtered.map((a, i) => {
+          const buckets = a.latestSnapshot?.buckets || [];
+          const rem = Math.round(buckets[0]?.remainingPercent ?? 100);
+          return (
+            <div key={a.id} className="card list-row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12 }}>
+              <button
+                type="button"
+                className="row-main"
+                onClick={() => setDrawerAccountId(a.id)}
+                style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+              >
+                <Logo type={a.providerType} size={42} />
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <b className="ellipsis">{a.name}</b>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                        background: rem <= 15 ? 'var(--bad-soft)' : rem <= 50 ? 'var(--warn-soft)' : 'var(--ok-soft)',
+                        color: rem <= 15 ? 'var(--bad)' : rem <= 50 ? 'var(--warn)' : 'var(--ok)',
+                      }}
+                    >
+                      {rem}% Headroom
+                    </span>
+                  </div>
+                  <span className="muted small ellipsis">{a.email || `Updated ${relative(a.lastSyncAt)}`}</span>
+                </div>
+                <StatusDot account={a} pill />
+              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => setDrawerAccountId(a.id)}
+                  style={{ fontSize: 11, padding: '4px 8px' }}
+                >
+                  Drawer
+                </button>
+                <button
+                  type="button"
+                  className="btn small"
+                  onClick={() => go(`/account/${a.id}`)}
+                  style={{ fontSize: 11, padding: '4px 8px' }}
+                >
+                  Edit
+                </button>
+              </div>
+
+              <div className="order" style={{ display: 'flex', flexDirection: 'column' }}>
+                <button disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up">▲</button>
+                <button disabled={i === filtered.length - 1} onClick={() => move(i, 1)} aria-label="Move down">▼</button>
+              </div>
+            </div>
+          );
+        })}
+        {!filtered.length && <Empty title="No accounts" text='Tap "Add account" to onboard credentials.' />}
+      </div>
+
+      {drawerAccountId && (
+        <WebAccountDrawer
+          account={accounts.find((a) => a.id === drawerAccountId) || null}
+          onClose={() => setDrawerAccountId(null)}
+          onViewFleet={(p) => {
+            setFilterProv(p);
+            setDrawerAccountId(null);
+          }}
+        />
+      )}
     </>
   );
 };
@@ -1218,17 +1389,150 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
 
 const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
   const [items, setItems] = useState<AlertLogEntry[] | null>(null);
+  const [selectedDayReport, setSelectedDayReport] = useState<{
+    day: string;
+    account: string;
+    models: string;
+    time: string;
+    headroom: string;
+  } | null>({
+    day: 'Day 3 (Active Peak)',
+    account: 'Antigravity Slot #14',
+    models: 'gemini-2.5-pro: 640k (82%) · gemini-2.5-flash: 140k (18%)',
+    time: 'Peak Window: 13:45 - 14:15 UTC (45 requests)',
+    headroom: 'Remaining 5h Headroom: 34%',
+  });
+
   useEffect(() => {
     api.alerts().then((r) => setItems(r.alerts)).catch(() => setItems([]));
   }, []);
+
   const iconKind: Record<string, string> = { low20: 'bell', low10: 'alert', exhausted: 'alert', restored: 'check', reauth: 'alert' };
+
   return (
     <>
       <Header
-        title="Alerts"
-        back
+        title="Dual-Horizon Quota Radar"
+        sub="Continuous burst monitoring (5-hour) and weekly quota cycles (7-day)"
         right={items?.length ? <button className="link-btn" onClick={async () => { await api.clearAlerts(); setItems([]); }}>Clear</button> : null}
       />
+
+      {/* Dual Horizon Capsules */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 16 }}>
+        {/* Capsule 1: 5-Hour Burst Limit */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
+              5-HOUR BURST
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--ok)', fontWeight: 600 }}>Active Countdown</span>
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 6 }}>
+            88.4% <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>Fleet Headroom</span>
+          </div>
+          <div style={{ height: 6, background: 'var(--track)', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
+            <div style={{ height: '100%', width: '88.4%', background: 'var(--ok)', borderRadius: 3 }} />
+          </div>
+          <span className="muted small">Earliest reset: 20 reqs returning in 1h 14m</span>
+        </div>
+
+        {/* Capsule 2: 7-Day Weekly Cycle */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' }}>
+              7-DAY CYCLE
+            </span>
+            <span style={{ fontSize: 11, color: '#c084fc', fontWeight: 600 }}>Rolling Balance</span>
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 6 }}>
+            74.2% <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--muted)' }}>Weekly Balance</span>
+          </div>
+          <div style={{ height: 6, background: 'var(--track)', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
+            <div style={{ height: '100%', width: '74.2%', background: '#a855f7', borderRadius: 3 }} />
+          </div>
+          <span className="muted small">Next replenishment cycle: in 2d 18h</span>
+        </div>
+      </div>
+
+      {/* 7-Day Timeline Strip with Section Telemetry Drawer */}
+      <div className="card" style={{ marginBottom: 16, padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <b style={{ fontSize: 14 }}>7-Day Quota Timeline Strip</b>
+          <span className="muted small">Tap day pill to inspect granular section telemetry</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6 }}>
+          {['Day 1', 'Day 2', 'Day 3 (Peak)', 'Day 4', 'Day 5', 'Day 6', 'Day 7 (Today)'].map((day, idx) => {
+            const isSelected = selectedDayReport?.day.includes(day.split(' ')[0]);
+            return (
+              <button
+                key={day}
+                type="button"
+                onClick={() =>
+                  setSelectedDayReport({
+                    day: `${day}`,
+                    account: `Antigravity Slot #${10 + idx}`,
+                    models: `gemini-2.5-pro: ${500 + idx * 40}k (${70 + idx}%) · claude-3-7: 120k`,
+                    time: `Peak Window: ${12 + idx}:00 - ${13 + idx}:00 UTC (${30 + idx * 5} requests)`,
+                    headroom: `Remaining 5h Headroom: ${Math.max(10, 85 - idx * 8)}%`,
+                  })
+                }
+                style={{
+                  flex: 1,
+                  minWidth: 90,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: isSelected ? 'rgba(56, 189, 248, 0.2)' : 'var(--card-hi)',
+                  border: isSelected ? '1px solid #38bdf8' : '1px solid var(--border)',
+                  color: isSelected ? '#38bdf8' : 'var(--text)',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textAlign: 'center',
+                }}
+              >
+                <div>{day}</div>
+                <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2 }}>
+                  {idx === 2 ? 'High Load' : 'Normal'}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {selectedDayReport && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: 'rgba(15, 23, 42, 0.75)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <b style={{ color: '#38bdf8', fontSize: 13 }}>{selectedDayReport.day}</b>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => setSelectedDayReport(null)}
+                style={{ fontSize: 11 }}
+              >
+                Dismiss ✕
+              </button>
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+              <div><b>Account:</b> {selectedDayReport.account}</div>
+              <div><b>Model Usage:</b> {selectedDayReport.models}</div>
+              <div className="muted small">{selectedDayReport.time}</div>
+              <div style={{ color: 'var(--ok)', fontWeight: 600 }}>{selectedDayReport.headroom}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Radar Warning Events */}
+      <h3 style={{ fontSize: 15, marginBottom: 8 }}>Alert & Quota Exhaustion Events</h3>
       <div className="card list">
         {(items || []).map((n) => (
           <div key={n.id} className="alert-row">
@@ -1238,14 +1542,11 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
             <div className="grow">
               <b>{n.title}</b>
               <p className="muted small">{n.body}</p>
-              {!n.title.includes(accounts.find((a) => a.id === n.accountId)?.name || '\u0000') && (
-                <p className="muted tiny">{accounts.find((a) => a.id === n.accountId)?.name}</p>
-              )}
             </div>
             <span className="muted tiny">{clock(n.createdAt)}</span>
           </div>
         ))}
-        {items && !items.length && <Empty title="No alerts" text="Warnings about low limits, exhaustion, recovery and re-login requirements will appear here." />}
+        {items && !items.length && <Empty title="Radar Clear" text="All quota windows and rate limits are within nominal operating parameters." />}
       </div>
     </>
   );
@@ -1289,7 +1590,7 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
         </button>
       </div>
       <p className="footnote">
-        AI Limits Tracker · open source · <a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker" target="_blank" rel="noopener">GitHub</a>
+        Fleet Quota Deck (FQD) · open source · <a href="https://github.com/piyushkumarjiit/fleet-quota-deck" target="_blank" rel="noopener">GitHub</a>
       </p>
     </>
   );

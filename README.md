@@ -1,18 +1,20 @@
 <div align="center">
 
-<img src="web/public/icon.svg" width="88" height="88" alt="AI Limits Tracker" />
+<img src="web/public/icon.svg" width="88" height="88" alt="Fleet Quota Deck (FQD)" />
 
-# AI Limits Tracker
+# Fleet Quota Deck (FQD)
 
-**Track the usage limits of all your Claude, ChatGPT and Gemini accounts in one place — including several accounts of the same service.**
+**The unified observability deck for AI subscription fleets, proxy pools, and API keys.**
 
-Mobile app · self-hosted web panel (PWA) · Chrome extension. Honest numbers, live reset timers, low-limit alerts. Your credentials never leave your own device or server.
+Mobile PWA · Self-hosted web cockpit · Proxy & Gateway Integrations (CLIProxy & LiteLLM). Continuous burst monitoring (5-hour), weekly quota cycles (7-day), and token telemetry. Your credentials never leave your own device or server.
 
-<a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker/stargazers"><img src="https://img.shields.io/github/stars/piyushkumarjiit/AI-Limits-Tracker?style=flat&color=1f9d74" alt="Stars" /></a>
+<a href="https://github.com/piyushkumarjiit/fleet-quota-deck/stargazers"><img src="https://img.shields.io/github/stars/piyushkumarjiit/fleet-quota-deck?style=flat&color=1f9d74" alt="Stars" /></a>
 <img src="https://img.shields.io/badge/license-MIT-black" alt="MIT" />
-<img src="https://img.shields.io/badge/Claude%20·%20ChatGPT%20·%20Gemini-supported-e2683c" alt="Providers" />
+<img src="https://img.shields.io/badge/CLIProxy%20·%20LiteLLM%20·%20Antigravity-supported-38bdf8" alt="Gateways" />
 
 </div>
+
+> **Note on Project Lineage & Attribution**: Fleet Quota Deck (FQD) originated from [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan under the MIT License, and has been extensively modernized and re-architected into a high-concurrency fleet observability cockpit for CLIProxy and LiteLLM gateway topologies.
 
 ---
 

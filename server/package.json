@@ -1,9 +1,9 @@
 {
-  "name": "ai-limits-tracker-server",
+  "name": "fleet-quota-deck-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Self-hosted server + web panel for AI Limits Tracker. Node 22+ / 24+, zero runtime dependencies.",
+  "description": "Self-hosted server + web panel for Fleet Quota Deck (FQD). Node 22+ / 24+, zero runtime dependencies.",
   "engines": {
     "node": ">=22.5.0"
   },
