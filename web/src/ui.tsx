@@ -19,7 +19,7 @@ import {
   severityOf,
   type Weighting,
 } from '../../src/services/capacity';
-import { formatTimeRemaining } from '../../src/utils/formatters';
+import { formatTimeRemaining, formatResetCountdown } from '../../src/utils/formatters';
 import type { Forecast } from '../../src/services/stats';
 import type { Account } from './api';
 import type { AccountTelemetry } from '../../src/services/telemetryService';
@@ -1327,7 +1327,7 @@ export const WebAccountDrawer: React.FC<WebAccountDrawerProps> = ({
           </div>
           {nearestReset && (
             <span className="small muted">
-              Resets in {formatTimeRemaining(nearestReset)}
+              {formatResetCountdown(nearestReset)}
             </span>
           )}
         </div>
@@ -1357,10 +1357,36 @@ export const WebAccountDrawer: React.FC<WebAccountDrawerProps> = ({
               <div style={{ height: '100%', width: `${rollingRem}%`, background: brand.primary, borderRadius: 4 }} />
             </div>
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>
-              {rolling?.resetsAt ? `Resets in ${formatTimeRemaining(rolling.resetsAt)}` : 'Active session window'}
+              {rolling?.resetsAt ? `Next Window Recovery: ${formatResetCountdown(rolling.resetsAt)}` : 'Active session window'}
             </div>
           </div>
         </div>
+
+        
+          {/* 7-Day Quota Cycle Strip */}
+          <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>7-Day Quota Cycle</span>
+              <b style={{ fontSize: 13, color: weeklyRem <= 35 ? 'var(--warn)' : 'var(--ok)' }}>
+                {weeklyRem}% Balance ({Math.round(weeklyRem * 10)}k / 1M)
+              </b>
+            </div>
+            <div style={{ height: 8, background: 'var(--track)', borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
+              <div style={{ height: '100%', width: `${weeklyRem}%`, background: weeklyRem <= 35 ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'linear-gradient(90deg, #10b981, #059669)', borderRadius: 4 }} />
+            </div>
+            <div className="dh-calendar-strip" style={{ marginBottom: 8 }}>
+              <div className="dh-day-pill past">D1</div>
+              <div className="dh-day-pill past">D2</div>
+              <div className={`dh-day-pill ${weeklyRem <= 35 ? 'tight' : 'current'}`}>D3</div>
+              <div className="dh-day-pill">D4</div>
+              <div className="dh-day-pill">D5</div>
+              <div className="dh-day-pill">D6</div>
+              <div className="dh-day-pill">D7</div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              Weekly Reset: <strong style={{ color: '#e5e7eb' }}>{formatResetCountdown(weekly?.resetsAt || nearestReset)}</strong>
+            </div>
+          </div>
 
         {/* Telemetry info */}
         <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1399,14 +1425,16 @@ export const WebAccountDrawer: React.FC<WebAccountDrawerProps> = ({
           }}
           style={{
             marginTop: 'auto',
-            background: 'var(--ink)',
-            color: '#fff',
+            background: '#2563eb',
+            color: '#ffffff',
             padding: '14px',
             borderRadius: 12,
             fontWeight: 700,
             fontSize: 15,
             textAlign: 'center',
             cursor: 'pointer',
+            border: 'none',
+            boxShadow: '0 2px 8px rgba(37,99,235,0.4)',
           }}
         >
           View in Fleet Tab ➔

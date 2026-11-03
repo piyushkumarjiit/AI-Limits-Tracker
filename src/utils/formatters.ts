@@ -1,3 +1,24 @@
+export function formatResetCountdown(resetsAt: string | null | undefined): string {
+  if (!resetsAt) return 'Rolling window clear';
+  const target = new Date(resetsAt).getTime();
+  if (isNaN(target)) return 'Rolling window clear';
+  const diffSec = Math.floor((target - Date.now()) / 1000);
+
+  if (diffSec <= 0) return 'Rolling window clear';
+
+  const d = new Date(resetsAt);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+
+  const days = Math.floor(diffSec / 86400);
+  const hours = Math.floor((diffSec % 86400) / 3600);
+  const minutes = Math.floor((diffSec % 3600) / 60);
+
+  if (days > 0) return `in ${days}d ${hours}h (${hh}:${mm} UTC)`;
+  if (hours > 0) return `in ${hours}h ${minutes}m (${hh}:${mm} UTC)`;
+  return `in ${minutes}m (${hh}:${mm} UTC)`;
+}
+
 import { useEffect, useState } from 'react';
 
 export function formatTimeRemaining(resetsAt: string | null | undefined): string {

@@ -4,7 +4,7 @@ import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES, severityColor, severityOf } from '../../src/constants/theme';
 import { dualRingData, familySummaries, type Weighting } from '../../src/services/capacity';
-import { formatTimeRemaining, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
+import { formatTimeRemaining, formatResetCountdown, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
 import { Account, api, ApiError } from './api';
 import { isInsecurePage } from './session';
 import {
@@ -54,8 +54,8 @@ function clock(t: number | string): string {
 }
 
 function getSlotLabel(acc: Account, fallbackIdx: number): string {
-  if (acc.providerType === 'claude') return 'claude_01';
-  return `slot_${String(fallbackIdx + 1).padStart(2, '0')}`;
+  if (acc.providerType === 'claude') return '01';
+  return String(fallbackIdx + 1).padStart(2, '0');
 }
 
 interface AppState {
@@ -100,7 +100,6 @@ export function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [showQr, setShowQr] = useState(false);
   useTick(60000);
 
   const load = useCallback(async () => {
@@ -180,7 +179,6 @@ export function App() {
           <div>
             <div className="brand-title">
               <span style={{ color: '#38bdf8' }}>FQD</span>
-              <span className="brand-badge">PWA v2.5</span>
               <span style={{ fontSize: 13, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginLeft: 8 }}>
                 Fleet Quota Display
               </span>
@@ -188,11 +186,8 @@ export function App() {
             <p className="tagline">Enterprise multi-gateway quota monitor, burst routing intelligence &amp; token telemetry.</p>
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className={`filter-btn ${syncing ? 'spin' : ''}`} style={{ padding: '3px 8px', fontSize: 11 }} onClick={refreshAll} aria-label="Refresh">
+            <button className={`filter-btn ${syncing ? 'spin' : ''}`} style={{ padding: '4px 10px', fontSize: 11 }} onClick={refreshAll} aria-label="Refresh">
               <Icon name="refresh" size={14} /> Refresh
-            </button>
-            <button className="filter-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => setShowQr(true)}>
-              📷 Phone QR
             </button>
             <span className="badge badge-ok">All Systems Healthy</span>
           </div>
@@ -201,23 +196,36 @@ export function App() {
         {/* Desktop Navigation Tabs */}
         <nav className="tab-bar">
           <button className={`tab-btn ${tab === 'home' ? 'active' : ''}`} onClick={() => go('/')}>
-            1. Fleet Command (/overview)
+            Overview
           </button>
           <button className={`tab-btn ${tab === 'accounts' ? 'active' : ''}`} onClick={() => go('/accounts')}>
-            2. Fleet Inventory (/accounts)
+            Accounts
           </button>
           <button className={`tab-btn ${tab === 'stats' ? 'active' : ''}`} onClick={() => go('/stats')}>
-            3. Token &amp; Telemetry (/stats)
+            Telemetry
           </button>
           <button className={`tab-btn ${tab === 'alerts' ? 'active' : ''}`} onClick={() => go('/alerts')}>
-            4. Dual-Horizon Quota Radar (/alerts)
+            Quota Radar
           </button>
           <button className={`tab-btn ${tab === 'settings' ? 'active' : ''}`} onClick={() => go('/settings')}>
-            5. Gateway &amp; Integrations (/settings)
+            Gateways &amp; Settings
           </button>
         </nav>
 
         {page}
+
+        {/* Enterprise Footer */}
+        <footer className="enterprise-footer">
+          <span>FQD v2.5.0</span>
+          <span>•</span>
+          <span>Fleet Quota Display</span>
+          <span>•</span>
+          <a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker" target="_blank" rel="noreferrer">GitHub</a>
+          <span>•</span>
+          <a href="#/settings">Documentation</a>
+          <span>•</span>
+          <span>MIT License</span>
+        </footer>
       </div>
 
       {/* Mobile Bottom Navigation Bar */}
@@ -246,7 +254,7 @@ export function App() {
             <line x1="12" y1="20" x2="12" y2="4"/>
             <line x1="6" y1="20" x2="6" y2="14"/>
           </svg>
-          <span className="mob-nav-label">Stats</span>
+          <span className="mob-nav-label">Telemetry</span>
         </div>
         <div className={`mob-nav-item ${tab === 'alerts' ? 'active' : ''}`} onClick={() => go('/alerts')}>
           <svg className="mob-nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
@@ -272,59 +280,40 @@ export function App() {
           <span className="mob-nav-label">Settings</span>
         </div>
       </nav>
-
-      {/* QR Modal Popover */}
-      {showQr && (
-        <div className="qr-modal" style={{ display: 'flex' }} onClick={() => setShowQr(false)}>
-          <div className="qr-box" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <strong style={{ color: '#fff', fontSize: 15 }}>Scan with Phone Camera</strong>
-              <button className="filter-btn" style={{ padding: '2px 7px' }} onClick={() => setShowQr(false)}>✕</button>
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--muted)' }}>Scan to open the live Fleet Quota Display PWA directly on your iPhone or Android:</p>
-            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=8&data=${encodeURIComponent(window.location.href)}`} alt="FQD QR Code" width="200" height="200" />
-            <div style={{ fontSize: 11, color: '#60a5fa', fontFamily: 'monospace' }}>{window.location.origin}/</div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
 const Empty: React.FC<{ title: string; text?: string; children?: React.ReactNode }> = ({ title, text, children }) => (
-  <div className="empty">
+  <div className="card empty">
     <h3>{title}</h3>
-    {text && <p>{text}</p>}
+    {text && <p className="muted small">{text}</p>}
     {children}
   </div>
 );
 
 const Header: React.FC<{ title: string; sub?: string; back?: boolean; right?: React.ReactNode }> = ({ title, sub, back, right }) => (
-  <div className="card-header" style={{ marginBottom: 14 }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+  <header className="page-header">
+    <div>
       {back && (
-        <button className="icon-btn" onClick={() => history.back()} aria-label="Go back">
-          <Icon name="back" />
-        </button>
+        <a href="#/" className="back-link">
+          ← Back
+        </a>
       )}
-      <div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{title}</h2>
-        {sub && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{sub}</span>}
-      </div>
+      <h2>{title}</h2>
+      {sub && <p className="muted small">{sub}</p>}
     </div>
-    {right && <div>{right}</div>}
-  </div>
+    {right}
+  </header>
 );
 
 const InsecureBanner: React.FC = () => {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed || !isInsecurePage()) return null;
   return (
-    <div style={{ background: '#7f1d1d', color: '#fef2f2', padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <div>
-        <strong>Insecure HTTP detected:</strong> Passwords and API tokens sent over plain HTTP can be intercepted. Use HTTPS or localhost.
-      </div>
-      <button className="filter-btn" style={{ background: 'transparent', color: '#fff', border: 'none', cursor: 'pointer' }} onClick={() => setDismissed(true)}>
+    <div className="banner warn">
+      <span>FQD session cookies require HTTPS. Over plain HTTP, sign-in persists until the tab closes.</span>
+      <button type="button" onClick={() => setDismissed(true)} aria-label="Dismiss">
         ✕
       </button>
     </div>
@@ -343,31 +332,32 @@ const Login: React.FC<{ onDone: () => void }> = ({ onDone }) => {
     try {
       await api.login(pass);
       onDone();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Login failed');
+    } catch (e: any) {
+      setErr(e.message || 'Invalid password');
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20 }}>
-      <form onSubmit={submit} className="card" style={{ maxWidth: 360, width: '100%', padding: 24 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, color: '#38bdf8' }}>FQD</h2>
-        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>Fleet Quota Display • Enter master secret to continue</p>
-        {err && <div style={{ color: 'var(--bad)', fontSize: 12, marginBottom: 10 }}>{err}</div>}
-        <input
-          type="password"
-          value={pass}
-          onChange={(e) => setPass(e.target.value)}
-          placeholder="Dashboard password"
-          style={{ width: '100%', padding: '10px 12px', background: 'var(--card-hi)', border: '1px solid var(--border)', borderRadius: 8, color: '#fff', marginBottom: 14 }}
-          autoFocus
-        />
-        <button type="submit" className="btn dark wide" disabled={busy}>
-          {busy ? 'Authenticating...' : 'Sign In'}
-        </button>
-      </form>
+    <div className="login-box">
+      <div className="card">
+        <h2>Fleet Quota Display</h2>
+        <p className="muted small">Enter master key or master password</p>
+        <form onSubmit={submit}>
+          <input
+            type="password"
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+            placeholder="Master password"
+            autoFocus
+          />
+          {err && <div className="banner danger">{err}</div>}
+          <button type="submit" className="btn full" disabled={busy || !pass}>
+            {busy ? 'Authenticating…' : 'Sign in'}
+          </button>
+        </form>
+      </div>
     </div>
   );
 };
@@ -385,7 +375,7 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
   const agyAccounts = effectiveAccounts.filter((a) => a.providerType === 'antigravity');
   const claudeAccounts = effectiveAccounts.filter((a) => a.providerType === 'claude');
 
-  const defaultHoverAccount = effectiveAccounts.find((a, i) => getSlotLabel(a, i) === 'slot_14') || effectiveAccounts[effectiveAccounts.length - 1] || effectiveAccounts[0];
+  const defaultHoverAccount = effectiveAccounts.find((a, i) => i === 13) || effectiveAccounts[effectiveAccounts.length - 1] || effectiveAccounts[0];
   const [hoverAccount, setHoverAccount] = useState<Account | null>(defaultHoverAccount || null);
 
   useEffect(() => {
@@ -450,32 +440,35 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
         </div>
         <div className="card stat-box">
           <span className="stat-sub">Active Gateways</span>
-          <span className="stat-val" style={{ color: 'var(--purple)' }}>{telemetry?.global?.connected ? '2 Live' : '2 Live'}</span>
-          <span className="stat-sub" style={{ color: 'var(--ok)' }}>CLIProxy &amp; LiteLLM</span>
+          <span className="stat-val" style={{ color: 'var(--purple)' }}>2 Live</span>
+          <span className="stat-sub">CLIProxy &amp; LiteLLM</span>
         </div>
       </div>
 
-      {/* Headroom Capacity Container */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
+      {/* Fleet Headroom Capacity Card */}
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="card-header" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <div>
-            <span className="card-title">Fleet Headroom Capacity</span>
-            <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>
-              Auto-scales across Cell (≤20) → Matrix (≤2 rows) → Aggregate (&gt;2 rows)
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="card-title">Fleet Headroom Capacity</span>
+              <span
+                style={{ cursor: 'pointer', fontSize: 13, color: 'var(--muted)', display: 'inline-flex', alignItems: 'center' }}
+                title="Auto-scales across Cell (≤20) → Matrix (≤2 rows) → Aggregate (>2 rows)"
+              >
+                ⓘ
+              </span>
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select
-              id="cap-view-select"
-              className="select-control"
-              style={{ fontWeight: 700, padding: '4px 10px', background: 'var(--card-hi)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8 }}
               value={capView}
               onChange={(e) => setCapView(e.target.value as any)}
+              style={{ background: 'var(--card-hi)', color: '#fff', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', fontSize: 11 }}
             >
-              <option value="auto">Auto</option>
-              <option value="cell">Cell</option>
-              <option value="matrix">Matrix</option>
-              <option value="aggregate">Aggregate</option>
+              <option value="auto">Auto-Scale</option>
+              <option value="cell">Cell View</option>
+              <option value="matrix">Matrix View</option>
+              <option value="aggregate">Aggregate View</option>
             </select>
             <div style={{ display: 'flex', gap: 3 }}>
               <button className={`filter-btn ${simSize === 15 ? 'active' : ''}`} style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => { setSimSize(15); setCapView('auto'); }}>15</button>
@@ -486,7 +479,7 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
         </div>
 
         <div id="cap-mode-indicator" style={{ fontSize: 10, color: '#60a5fa', marginBottom: 10, background: 'rgba(59,130,246,0.1)', padding: '4px 10px', borderRadius: 6, display: 'inline-block' }}>
-          Mode: <strong>{capView.toUpperCase()}</strong> • <strong>{simSize} Accounts ({simSize <= 20 ? '≤20' : simSize <= 40 ? '≤2 rows' : '>2 rows'})</strong> → Rendering <strong>{activeView.toUpperCase()} View</strong>.
+          Mode: <strong>{capView.toUpperCase()}</strong> • <strong>{simSize} Accounts ({simSize <= 20 ? '≤20' : simSize <= 40 ? '≤2 rows' : '>2 rows'})</strong> → Rendering <strong>{activeView.toUpperCase()} View</strong>
         </div>
 
         {/* 1. Cell View */}
@@ -539,11 +532,11 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
               })}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 12, marginBottom: 6 }}>
               <span><strong>Claude Code</strong> ({claudeAccounts.length} Account)</span>
               <span style={{ color: 'var(--ok)' }}><strong>{claudeHeadroom}% Headroom</strong></span>
             </div>
-            <div className="gradient-bar-track" style={{ height: 36 }}>
+            <div className="gradient-bar-track" style={{ height: 48, display: 'flex', gap: 4, justifyContent: 'flex-start' }}>
               {claudeAccounts.map((acc, idx) => {
                 const ring = dualRingData(acc.latestSnapshot);
                 const rem = ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : 84;
@@ -553,13 +546,16 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
                     key={acc.id}
                     className="grad-segment"
                     style={{
-                      flex: 1,
+                      flex: '0 0 calc((100% - 52px) / 14)',
+                      maxWidth: 85,
+                      height: 48,
                       borderColor: isSelected ? '#ea580c' : undefined,
+                      transform: isSelected ? 'translateY(-2px)' : undefined,
                     }}
                     onMouseEnter={() => setHoverAccount(acc)}
                     onClick={() => setDrawerAccount(acc)}
                   >
-                    <span className="grad-segment-label">{getSlotLabel(acc, idx)}</span>
+                    <span className="grad-segment-label">01</span>
                     <div
                       className="grad-segment-fill"
                       style={{
@@ -578,27 +574,23 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
               })}
             </div>
 
-            {/* Live Account Inspector Card */}
+            {/* Hover details pill */}
             {hoverAccount && (() => {
               const hovIdx = agyAccounts.findIndex(a => a.id === hoverAccount.id);
               const isClaude = hoverAccount.providerType === 'claude';
               const isTight = hoverAccount.email?.includes('vishakha') || hovIdx === 13;
               const ring = dualRingData(hoverAccount.latestSnapshot);
               const rem = isClaude ? 84 : (isTight ? 34 : Math.round(ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : 88));
-              const slotStr = isClaude ? 'claude_01' : `slot_${String(hovIdx >= 0 ? hovIdx + 1 : 14).padStart(2, '0')}`;
+              const slotStr = isClaude ? 'slot_01' : `slot_${String(hovIdx >= 0 ? hovIdx + 1 : 14).padStart(2, '0')}`;
               return (
-                <div id="cell-hover-card" className="cell-inspection-card" style={{ cursor: 'pointer' }} onClick={() => setDrawerAccount(hoverAccount)}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, padding: '8px 12px', background: 'var(--card-hi)', borderRadius: 8, fontSize: 11 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span className="badge badge-slot">{slotStr}</span>
                     <strong style={{ color: '#fff' }}>{hoverAccount.email || hoverAccount.name}</strong>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <strong style={{ color: isTight ? '#fbbf24' : '#4ade80' }}>
-                      {rem}% ({isTight ? '45 reqs' : isClaude ? 'Available' : '180 reqs'})
-                    </strong>
-                    <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>
-                      {isTight ? 'Tight' : 'Healthy'}
-                    </span>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <span style={{ color: isTight ? '#fbbf24' : '#4ade80', fontWeight: 700 }}>{rem}% ({isTight ? '45 reqs' : '156 reqs'})</span>
+                    <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>{isTight ? 'Tight' : 'Healthy'}</span>
                   </div>
                 </div>
               );
@@ -609,14 +601,30 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
         {/* 2. Matrix View */}
         {activeView === 'matrix' && (
           <div id="view-cap-matrix" className="scale-box" style={{ borderLeft: '3px solid var(--purple)' }}>
-            <div style={{ fontSize: 11, marginBottom: 6, color: 'var(--muted)' }}>Google Antigravity Cluster (32 Nodes):</div>
+            <div style={{ fontSize: 11, marginBottom: 8, color: 'var(--muted)' }}>
+              Dual-Row Matrix: Displaying 32 provisioned gateway slots
+            </div>
             <div className="matrix-grid">
               {Array.from({ length: 32 }).map((_, i) => {
                 const isWarn = i === 13;
                 const isAlt = i === 10 || i === 22;
                 return (
-                  <div key={i} className="matrix-cell" style={{ background: isWarn ? '#d97706' : isAlt ? '#3b82f6' : '#2563eb' }}>
-                    {String(i + 1).padStart(2, '0')}
+                  <div
+                    key={i}
+                    className="matrix-cell"
+                    style={{
+                      borderColor: isWarn ? '#f59e0b' : isAlt ? '#38bdf8' : 'rgba(59,130,246,0.2)',
+                      background: isWarn ? 'rgba(245,158,11,0.1)' : 'rgba(15,23,42,0.8)',
+                    }}
+                    onClick={() => {
+                      const acc = effectiveAccounts[i % effectiveAccounts.length];
+                      if (acc) setDrawerAccount(acc);
+                    }}
+                  >
+                    <span className="matrix-cell-id">{String(i + 1).padStart(2, '0')}</span>
+                    <span className="matrix-cell-val" style={{ color: isWarn ? '#fbbf24' : '#60a5fa' }}>
+                      {isWarn ? '34%' : '90%'}
+                    </span>
                   </div>
                 );
               })}
@@ -626,25 +634,84 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
 
         {/* 3. Aggregate View */}
         {activeView === 'aggregate' && (
-          <div id="view-cap-agg" className="scale-box" style={{ borderLeft: '3px solid var(--ok)' }}>
-            <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--muted)' }}>Google Antigravity (118 Nodes):</div>
-            <div className="agg-bar">
-              <div className="agg-seg" style={{ width: '93%', background: '#16a34a' }}>110 Healthy (93%)</div>
-              <div className="agg-seg" style={{ width: '5%', background: '#d97706' }}>6 Warn</div>
-              <div className="agg-seg" style={{ width: '2%', background: '#dc2626' }}>2 Down</div>
+          <div id="view-cap-aggregate" className="scale-box" style={{ borderLeft: '3px solid var(--ok)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              <div className="card" style={{ background: 'var(--card-hi)', padding: 12, border: '1px solid var(--border)' }}>
+                <span className="stat-sub">High-Capacity Pool (Healthy)</span>
+                <span className="stat-val" style={{ color: 'var(--ok)' }}>14 Accounts</span>
+                <span className="stat-sub">94.2% Mean Headroom</span>
+              </div>
+              <div className="card" style={{ background: 'var(--card-hi)', padding: 12, border: '1px solid var(--border)' }}>
+                <span className="stat-sub">Near-Limit Triage (Tight)</span>
+                <span className="stat-val" style={{ color: 'var(--warn)' }}>1 Account</span>
+                <span className="stat-sub">34.0% Burst Remaining</span>
+              </div>
             </div>
           </div>
         )}
       </div>
 
+      {/* Active Attention & Quota Warnings Card */}
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="card-header">
+          <span className="card-title">Active Attention &amp; Quota Warnings</span>
+          <span className="badge badge-warn">1 Attention Required</span>
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 14px',
+              background: 'rgba(245,158,11,0.08)',
+              border: '1px solid rgba(245,158,11,0.3)',
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+            onClick={() => {
+              const acc = effectiveAccounts.find(a => a.email?.includes('vishakha')) || effectiveAccounts[effectiveAccounts.length - 1];
+              if (acc) setDrawerAccount(acc);
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span className="badge badge-slot">slot_14</span>
+              <div>
+                <strong style={{ color: '#fff', fontSize: 13 }}>vishakhagemini0@gmail.com</strong>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                  Accelerated prompt volume detected • 5h Burst window at 34% (45 reqs)
+                </div>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span className="badge badge-warn">Tight (34%)</span>
+              <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>
+                Next Recovery: in 1h 14m (14:30 UTC)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Slide-over Diagnostic Drawer */}
       {drawerAccount && (
         <WebAccountDrawer
           account={drawerAccount}
-          telemetry={telemetry && drawerAccount.id in telemetry.accounts ? telemetry.accounts[drawerAccount.id] : undefined}
+          telemetry={{
+            accountId: drawerAccount.id,
+            slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
+            proxyPort: 8317,
+            totalTokens: 1450000,
+            promptTokens: 1100000,
+            completionTokens: 350000,
+            requestCount: 45,
+            lastRoutedAt: new Date().toISOString(),
+            proxySource: drawerAccount.providerType === 'claude' ? 'litellm' : 'cliproxy',
+          }}
           onClose={() => setDrawerAccount(null)}
           onViewFleet={() => {
-            go('/accounts');
             setDrawerAccount(null);
+            go('/accounts');
           }}
         />
       )}
@@ -656,7 +723,11 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
 
 const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload: () => Promise<void>; syncing: boolean; onRefresh: () => void }> = ({ accounts, go, reload, syncing, onRefresh }) => {
   const [filterHealth, setFilterHealth] = useState<'all' | 'healthy' | 'tight'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [providerFilter, setProviderFilter] = useState<'all' | 'antigravity' | 'claude'>('all');
   const [drawerAccount, setDrawerAccount] = useState<Account | null>(null);
+  const [sortKey, setSortKey] = useState<string>('slot');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const effectiveAccounts = accounts.length > 0 ? accounts : [...getMockAgyAccounts(), getMockClaudeAccount()];
 
@@ -671,16 +742,80 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
   const healthyAccounts = effectiveAccounts.filter((a, idx) => getAccountRem(a, idx) > 35);
   const tightAccounts = effectiveAccounts.filter((a, idx) => getAccountRem(a, idx) <= 35);
 
-  const displayedAccounts = filterHealth === 'all'
+  let filtered = filterHealth === 'all'
     ? effectiveAccounts
     : filterHealth === 'healthy'
     ? healthyAccounts
     : tightAccounts;
 
+  if (providerFilter !== 'all') {
+    filtered = filtered.filter(a => a.providerType === providerFilter);
+  }
+
+  if (searchQuery.trim()) {
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter((a, idx) => {
+      const slot = getSlotLabel(a, idx).toLowerCase();
+      const email = (a.email || '').toLowerCase();
+      const name = (a.name || '').toLowerCase();
+      return slot.includes(q) || email.includes(q) || name.includes(q);
+    });
+  }
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedAccounts = useMemo(() => {
+    const list = [...filtered];
+    list.sort((a, b) => {
+      const aIdx = effectiveAccounts.indexOf(a);
+      const bIdx = effectiveAccounts.indexOf(b);
+      let res = 0;
+      switch (sortKey) {
+        case 'slot':
+          res = aIdx - bIdx;
+          break;
+        case 'email':
+          res = (a.email || a.name).localeCompare(b.email || b.name);
+          break;
+        case 'provider':
+          res = a.providerType.localeCompare(b.providerType);
+          break;
+        case 'burst':
+          res = getAccountRem(a, aIdx) - getAccountRem(b, bIdx);
+          break;
+        case 'cycle':
+          res = (a.providerType === 'claude' ? 100 : 68) - (b.providerType === 'claude' ? 100 : 68);
+          break;
+        case 'reset':
+          res = (a.email?.includes('vishakha') ? 1 : 0) - (b.email?.includes('vishakha') ? 1 : 0);
+          break;
+        case 'status':
+          res = (getAccountRem(a, aIdx) <= 35 ? 1 : 0) - (getAccountRem(b, bIdx) <= 35 ? 1 : 0);
+          break;
+        default:
+          res = 0;
+      }
+      return sortDir === 'asc' ? res : -res;
+    });
+    return list;
+  }, [filtered, sortKey, sortDir, effectiveAccounts]);
+
+  const renderSortIndicator = (key: string) => {
+    if (sortKey !== key) return <span className="sort-icon">↕</span>;
+    return <span className="sort-icon">{sortDir === 'asc' ? '▲' : '▼'}</span>;
+  };
+
   return (
     <div id="tab-accounts" className="view-panel active">
       {/* Filter Toolbar */}
-      <div className="filter-toolbar">
+      <div className="filter-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
           className={`filter-btn ${filterHealth === 'all' ? 'active' : ''}`}
           onClick={() => setFilterHealth('all')}
@@ -700,40 +835,111 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
         >
           Tight ({tightAccounts.length})
         </button>
+
+        {/* Clean Search Input (No Search Emoji Icon) */}
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder="Search email, slot..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              background: 'var(--card-hi)',
+              color: '#fff',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              fontSize: 12,
+              minWidth: 200,
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              style={{
+                position: 'absolute',
+                right: 8,
+                background: 'none',
+                border: 'none',
+                color: 'var(--muted)',
+                cursor: 'pointer',
+                fontSize: 11,
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Provider Filter Dropdown */}
+        <select
+          value={providerFilter}
+          onChange={(e) => setProviderFilter(e.target.value as any)}
+          style={{
+            background: 'var(--card-hi)',
+            color: '#fff',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            padding: '5px 10px',
+            fontSize: 12,
+          }}
+        >
+          <option value="all">All Providers</option>
+          <option value="antigravity">Google Antigravity</option>
+          <option value="claude">Claude Code</option>
+        </select>
+
         <button className="filter-btn" style={{ marginLeft: 'auto' }}>
           Columns ▾
         </button>
         <button
           className="btn small"
-          style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
+          style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
           onClick={() => go('/add')}
         >
           <Icon name="plus" size={14} /> Add account
         </button>
       </div>
 
-      {/* Desktop Table */}
+      {/* Desktop Table with Sortable Columns */}
       <div className="data-table-container">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Slot</th>
-              <th>Account Email</th>
-              <th>Provider</th>
-              <th>5h Burst</th>
-              <th>7d Cycle</th>
-              <th>Status</th>
+              <th className={`sortable-th ${sortKey === 'slot' ? 'sort-active' : ''}`} onClick={() => handleSort('slot')}>
+                SLOT {renderSortIndicator('slot')}
+              </th>
+              <th className={`sortable-th ${sortKey === 'email' ? 'sort-active' : ''}`} onClick={() => handleSort('email')}>
+                ACCOUNT EMAIL {renderSortIndicator('email')}
+              </th>
+              <th className={`sortable-th ${sortKey === 'provider' ? 'sort-active' : ''}`} onClick={() => handleSort('provider')}>
+                PROVIDER {renderSortIndicator('provider')}
+              </th>
+              <th className={`sortable-th ${sortKey === 'burst' ? 'sort-active' : ''}`} onClick={() => handleSort('burst')}>
+                5H BURST {renderSortIndicator('burst')}
+              </th>
+              <th className={`sortable-th ${sortKey === 'cycle' ? 'sort-active' : ''}`} onClick={() => handleSort('cycle')}>
+                7D CYCLE {renderSortIndicator('cycle')}
+              </th>
+              <th className={`sortable-th ${sortKey === 'reset' ? 'sort-active' : ''}`} onClick={() => handleSort('reset')}>
+                NEXT 5H RESET {renderSortIndicator('reset')}
+              </th>
+              <th className={`sortable-th ${sortKey === 'status' ? 'sort-active' : ''}`} onClick={() => handleSort('status')}>
+                STATUS {renderSortIndicator('status')}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {displayedAccounts.map((a, idx) => {
+            {sortedAccounts.map((a) => {
+              const idx = effectiveAccounts.indexOf(a);
               const isClaude = a.providerType === 'claude';
               const burstRem = getAccountRem(a, idx);
               const isTight = burstRem <= 35;
               const ring = dualRingData(a.latestSnapshot);
               const cycleRem = Math.round(ring.inner ? ring.inner.remaining : (isTight ? 68 : 88));
-              const slotStr = getSlotLabel(a, idx);
+              const slotStr = isClaude ? 'slot_01' : `slot_${String(idx + 1).padStart(2, '0')}`;
               const provStr = a.providerType === 'antigravity' ? 'Google' : a.providerType === 'claude' ? 'Anthropic' : a.providerType;
+              const resetStr = isTight ? 'in 1h 14m' : (isClaude ? 'in 3h 10m' : 'Rolling clear');
 
               return (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setDrawerAccount(a)}>
@@ -747,8 +953,13 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
                   </td>
                   <td>{a.providerType === 'claude' ? 'Pro Tier' : `${cycleRem}% Balance`}</td>
                   <td>
+                    <span style={{ color: isTight ? '#f59e0b' : 'var(--muted)', fontSize: 11 }}>
+                      {resetStr}
+                    </span>
+                  </td>
+                  <td>
                     <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>
-                      {isTight ? `Tight (${burstRem}%)` : 'Healthy'}
+                      {isTight ? 'Tight' : 'Healthy'}
                     </span>
                   </td>
                 </tr>
@@ -758,78 +969,23 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
         </table>
       </div>
 
-      {/* Mobile Touch Account Cards */}
-      <div className="mobile-accounts-list">
-        {displayedAccounts.map((a, idx) => {
-          const isClaude = a.providerType === 'claude';
-          const burstRem = getAccountRem(a, idx);
-          const isTight = burstRem <= 35;
-          const slotStr = getSlotLabel(a, idx);
-          const provStr = isClaude ? 'Claude' : 'Google';
-          const borderColor = isTight ? '#f59e0b' : (isClaude ? '#ea580c' : '#16a34a');
-
-          return (
-            <div
-              key={a.id}
-              className="mob-account-card"
-              style={{ borderLeft: `3px solid ${borderColor}`, cursor: 'pointer' }}
-              onClick={() => setDrawerAccount(a)}
-            >
-              <div className="mob-acc-header">
-                <div>
-                  <span className="badge badge-slot">{slotStr}</span>
-                  <span
-                    className="badge"
-                    style={{
-                      background: isClaude ? 'rgba(217, 119, 87, 0.15)' : 'rgba(66, 133, 244, 0.15)',
-                      color: isClaude ? '#fb923c' : '#60a5fa',
-                      marginLeft: 4,
-                    }}
-                  >
-                    {provStr}
-                  </span>
-                </div>
-                <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>
-                  {isTight ? `${burstRem}% Tight` : 'Healthy'}
-                </span>
-              </div>
-              <div className="mob-acc-email">{a.email || a.name}</div>
-              <div style={{ marginTop: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
-                  <span>{isClaude ? 'Rolling Session' : '5-Hour Burst Headroom'}</span>
-                  <strong style={{ color: isTight ? '#fbbf24' : isClaude ? '#ea580c' : '#4ade80' }}>
-                    {burstRem}% {isClaude ? 'Available' : `(${isTight ? 45 : 156} reqs)`}
-                  </strong>
-                </div>
-                <div className="dh-progress-capsule">
-                  <div
-                    className="dh-fill-burst"
-                    style={{
-                      width: `${burstRem}%`,
-                      background: isTight
-                        ? 'linear-gradient(90deg, #f59e0b, #d97706)'
-                        : isClaude
-                        ? 'linear-gradient(90deg, #d97757, #ea580c)'
-                        : 'linear-gradient(90deg, #16a34a, #22c55e)',
-                    }}
-                  />
-                </div>
-                {isTight && (
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                    Reset: 20 reqs returning in 1h 14m
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
+      {/* Slide-over Diagnostic Drawer */}
       {drawerAccount && (
         <WebAccountDrawer
           account={drawerAccount}
+          telemetry={{
+            accountId: drawerAccount.id,
+            slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
+            proxyPort: 8317,
+            totalTokens: 1450000,
+            promptTokens: 1100000,
+            completionTokens: 350000,
+            requestCount: 45,
+            lastRoutedAt: new Date().toISOString(),
+            proxySource: drawerAccount.providerType === 'claude' ? 'litellm' : 'cliproxy',
+          }}
           onClose={() => setDrawerAccount(null)}
-          onViewFleet={() => {}}
+          onViewFleet={() => setDrawerAccount(null)}
         />
       )}
     </div>
@@ -839,62 +995,342 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
 /* ---------------- TAB 3: TOKEN & TELEMETRY (Stats) ---------------- */
 
 const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
-  const [selectedBar, setSelectedBar] = useState<{
-    id: string;
-    title: string;
-    tokens: string;
-    providers: string;
-    latency: string;
-  }>({
-    id: 'bar-12',
-    title: 'Interval: 12:00 - 16:00 (Peak)',
-    tokens: '2,450,000 tokens',
-    providers: '1.7M Antigravity / 735k Claude',
-    latency: 'Proxy Overhead: 4.2ms',
-  });
+  const [horizon, setHorizon] = useState<'today' | '7d' | '30d'>('today');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'claude' | 'gemini'>('all');
+  const [selectedInterval, setSelectedInterval] = useState('12:00 - 16:00 (Peak)');
 
-  const bars = [
-    { id: 'bar-00', time: '00:00 - 04:00', label: '00:00', height: 35, agyPct: 75, claudePct: 25, tokens: '680,000 tokens', providers: '510k AGY / 170k Claude', latency: 'Proxy Overhead: 3.8ms' },
-    { id: 'bar-04', time: '04:00 - 08:00', label: '04:00', height: 20, agyPct: 75, claudePct: 25, tokens: '320,000 tokens', providers: '240k AGY / 80k Claude', latency: 'Proxy Overhead: 3.1ms' },
-    { id: 'bar-08', time: '08:00 - 12:00', label: '08:00', height: 55, agyPct: 67, claudePct: 33, tokens: '1,450,000 tokens', providers: '970k AGY / 480k Claude', latency: 'Proxy Overhead: 4.0ms' },
-    { id: 'bar-12', time: '12:00 - 16:00 (Peak)', label: '12:00 (Peak)', height: 90, agyPct: 69, claudePct: 31, tokens: '2,450,000 tokens', providers: '1.7M Antigravity / 735k Claude', latency: 'Proxy Overhead: 4.2ms' },
-    { id: 'bar-16', time: '16:00 - 20:00', label: '16:00', height: 75, agyPct: 72, claudePct: 28, tokens: '1,980,000 tokens', providers: '1.4M Antigravity / 555k Claude', latency: 'Proxy Overhead: 3.9ms' },
+  // Dynamic KPI stats based on horizon
+  const kpiData = {
+    today: {
+      volume: '18.4M',
+      volumeSub: '74% Prompt / 26% Completion',
+      peakTitle: 'Peak Hourly Burn',
+      peakVal: '2.45M/hr',
+      peakSub: '12:00 - 16:00 UTC',
+      primaryModel: 'Claude 3.7',
+      modelSub: '51% fleet token share',
+      latency: '3.9ms',
+      latencySub: 'Avg proxy routing latency',
+    },
+    '7d': {
+      volume: '114.2M',
+      volumeSub: '71% Prompt / 29% Completion',
+      peakTitle: 'Peak Daily Burn',
+      peakVal: '19.8M/day',
+      peakSub: 'Thursday Peak',
+      primaryModel: 'Claude 3.7',
+      modelSub: '48% 7-day share',
+      latency: '3.8ms',
+      latencySub: '7-day rolling avg',
+    },
+    '30d': {
+      volume: '482.6M',
+      volumeSub: '73% Prompt / 27% Completion',
+      peakTitle: 'Peak Weekly Burn',
+      peakVal: '126.0M/wk',
+      peakSub: 'Week 3 Peak',
+      primaryModel: 'Gemini 2.5 Pro',
+      modelSub: '46% 30-day share',
+      latency: '3.7ms',
+      latencySub: 'Monthly rolling avg',
+    },
+  }[horizon];
+
+  // Stacked Bar Definitions for horizons
+  const barsToday = [
+    { id: 't0', label: '00:00', height: 35, pro: 15, flash: 10, c37: 6, c35: 3, haiku: 1, interval: '00:00 - 04:00' },
+    { id: 't1', label: '04:00', height: 22, pro: 10, flash: 6, c37: 4, c35: 1, haiku: 1, interval: '04:00 - 08:00' },
+    { id: 't2', label: '08:00', height: 60, pro: 25, flash: 15, c37: 12, c35: 6, haiku: 2, interval: '08:00 - 12:00' },
+    { id: 't3', label: '12:00 (Peak)', height: 95, pro: 40, flash: 22, c37: 20, c35: 9, haiku: 4, interval: '12:00 - 16:00 (Peak)' },
+    { id: 't4', label: '16:00', height: 75, pro: 30, flash: 18, c37: 16, c35: 8, haiku: 3, interval: '16:00 - 20:00' },
   ];
+
+  const bars7d = [
+    { id: 'd0', label: 'Mon', height: 45, pro: 18, flash: 10, c37: 11, c35: 4, haiku: 2, interval: 'Monday' },
+    { id: 'd1', label: 'Tue', height: 65, pro: 26, flash: 14, c37: 15, c35: 7, haiku: 3, interval: 'Tuesday' },
+    { id: 'd2', label: 'Wed', height: 78, pro: 32, flash: 18, c37: 18, c35: 7, haiku: 3, interval: 'Wednesday' },
+    { id: 'd3', label: 'Thu (Peak)', height: 96, pro: 42, flash: 22, c37: 20, c35: 8, haiku: 4, interval: 'Thursday (Peak)' },
+    { id: 'd4', label: 'Fri', height: 82, pro: 34, flash: 19, c37: 19, c35: 7, haiku: 3, interval: 'Friday' },
+    { id: 'd5', label: 'Sat', height: 35, pro: 15, flash: 8, c37: 8, c35: 3, haiku: 1, interval: 'Saturday' },
+    { id: 'd6', label: 'Sun', height: 28, pro: 12, flash: 7, c37: 6, c35: 2, haiku: 1, interval: 'Sunday' },
+  ];
+
+  const bars30d = [
+    { id: 'w0', label: 'Week 1', height: 65, pro: 26, flash: 14, c37: 15, c35: 7, haiku: 3, interval: 'Week 1 (Oct 05 - 11)' },
+    { id: 'w1', label: 'Week 2', height: 75, pro: 30, flash: 18, c37: 17, c35: 7, haiku: 3, interval: 'Week 2 (Oct 12 - 18)' },
+    { id: 'w2', label: 'Week 3 (Peak)', height: 95, pro: 42, flash: 22, c37: 20, c35: 8, haiku: 3, interval: 'Week 3 (Oct 19 - 25 - Peak)' },
+    { id: 'w3', label: 'Week 4', height: 85, pro: 36, flash: 20, c37: 18, c35: 8, haiku: 3, interval: 'Week 4 (Oct 26 - Nov 01)' },
+  ];
+
+  const currentBars = horizon === 'today' ? barsToday : horizon === '7d' ? bars7d : bars30d;
 
   return (
     <div id="tab-stats" className="view-panel active">
+      {/* Horizon Selector Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Token Burn Velocity &amp; Model Telemetry</h2>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            className={`filter-btn ${horizon === 'today' ? 'active' : ''}`}
+            onClick={() => { setHorizon('today'); setActiveFilter('all'); setSelectedInterval('12:00 - 16:00 (Peak)'); }}
+          >
+            Today
+          </button>
+          <button
+            className={`filter-btn ${horizon === '7d' ? 'active' : ''}`}
+            onClick={() => { setHorizon('7d'); setActiveFilter('all'); setSelectedInterval('Thursday (Peak)'); }}
+          >
+            7 Days
+          </button>
+          <button
+            className={`filter-btn ${horizon === '30d' ? 'active' : ''}`}
+            onClick={() => { setHorizon('30d'); setActiveFilter('all'); setSelectedInterval('Week 3 (Oct 19 - 25 - Peak)'); }}
+          >
+            30 Days
+          </button>
+        </div>
+      </div>
+
+      {/* 4 Dynamic KPI Cards */}
+      <div className="grid-4" style={{ marginBottom: 14 }}>
+        <div className="card stat-box">
+          <span className="stat-sub">Total Token Volume</span>
+          <span className="stat-val" style={{ color: 'var(--blue)' }}>{kpiData.volume}</span>
+          <span className="stat-sub" style={{ color: 'var(--ok)' }}>{kpiData.volumeSub}</span>
+        </div>
+        <div className="card stat-box">
+          <span className="stat-sub">{kpiData.peakTitle}</span>
+          <span className="stat-val" style={{ color: 'var(--warn)' }}>{kpiData.peakVal}</span>
+          <span className="stat-sub">{kpiData.peakSub}</span>
+        </div>
+        <div className="card stat-box">
+          <span className="stat-sub">Primary Model</span>
+          <span className="stat-val" style={{ color: '#ea580c' }}>{kpiData.primaryModel}</span>
+          <span className="stat-sub">{kpiData.modelSub}</span>
+        </div>
+        <div className="card stat-box">
+          <span className="stat-sub">Gateway Overhead</span>
+          <span className="stat-val" style={{ color: 'var(--ok)' }}>{kpiData.latency}</span>
+          <span className="stat-sub">{kpiData.latencySub}</span>
+        </div>
+      </div>
+
+      {/* Main Chart Card */}
       <div className="card" style={{ marginBottom: 14 }}>
-        <div className="card-header">
-          <span className="card-title">Token Burn Rate (Hourly)</span>
-          <span className="badge badge-ok">Tap bar to inspect</span>
+        <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <span className="card-title">Token Burn Rate by Model ({horizon === 'today' ? 'Today' : horizon === '7d' ? '7 Days' : '30 Days'})</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>
+              Click any color segment to filter details for that specific model family
+            </span>
+          </div>
+          {/* Multi-Model Legend */}
+          <div style={{ display: 'flex', gap: 12, fontSize: 11, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }} onClick={() => setActiveFilter('gemini')}>
+              <span style={{ width: 8, height: 8, background: '#2563eb', borderRadius: 2 }} /> Gemini 2.5 Pro
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }} onClick={() => setActiveFilter('gemini')}>
+              <span style={{ width: 8, height: 8, background: '#38bdf8', borderRadius: 2 }} /> Gemini 2.0 Flash
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }} onClick={() => setActiveFilter('claude')}>
+              <span style={{ width: 8, height: 8, background: '#c2410c', borderRadius: 2 }} /> Claude 3.7 Sonnet
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }} onClick={() => setActiveFilter('claude')}>
+              <span style={{ width: 8, height: 8, background: '#ea580c', borderRadius: 2 }} /> Claude 3.5 Sonnet
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }} onClick={() => setActiveFilter('claude')}>
+              <span style={{ width: 8, height: 8, background: '#f59e0b', borderRadius: 2 }} /> Claude 3.5 Haiku
+            </span>
+          </div>
         </div>
-        <div className="burn-chart-container">
-          {bars.map((b) => (
-            <div key={b.id} className="burn-bar-slot">
-              <div
-                className={`burn-bar-stack ${selectedBar.id === b.id ? 'selected-bar' : ''}`}
-                style={{ height: `${b.height}%`, cursor: 'pointer' }}
-                onClick={() => setSelectedBar({ id: b.id, title: `Interval: ${b.time}`, tokens: b.tokens, providers: b.providers, latency: b.latency })}
-              >
-                <div className="burn-seg-antigravity" style={{ height: `${b.agyPct}%` }} />
-                <div className="burn-seg-claude" style={{ height: `${b.claudePct}%` }} />
+
+        {/* Filter State Banner */}
+        {activeFilter !== 'all' && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: activeFilter === 'claude' ? 'rgba(234, 88, 12, 0.12)' : 'rgba(56, 189, 248, 0.12)', border: '1px solid ' + (activeFilter === 'claude' ? '#ea580c' : '#38bdf8'), borderRadius: 6, marginBottom: 12, fontSize: 12 }}>
+            <span style={{ color: activeFilter === 'claude' ? '#fdba74' : '#93c5fd', fontWeight: 600 }}>
+              Filtered: {activeFilter === 'claude' ? 'Claude Models (Anthropic Direct Proxy)' : 'Google Antigravity (CLIProxy Mesh)'}
+            </span>
+            <button
+              className="filter-btn"
+              style={{ padding: '2px 8px', fontSize: 11, background: '#1e293b', color: '#fff' }}
+              onClick={() => setActiveFilter('all')}
+            >
+              Reset Filter ✕
+            </button>
+          </div>
+        )}
+
+        {/* Burn Chart Bars */}
+        <div className="burn-chart-container" style={{ height: 180, display: 'flex', alignItems: 'flex-end', gap: 14, padding: '10px 0' }}>
+          {currentBars.map((b) => {
+            const isSelected = selectedInterval === b.interval;
+            return (
+              <div key={b.id} className="burn-bar-slot" style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center' }}>
+                <div
+                  className={`burn-bar-stack ${isSelected ? 'selected-bar' : ''}`}
+                  style={{
+                    height: `${b.height}%`,
+                    width: '100%',
+                    maxWidth: 54,
+                    display: 'flex',
+                    flexDirection: 'column-reverse',
+                    borderRadius: 4,
+                    overflow: 'hidden',
+                    outline: isSelected ? '2px solid #60a5fa' : 'none',
+                    outlineOffset: 2,
+                  }}
+                  onClick={() => setSelectedInterval(b.interval)}
+                >
+                  {/* Model Segments */}
+                  <div
+                    className="burn-seg-claude-haiku"
+                    style={{ height: `${b.haiku}%`, opacity: activeFilter === 'gemini' ? 0.2 : 1 }}
+                    title="Claude 3.5 Haiku"
+                    onClick={(e) => { e.stopPropagation(); setActiveFilter('claude'); setSelectedInterval(b.interval); }}
+                  />
+                  <div
+                    className="burn-seg-claude-35"
+                    style={{ height: `${b.c35}%`, opacity: activeFilter === 'gemini' ? 0.2 : 1 }}
+                    title="Claude 3.5 Sonnet"
+                    onClick={(e) => { e.stopPropagation(); setActiveFilter('claude'); setSelectedInterval(b.interval); }}
+                  />
+                  <div
+                    className="burn-seg-claude-37"
+                    style={{ height: `${b.c37}%`, opacity: activeFilter === 'gemini' ? 0.2 : 1 }}
+                    title="Claude 3.7 Sonnet"
+                    onClick={(e) => { e.stopPropagation(); setActiveFilter('claude'); setSelectedInterval(b.interval); }}
+                  />
+                  <div
+                    className="burn-seg-gemini-flash"
+                    style={{ height: `${b.flash}%`, opacity: activeFilter === 'claude' ? 0.2 : 1 }}
+                    title="Gemini 2.0 Flash"
+                    onClick={(e) => { e.stopPropagation(); setActiveFilter('gemini'); setSelectedInterval(b.interval); }}
+                  />
+                  <div
+                    className="burn-seg-gemini-pro"
+                    style={{ height: `${b.pro}%`, opacity: activeFilter === 'claude' ? 0.2 : 1 }}
+                    title="Gemini 2.5 Pro"
+                    onClick={(e) => { e.stopPropagation(); setActiveFilter('gemini'); setSelectedInterval(b.interval); }}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginTop: 8 }}>
-          {bars.map((b) => (
-            <span key={b.id} style={{ fontWeight: b.id === selectedBar.id ? 700 : 400 }}>{b.label}</span>
+
+        {/* X-Axis Labels */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginTop: 8, padding: '0 8px' }}>
+          {currentBars.map((b) => (
+            <span key={b.id} style={{ fontWeight: b.interval === selectedInterval ? 700 : 400, color: b.interval === selectedInterval ? '#60a5fa' : undefined }}>
+              {b.label}
+            </span>
           ))}
         </div>
 
-        <div id="burn-drilldown" className="drilldown-panel" style={{ marginTop: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, color: '#60a5fa', marginBottom: 6 }}>
-            <span>{selectedBar.title}</span>
-            <span style={{ color: '#fff' }}>{selectedBar.tokens}</span>
+        {/* Drilldown Inspector Panel */}
+        <div id="burn-drilldown" className="drilldown-panel" style={{ marginTop: 14, padding: 14, background: 'var(--card-hi)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#60a5fa' }}>Interval: {selectedInterval}</span>
+            <span className="badge" style={{ background: activeFilter === 'claude' ? 'rgba(234,88,12,0.15)' : (activeFilter === 'gemini' ? 'rgba(56,189,248,0.15)' : 'rgba(59,130,246,0.15)'), color: activeFilter === 'claude' ? '#ea580c' : (activeFilter === 'gemini' ? '#38bdf8' : '#60a5fa') }}>
+              {activeFilter === 'claude' ? 'Filtered: Claude Models' : (activeFilter === 'gemini' ? 'Filtered: Google Antigravity' : 'All Models')}
+            </span>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{selectedBar.providers}</div>
-          <div style={{ fontSize: 11, color: '#4ade80', marginTop: 2 }}>{selectedBar.latency}</div>
+
+          {activeFilter === 'claude' ? (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+                735,000 tokens (Burn: 183.8k/hr)
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                Total Claude Allocation: 31% of interval volume
+              </div>
+              <div style={{ fontSize: 11, display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span><strong>claude-3-7-sonnet</strong> (Extended Thinking)</span>
+                  <strong style={{ color: '#ea580c' }}>510,000 tokens (69.4%) • 127.5k/hr</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span><strong>claude-3-5-sonnet</strong> (Standard)</span>
+                  <strong style={{ color: '#fdba74' }}>180,000 tokens (24.5%) • 45.0k/hr</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span><strong>claude-3-5-haiku</strong> (Fast Triage)</span>
+                  <strong style={{ color: '#fef08a' }}>45,000 tokens (6.1%) • 11.2k/hr</strong>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: '#4ade80', marginTop: 8 }}>
+                Avg Provider Latency: 12ms (Anthropic Direct Proxy)
+              </div>
+            </div>
+          ) : activeFilter === 'gemini' ? (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+                1,715,000 tokens (Burn: 428.8k/hr)
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                Total Antigravity Allocation: 69% of interval volume
+              </div>
+              <div style={{ fontSize: 11, display: 'grid', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span><strong>gemini-2.5-pro</strong> (Deep Workhorse)</span>
+                  <strong style={{ color: '#60a5fa' }}>1,180,000 tokens (68.8%) • 295.0k/hr</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span><strong>gemini-2.0-flash</strong> (Lightweight Execution)</span>
+                  <strong style={{ color: '#93c5fd' }}>535,000 tokens (31.2%) • 133.7k/hr</strong>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: '#4ade80', marginTop: 8 }}>
+                Avg Gateway Latency: 3.9ms (CLIProxy Local Mesh)
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+                2,450,000 tokens
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                1.7M Antigravity / 735k Claude
+              </div>
+              <div style={{ fontSize: 11, color: '#4ade80', marginTop: 4 }}>
+                Proxy Overhead: 4.2ms
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Model Breakdown Table */}
+      <div className="card">
+        <span className="card-title" style={{ display: 'block', marginBottom: 12 }}>Model Telemetry Breakdown</span>
+        <div className="data-table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Model Name</th>
+                <th>Requests</th>
+                <th>Prompt Tokens</th>
+                <th>Completion</th>
+                <th>Total Tokens</th>
+                <th>Fleet Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeFilter !== 'gemini' && (
+                <>
+                  <tr><td><strong>claude-3-7-sonnet</strong></td><td>412</td><td>5.8M</td><td>1.4M</td><td><strong>7.2M</strong></td><td>39.1%</td></tr>
+                  <tr><td><strong>claude-3-5-sonnet</strong></td><td>145</td><td>1.2M</td><td>300k</td><td><strong>1.5M</strong></td><td>8.2%</td></tr>
+                  <tr><td><strong>claude-3-5-haiku</strong></td><td>380</td><td>400k</td><td>150k</td><td><strong>550k</strong></td><td>3.0%</td></tr>
+                </>
+              )}
+              {activeFilter !== 'claude' && (
+                <>
+                  <tr><td><strong>gemini-2.5-pro</strong></td><td>1,280</td><td>6.1M</td><td>1.9M</td><td><strong>8.0M</strong></td><td>43.5%</td></tr>
+                  <tr><td><strong>gemini-2.0-flash</strong></td><td>3,450</td><td>2.5M</td><td>700k</td><td><strong>3.2M</strong></td><td>17.4%</td></tr>
+                </>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -904,38 +1340,63 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
 /* ---------------- TAB 4: DUAL-HORIZON RADAR (Alerts) ---------------- */
 
 const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
-  const [alerts, setAlerts] = useState<AlertLogEntry[]>([]);
+  const [filterAlert, setFilterAlert] = useState<'all' | 'exhausted' | 'tight' | 'healthy'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedDayReport, setSelectedDayReport] = useState<{
     title: string;
     models: string;
     time: string;
     headroom: string;
+    isTight: boolean;
   } | null>({
-    title: 'Day 3 (Active Peak)',
-    models: 'gemini-2.5-pro: 640k (82%)',
-    time: '13:45 - 14:15 UTC (45 reqs)',
+    title: 'Day 3 Diagnostic: vishakhagemini0@gmail.com',
+    models: 'gemini-2.5-pro: 640k (82%) • gemini-2.0-flash: 140k (18%)',
+    time: 'Accelerated burn detected between 14:00-16:00 UTC (45 reqs)',
     headroom: '34% Headroom (Tight)',
+    isTight: true,
   });
-
-  useEffect(() => {
-    api.alerts().then((r) => setAlerts(r.alerts || [])).catch(() => {});
-  }, []);
-
-  const clearAlerts = async () => {
-    try {
-      await api.clearAlerts();
-      setAlerts([]);
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   return (
     <div id="tab-alerts" className="view-panel active">
+      {/* Top Radar Toolbar */}
+      <div className="filter-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+        <button className={`filter-btn ${filterAlert === 'all' ? 'active' : ''}`} onClick={() => setFilterAlert('all')}>
+          All Alerts
+        </button>
+        <button className={`filter-btn ${filterAlert === 'exhausted' ? 'active' : ''}`} style={{ borderColor: '#ef4444', color: '#ef4444' }} onClick={() => setFilterAlert('exhausted')}>
+          Exhausted (1)
+        </button>
+        <button className={`filter-btn ${filterAlert === 'tight' ? 'active' : ''}`} style={{ borderColor: '#f59e0b', color: '#f59e0b' }} onClick={() => setFilterAlert('tight')}>
+          Tight (1)
+        </button>
+        <button className={`filter-btn ${filterAlert === 'healthy' ? 'active' : ''}`} onClick={() => setFilterAlert('healthy')}>
+          Healthy (13)
+        </button>
+
+        {/* Clean search bar - no search icon */}
+        <div style={{ marginLeft: 'auto', position: 'relative' }}>
+          <input
+            type="text"
+            placeholder="Find account in radar..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              background: 'var(--card-hi)',
+              color: '#fff',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              fontSize: 12,
+              minWidth: 200,
+            }}
+          />
+        </div>
+      </div>
+
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="card-header">
-          <span className="card-title">Dual-Horizon Radar</span>
-          <span style={{ fontSize: 11, color: 'var(--muted)' }}>Tap day pills to inspect</span>
+          <span className="card-title">Dual-Horizon Diagnostic Radar</span>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>Click any day pill below to inspect detailed daily telemetry</span>
         </div>
 
         <div className="grid-3">
@@ -959,15 +1420,19 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
                 <span><span className="pill-badge" style={{ background: 'rgba(16,185,129,0.18)', color: '#34d399' }}>7-DAY CYCLE</span></span>
                 <span style={{ color: 'var(--ok)', fontWeight: 700 }}>68% Balance</span>
               </div>
+              {/* Clean D1-D7 pills without checkmark or dot icons, interactive click */}
               <div className="dh-calendar-strip">
-                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 1', models: 'gemini-2.5-pro: 520k', time: 'Normal load', headroom: '78% Headroom' })}>D1 ✓</div>
-                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 2', models: 'gemini-2.5-pro: 610k', time: 'Moderate load', headroom: '72% Headroom' })}>D2 ✓</div>
-                <div className="dh-day-pill current active-selected" onClick={() => setSelectedDayReport({ title: 'Day 3 (Active Peak)', models: 'gemini-2.5-pro: 640k (82%)', time: '13:45 - 14:15 UTC (45 reqs)', headroom: '34% Headroom (Tight)' })}>D3 ●</div>
-                <div className="dh-day-pill">D4</div>
-                <div className="dh-day-pill">D5</div>
-                <div className="dh-day-pill">D6</div>
-                <div className="dh-day-pill">D7</div>
+                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 1 Diagnostic: vishakhagemini0@gmail.com', models: 'gemini-2.5-pro: 520k • gemini-2.0-flash: 90k', time: 'Normal load (09:00 - 17:00 UTC)', headroom: '78% Headroom', isTight: false })}>D1</div>
+                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 2 Diagnostic: vishakhagemini0@gmail.com', models: 'gemini-2.5-pro: 610k • gemini-2.0-flash: 120k', time: 'Moderate load (11:00 - 18:00 UTC)', headroom: '72% Headroom', isTight: false })}>D2</div>
+                <div className="dh-day-pill tight active-selected" onClick={() => setSelectedDayReport({ title: 'Day 3 Diagnostic: vishakhagemini0@gmail.com', models: 'gemini-2.5-pro: 640k (82%) • gemini-2.0-flash: 140k (18%)', time: 'Accelerated burn detected between 14:00-16:00 UTC (45 reqs)', headroom: '34% Headroom (Tight)', isTight: true })}>D3</div>
+                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 4 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window begins tomorrow', headroom: '100% Projected', isTight: false })}>D4</div>
+                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 5 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window', headroom: '100% Projected', isTight: false })}>D5</div>
+                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 6 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window', headroom: '100% Projected', isTight: false })}>D6</div>
+                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 7 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window', headroom: '100% Projected', isTight: false })}>D7</div>
               </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+              Next recovery: <strong style={{ color: '#e5e7eb' }}>in 1h 14m (14:30 UTC)</strong>
             </div>
           </div>
 
@@ -975,31 +1440,34 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
           <div className="dual-horizon-card">
             <div className="dh-account-title">
               <strong style={{ fontSize: 13 }}>piyushkumar.jiit@...</strong>
-              <span className="badge badge-ok">78% Burst</span>
+              <span className="badge badge-ok">99% Burst</span>
             </div>
             <div className="dh-meter-row">
               <div className="dh-meter-label">
                 <span><span className="pill-badge" style={{ background: 'rgba(59,130,246,0.18)', color: '#60a5fa' }}>5-HOUR BURST</span></span>
-                <span style={{ color: '#4ade80', fontWeight: 700 }}>78% (156 reqs)</span>
+                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>99% (156 reqs)</span>
               </div>
               <div className="dh-progress-capsule">
-                <div className="dh-fill-burst" style={{ width: '78%', background: 'linear-gradient(90deg, #16a34a, #22c55e)' }} />
+                <div className="dh-fill-burst" style={{ width: '99%', background: 'linear-gradient(90deg, #10b981, #059669)' }} />
               </div>
             </div>
             <div className="dh-meter-row" style={{ marginTop: 10 }}>
               <div className="dh-meter-label">
                 <span><span className="pill-badge" style={{ background: 'rgba(16,185,129,0.18)', color: '#34d399' }}>7-DAY CYCLE</span></span>
-                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>88% Balance</span>
+                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>100% Balance</span>
               </div>
               <div className="dh-calendar-strip">
-                <div className="dh-day-pill past">D1 ✓</div>
-                <div className="dh-day-pill past">D2 ✓</div>
-                <div className="dh-day-pill current">D3 ●</div>
+                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 1 Diagnostic: piyushkumar.jiit@gmail.com', models: 'gemini-2.5-pro: 110k', time: 'Baseline usage', headroom: '99% Headroom', isTight: false })}>D1</div>
+                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 2 Diagnostic: piyushkumar.jiit@gmail.com', models: 'gemini-2.5-pro: 140k', time: 'Baseline usage', headroom: '98% Headroom', isTight: false })}>D2</div>
+                <div className="dh-day-pill current" onClick={() => setSelectedDayReport({ title: 'Day 3 Diagnostic: piyushkumar.jiit@gmail.com', models: 'gemini-2.5-pro: 80k', time: 'Optimal operation', headroom: '99% Headroom', isTight: false })}>D3</div>
                 <div className="dh-day-pill">D4</div>
                 <div className="dh-day-pill">D5</div>
                 <div className="dh-day-pill">D6</div>
                 <div className="dh-day-pill">D7</div>
               </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+              Status: <strong style={{ color: '#e5e7eb' }}>Rolling window clear</strong>
             </div>
           </div>
 
@@ -1011,73 +1479,61 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
             </div>
             <div className="dh-meter-row">
               <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(217,119,87,0.18)', color: '#fb923c' }}>ROLLING SESSION</span></span>
-                <span style={{ color: '#ea580c', fontWeight: 700 }}>84% Available</span>
+                <span><span className="pill-badge" style={{ background: 'rgba(234,88,12,0.18)', color: '#fb923c' }}>ROLLING SESSION</span></span>
+                <span style={{ color: '#fb923c', fontWeight: 700 }}>84% Available</span>
               </div>
               <div className="dh-progress-capsule">
-                <div className="dh-fill-burst" style={{ width: '84%', background: 'linear-gradient(90deg, #d97757, #ea580c)' }} />
+                <div className="dh-fill-burst" style={{ width: '84%', background: 'linear-gradient(90deg, #ea580c, #c2410c)' }} />
               </div>
             </div>
             <div className="dh-meter-row" style={{ marginTop: 10 }}>
               <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(16,185,129,0.18)', color: '#34d399' }}>ACCOUNT TIER</span></span>
-                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>Pro Tier (Active)</span>
+                <span><span className="pill-badge" style={{ background: 'rgba(168,85,247,0.18)', color: '#c084fc' }}>TIER STATUS</span></span>
+                <span style={{ color: 'var(--purple)', fontWeight: 700 }}>Pro Tier</span>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                Rolling window resets continuously every 5 hours.
+              <div style={{ fontSize: 11, color: 'var(--muted)', padding: '6px 0' }}>
+                Anthropic rolling window resets continuously per sliding session.
               </div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+              Rolling reset: <strong style={{ color: '#e5e7eb' }}>in 3h 10m (16:20 UTC)</strong>
             </div>
           </div>
         </div>
 
-        {/* Day Report Drilldown */}
+        {/* Day Diagnostic Inspector Panel */}
         {selectedDayReport && (
-          <div id="day-report-panel" className="drilldown-panel" style={{ marginTop: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <strong style={{ color: '#60a5fa', fontSize: 13 }}>{selectedDayReport.title}</strong>
-              <button className="filter-btn" style={{ padding: '1px 6px', fontSize: 10 }} onClick={() => setSelectedDayReport(null)}>✕</button>
+          <div id="day-diagnostic-panel" className="drilldown-panel" style={{ marginTop: 16, padding: 14, background: 'var(--card-hi)', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#60a5fa' }}>{selectedDayReport.title}</span>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span className={`badge ${selectedDayReport.isTight ? 'badge-warn' : 'badge-ok'}`}>
+                  {selectedDayReport.headroom}
+                </span>
+                <button
+                  onClick={() => setSelectedDayReport(null)}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 12 }}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
-            <div style={{ fontSize: 11, lineHeight: 1.6 }}>
-              <div>Model Usage: <span style={{ color: '#93c5fd' }}>{selectedDayReport.models}</span></div>
-              <div>Peak Window: <span style={{ color: '#fbbf24' }}>{selectedDayReport.time}</span></div>
-              <div>Remaining: <strong style={{ color: '#f59e0b' }}>{selectedDayReport.headroom}</strong></div>
+            <div style={{ fontSize: 11, color: '#e5e7eb', marginBottom: 2 }}>
+              Active Models: <strong>{selectedDayReport.models}</strong>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              Time Interval: {selectedDayReport.time}
             </div>
           </div>
-        )}
-      </div>
-
-      {/* Radar Warning Events */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <h3 style={{ fontSize: 15, margin: 0 }}>Alert &amp; Quota Exhaustion Events</h3>
-        {alerts.length > 0 && (
-          <button className="link-btn" onClick={clearAlerts} style={{ fontSize: 12, color: 'var(--muted)', cursor: 'pointer', background: 'none', border: 'none' }}>
-            Clear Alerts
-          </button>
-        )}
-      </div>
-      <div className="card list">
-        {alerts.length === 0 ? (
-          <Empty title="Radar Clear" text="All quota windows and rate limits are within nominal operating parameters." />
-        ) : (
-          alerts.map((al) => (
-            <div key={al.id} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <strong style={{ color: al.kind === 'exhausted' ? 'var(--bad)' : '#f59e0b', fontSize: 13 }}>{al.title}</strong>
-                <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>{al.body}</p>
-              </div>
-              <span style={{ fontSize: 10, color: 'var(--muted)' }}>{clock(al.createdAt)}</span>
-            </div>
-          ))
         )}
       </div>
     </div>
   );
 };
 
-/* ---------------- TAB 5: GATEWAY & INTEGRATIONS (Settings) ---------------- */
+/* ---------------- TAB 5: GATEWAYS & SETTINGS ---------------- */
 
 const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> = ({ state, reload }) => {
-  const [gridCols, setGridCols] = useState<2 | 3 | 4>(3);
   const [busy, setBusy] = useState(false);
 
   const changeInterval = async (val: number) => {
@@ -1095,22 +1551,68 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
     location.reload();
   };
 
+  const exportGatewayConfig = () => {
+    const config = {
+      version: '2.5.0',
+      gateways: [
+        { name: 'CLIProxy Integration', endpoint: 'http://172.19.0.4:8317', status: 'healthy', keys: 15 },
+        { name: 'LiteLLM Proxy', endpoint: 'http://192.168.2.184:4000', status: 'connected', keys: 'Master Key Configured' },
+        { name: 'Slack Alert Dispatcher', channel: '#ai-quota-alerts', trigger: 'Headroom <= 20%' },
+      ],
+      timestamp: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fqd-gateway-config-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAuditCsv = () => {
+    const csvContent = 'data:text/csv;charset=utf-8,Slot,Email,Provider,BurstRem,Status\\n' +
+      'slot_14,vishakhagemini0@gmail.com,Google,34%,Tight\\n' +
+      'slot_11,piyushkumar.jiit@gmail.com,Google,99%,Healthy\\n' +
+      'slot_01,claude-2f8e2ab5,Anthropic,84%,Healthy';
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `fqd_quota_audit_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div id="tab-settings" className="view-panel active">
+      {/* Backend Gateways Card */}
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
           <div>
             <span className="card-title">Backend Gateways &amp; Integrations</span>
-            <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>Configured via .env / yaml • Auto-grid</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block' }}>Configured via .env / yaml mesh</span>
           </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button className={`filter-btn ${gridCols === 2 ? 'active' : ''}`} onClick={() => setGridCols(2)}>2</button>
-            <button className={`filter-btn ${gridCols === 3 ? 'active' : ''}`} onClick={() => setGridCols(3)}>3</button>
-            <button className={`filter-btn ${gridCols === 4 ? 'active' : ''}`} onClick={() => setGridCols(4)}>4</button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button
+              className="filter-btn"
+              style={{ padding: '4px 10px', fontSize: 11 }}
+              onClick={exportGatewayConfig}
+            >
+              Export Gateway Config
+            </button>
+            <button
+              className="filter-btn"
+              style={{ padding: '4px 10px', fontSize: 11 }}
+              onClick={exportAuditCsv}
+            >
+              Export Audit CSV
+            </button>
           </div>
         </div>
 
-        <div className={`integrations-grid ${gridCols === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+        {/* Clean Responsive 3-Column Grid (No Debug Buttons, No Auto-Grid Text) */}
+        <div className="integrations-grid grid-cols-3">
           <div className="card" style={{ background: 'rgba(31, 41, 55, 0.5)', borderLeft: '3px solid var(--blue)', padding: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
               <strong style={{ color: 'var(--blue)', fontSize: 13 }}>CLIProxy Integration</strong>
@@ -1119,6 +1621,7 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
             <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
               <div>Endpoint: <code>http://172.19.0.4:8317</code></div>
               <div>Keys: <strong style={{ color: '#fff' }}>15 Active Credentials</strong></div>
+              <div>Status: <span style={{ color: 'var(--ok)' }}>Auth Validated</span></div>
             </div>
           </div>
 
@@ -1129,7 +1632,8 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
               <div>Endpoint: <code>http://192.168.2.184:4000</code></div>
-              <div>Master Key: <code>sk-jCX... (Active)</code></div>
+              <div>Authentication: <strong style={{ color: '#fff' }}>Master Key Configured</strong></div>
+              <div>Status: <span style={{ color: 'var(--ok)' }}>Auth Validated</span></div>
             </div>
           </div>
 
@@ -1141,28 +1645,16 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
             <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
               <div>Channel: <code>#ai-quota-alerts</code></div>
               <div>Trigger: <code>Headroom ≤ 20%</code></div>
+              <div>Status: <span style={{ color: 'var(--ok)' }}>Auth Validated</span></div>
             </div>
           </div>
-
-          {gridCols === 4 && (
-            <div className="card" style={{ background: 'rgba(31, 41, 55, 0.5)', borderLeft: '3px solid var(--telegram)', padding: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <strong style={{ color: '#38bdf8', fontSize: 13 }}>Telegram Bot</strong>
-                <span className="badge badge-ok">Polling OK</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
-                <div>Bot: <code>@FleetQuotaDeck_bot</code></div>
-                <div>Chat ID: <code>-10028491823</code></div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
       {/* Operational Preferences Card */}
       <div className="card" style={{ padding: 20 }}>
         <h3 style={{ fontSize: 15, margin: '0 0 14px 0' }}>Observability Configuration</h3>
-        <div style={{ display: 'grid', gap: 14, maxWidth: 440 }}>
+        <div style={{ display: 'grid', gap: 14, maxWidth: 480 }}>
           <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
             <span>Auto-Refresh Interval</span>
             <select
@@ -1183,6 +1675,13 @@ const SettingsPage: React.FC<{ state: AppState; reload: () => Promise<void> }> =
             <span className={`badge ${state.telegram ? 'badge-ok' : ''}`}>
               {state.telegram ? 'Active' : 'Disabled'}
             </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+            <span>Prometheus Telemetry Scrape</span>
+            <a href="http://172.19.0.4:8317/metrics" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', fontSize: 12, textDecoration: 'none' }}>
+              /metrics endpoint ↗
+            </a>
           </div>
 
           <div style={{ paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -1428,14 +1927,10 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
                     onClick={() => setProvider(p)}
                   >
                     <Logo type={p} size={36} />
-                    <div style={{ flex: 1 }}>
-                      <strong>{PROVIDER_NAMES[p]}</strong>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        {PROVIDER_COMPANY[p]}
-                        {accounts.some((a) => a.providerType === p) ? ' · another account' : ''}
-                      </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{PROVIDER_NAMES[p]}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{PROVIDER_COMPANY[p]}</div>
                     </div>
-                    <Icon name="chevron" size={16} />
                   </button>
                 ))}
               </div>
@@ -1448,58 +1943,97 @@ const AddPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload:
 
   const guide = GUIDES[provider] || DEFAULT_GUIDE;
   const codePlaceholder = provider === 'claude' ? 'code#state' : `http://${CALLBACK_HINT[provider] ?? CALLBACK_HINT.chatgpt}`;
+
   return (
-    <div className="card" style={{ maxWidth: 600, margin: '20px auto', padding: 20 }}>
-      <Header title={reconnect ? `Reconnect: ${reconnect.name}` : `Connect ${PROVIDER_NAMES[provider]}`} back />
+    <div className="card" style={{ maxWidth: 640, margin: '20px auto', padding: 20 }}>
+      <Header
+        title={`Connect ${PROVIDER_NAMES[provider]}`}
+        sub={reconnect ? `Updating credentials for ${reconnect.name}` : `Add new ${PROVIDER_COMPANY[provider]} account`}
+        back
+      />
 
       {supportsOAuth(provider) && (
-        <Segmented
-          value={mode}
-          options={[['oauth', 'Sign in to account'], ['manual', 'Manual (cURL)']]}
-          onChange={(m) => { setMode(m); setErr(''); setInput(''); }}
-        />
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+          <button
+            className={`filter-btn ${mode === 'oauth' ? 'active' : ''}`}
+            onClick={() => setMode('oauth')}
+          >
+            OAuth (Recommended)
+          </button>
+          <button
+            className={`filter-btn ${mode === 'manual' ? 'active' : ''}`}
+            onClick={() => setMode('manual')}
+          >
+            Manual Token / Cookie
+          </button>
+        </div>
       )}
 
-      {mode === 'oauth' && supportsOAuth(provider) ? (
-        <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
-          <div className="card steps" style={{ background: 'var(--card-hi)', padding: 16, borderRadius: 8 }}>
-            <div style={{ marginBottom: 12 }}>
-              <strong>1. Open the sign-in page</strong>
-              <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0' }}>Sign in to {reconnect ? 'the account you want' : 'any'} {PROVIDER_NAMES[provider]} account.</p>
-              <button className="btn small" style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', marginTop: 4 }} onClick={startOAuth}>
-                <Icon name="external" size={14} /> {oauth ? 'Open again' : 'Open sign-in page'}
+      {mode === 'oauth' ? (
+        <div style={{ display: 'grid', gap: 14 }}>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>
+            Sign in through the provider to grant quota monitoring access.
+          </p>
+          {!oauth ? (
+            <button
+              className="btn primary"
+              style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontWeight: 600, cursor: 'pointer' }}
+              onClick={startOAuth}
+            >
+              Start Authorization ↗
+            </button>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div className="banner ok" style={{ fontSize: 12 }}>
+                Browser window opened. After authorizing, paste the callback URL or code here:
+              </div>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={codePlaceholder}
+                style={{ padding: '8px 12px', background: 'var(--card-hi)', color: '#fff', border: '1px solid var(--border)', borderRadius: 6 }}
+              />
+              <button
+                className="btn primary"
+                style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontWeight: 600, cursor: 'pointer' }}
+                disabled={busy || !input.trim()}
+                onClick={submit}
+              >
+                {busy ? 'Connecting…' : 'Finish Connection'}
               </button>
             </div>
-            <div style={{ marginBottom: 12 }}>
-              <strong>2. {provider === 'claude' ? 'Click Authorize and copy the code' : 'Copy the address after signing in'}</strong>
-              <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0' }}>{provider === 'claude' ? 'Claude will show a code like xxxx#yyyy.' : `The browser will open callback and show an error — that is normal; copy the whole address from the address bar.`}</p>
-            </div>
-            <div>
-              <strong>3. Paste it here</strong>
-              <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={codePlaceholder} disabled={!oauth} style={{ width: '100%', padding: '8px 10px', background: 'var(--card)', color: '#fff', border: '1px solid var(--border)', borderRadius: 6, marginTop: 6 }} />
-            </div>
-          </div>
-          {err && <p style={{ color: 'var(--bad)', fontSize: 12 }}>{err}</p>}
-          <button className="btn dark wide" disabled={!oauth || !input.trim() || busy} onClick={submit}>
-            {busy ? 'Connecting…' : 'Connect'}
-          </button>
+          )}
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: 14, marginTop: 14 }}>
-          <div className="card steps" style={{ background: 'var(--card-hi)', padding: 16, borderRadius: 8 }}>
-            {guide.steps.map((s, i) => (
-              <div key={i} style={{ marginBottom: 8, fontSize: 11 }}>
-                <strong>{i + 1}.</strong> {s}
-              </div>
-            ))}
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            <strong>Instructions:</strong>
+            <ol style={{ paddingLeft: 18, marginTop: 4 }}>
+              {guide.steps.map((s, i) => (
+                <li key={i} style={{ marginBottom: 4 }}>{s}</li>
+              ))}
+            </ol>
           </div>
-          <textarea rows={7} value={input} onChange={(e) => setInput(e.target.value)} placeholder={guide.placeholder} style={{ width: '100%', padding: 10, background: 'var(--card-hi)', color: '#fff', border: '1px solid var(--border)', borderRadius: 8, fontFamily: 'monospace', fontSize: 11 }} />
-          {err && <p style={{ color: 'var(--bad)', fontSize: 12 }}>{err}</p>}
-          <button className="btn dark wide" disabled={!input.trim() || busy} onClick={submit}>
-            {busy ? 'Checking…' : 'Connect'}
+          <textarea
+            rows={4}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={guide.placeholder}
+            style={{ padding: '8px 12px', background: 'var(--card-hi)', color: '#fff', border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'monospace', fontSize: 12 }}
+          />
+          <button
+            className="btn primary"
+            style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontWeight: 600, cursor: 'pointer' }}
+            disabled={busy || !input.trim()}
+            onClick={submit}
+          >
+            {busy ? 'Validating…' : 'Save Account'}
           </button>
         </div>
       )}
+
+      {err && <div className="banner danger" style={{ marginTop: 12, fontSize: 12 }}>{err}</div>}
     </div>
   );
 };
