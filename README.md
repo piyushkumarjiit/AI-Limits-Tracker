@@ -18,7 +18,6 @@
 
 </div>
 
-> **Lineage & Attribution**: FQD (Fleet Quota Deck) originated from [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan under the MIT License, and has been extensively refactored into a high-concurrency fleet observability deck and routing engine for multi-account CLIProxy and LiteLLM gateway topologies.
 
 ---
 
@@ -45,13 +44,13 @@ No major AI subscription exposes an arbitrary message counter, so **FQD never in
 
 ## Key Capabilities
 
-- 📊 **Unified Multi-Horizon Radar:** Dual-horizon monitoring tracking short-term 5-hour rolling burst limits alongside 7-day weekly cycle balances.
-- 👥 **Multi-Account Fleet Isolation:** Pool 10, 20, or 50+ accounts across Google Antigravity, Claude Code, and ChatGPT with fully isolated sessions, encryption, and token refreshes.
-- ⏱ **Dynamic Reset Countdowns:** Precise rolling countdowns (e.g. `resets in 1h 14m (14:30 UTC)`) refreshed in real-time.
-- 🚦 **Intelligent Gateway Integration:** Exposes normalized `/api/quota` JSON and Prometheus `/metrics` for dynamic routing in CLIProxy and LiteLLM.
-- 📈 **30-Day Velocity Histograms:** Model-level token burn velocity (Gemini 2.5 Pro, Flash, Claude 3.7 Sonnet) with 30 discrete daily telemetry bars.
-- 🔔 **Proactive Quota Warnings:** Automatically flags slots as **Exhausted** ($\le 15\%$), **Tight** ($\le 35\%$), or **Healthy** ($> 35\%$).
-- 🔒 **Self-Hosted & Private:** All authentication tokens and cookies remain encrypted on your host (AES-256-GCM) with no third-party telemetry.
+-  **Unified Multi-Horizon Radar:** Dual-horizon monitoring tracking short-term 5-hour rolling burst limits alongside 7-day weekly cycle balances.
+-  **Multi-Account Fleet Isolation:** Pool 10, 20, or 50+ accounts across Google Antigravity, Claude Code, and ChatGPT with fully isolated sessions, encryption, and token refreshes.
+-  **Dynamic Reset Countdowns:** Precise rolling countdowns (e.g. `resets in 1h 14m (14:30 UTC)`) refreshed in real-time.
+-  **Intelligent Gateway Integration:** Exposes normalized `/api/quota` JSON and Prometheus `/metrics` for dynamic routing in CLIProxy and LiteLLM.
+-  **30-Day Velocity Histograms:** Model-level token burn velocity (Gemini 2.5 Pro, Flash, Claude 3.7 Sonnet) with 30 discrete daily telemetry bars.
+-  **Proactive Quota Warnings:** Automatically flags slots as **Exhausted** ($\le 15\%$), **Tight** ($\le 35\%$), or **Healthy** ($> 35\%$).
+-  **Self-Hosted & Private:** All authentication tokens and cookies remain encrypted on your host (AES-256-GCM) with no third-party telemetry.
 
 ---
 
@@ -295,4 +294,4 @@ MIT License © 2026 [Piyush Kumar](https://github.com/piyushkumarjiit)
 Based upon and substantially modernized from the original [AI Limits Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan:
 Copyright (c) 2026 Rauan
 
-<div align="center"><sub>Fleet Quota Deck — High-integrity capacity observability for modern AI stacks.</sub></div>
+<div align="center"><sub>Fleet Quota Deck — High capacity observability for modern AI stacks.</sub></div>
