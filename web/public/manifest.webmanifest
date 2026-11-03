@@ -1,6 +1,6 @@
 {
-  "name": "Fleet Quota Deck",
-  "short_name": "Fleet Quota",
+  "name": "FQD — Fleet Quota Display",
+  "short_name": "FQD",
   "description": "Unified observability deck for AI subscription fleets, proxy pools, and API keys.",
   "start_url": "/",
   "scope": "/",

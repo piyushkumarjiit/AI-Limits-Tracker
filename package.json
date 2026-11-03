@@ -63,5 +63,5 @@
   "author": "Piyush Kumar <piyushkumar.jiit@gmail.com> (https://github.com/piyushkumarjiit)",
   "license": "MIT",
   "private": true,
-  "description": "Fleet Quota Deck (FQD) \u2014 Unified observability deck for AI subscription fleets, proxy pools, and API keys."
+  "description": "FQD (Fleet Quota Display) \u2014 Unified observability deck for AI subscription fleets, proxy pools, and API keys."
 }

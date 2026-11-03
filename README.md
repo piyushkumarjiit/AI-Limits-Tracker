@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="web/public/icon.svg" width="88" height="88" alt="Fleet Quota Deck (FQD)" />
+<img src="web/public/icon.svg" width="88" height="88" alt="FQD (Fleet Quota Display)" />
 
-# Fleet Quota Deck (FQD)
+# FQD — Fleet Quota Display
 
 **The unified observability deck for AI subscription fleets, proxy pools, and API keys.**
 
@@ -14,7 +14,7 @@ Mobile PWA · Self-hosted web cockpit · Proxy & Gateway Integrations (CLIProxy 
 
 </div>
 
-> **Note on Project Lineage & Attribution**: Fleet Quota Deck (FQD) originated from [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan under the MIT License, and has been extensively modernized and re-architected into a high-concurrency fleet observability cockpit for CLIProxy and LiteLLM gateway topologies.
+> **Note on Project Lineage & Attribution**: FQD (Fleet Quota Display) originated from [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan under the MIT License, and has been extensively modernized and re-architected into a high-concurrency fleet observability cockpit for CLIProxy and LiteLLM gateway topologies.
 
 ---
 
