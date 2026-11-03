@@ -34,20 +34,31 @@ const MIME_TYPES = {
 };
 
 function createStaticServer(distDir, port = 4567) {
+  const safeDistRoot = path.resolve(distDir);
+
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       let reqPath = req.url?.split('?')[0] || '/';
       if (reqPath === '/' || reqPath.startsWith('/#')) reqPath = '/index.html';
-      let filePath = path.join(distDir, reqPath.replace(/^\//, ''));
+
+      const candidatePath = path.resolve(safeDistRoot, `.${reqPath}`);
+      const relativeCandidate = path.relative(safeDistRoot, candidatePath);
+      let filePath = (!relativeCandidate.startsWith('..') && !path.isAbsolute(relativeCandidate))
+        ? candidatePath
+        : path.join(safeDistRoot, 'index.html');
+
       if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-        filePath = path.join(distDir, 'index.html');
+        filePath = path.join(safeDistRoot, 'index.html');
       }
 
       const ext = path.extname(filePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
       try {
         const data = fs.readFileSync(filePath);
-        res.writeHead(200, { 'Content-Type': contentType });
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'X-Content-Type-Options': 'nosniff',
+        });
         res.end(data);
       } catch (err) {
         res.writeHead(404);
