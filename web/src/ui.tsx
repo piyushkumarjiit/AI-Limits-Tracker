@@ -457,11 +457,61 @@ const ICON_PATHS: Record<string, string> = {
   terminal: 'M4 17l6-6-6-6M12 19h8',
 };
 
-export const Icon: React.FC<{ name: keyof typeof ICON_PATHS | string; size?: number; stroke?: number }> = ({ name, size = 20, stroke = 2 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d={ICON_PATHS[name] || ''} />
-  </svg>
-);
+const NAV_ICONS: Record<string, React.ReactNode> = {
+  overview: (
+    <>
+      <rect width="7" height="9" x="3" y="3" rx="1.5" />
+      <rect width="7" height="5" x="14" y="3" rx="1.5" />
+      <rect width="7" height="9" x="14" y="12" rx="1.5" />
+      <rect width="7" height="5" x="3" y="16" rx="1.5" />
+    </>
+  ),
+  accounts: (
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </>
+  ),
+  stats: (
+    <>
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+    </>
+  ),
+  radar: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="4" />
+      <line x1="12" y1="3" x2="12" y2="12" />
+      <line x1="12" y1="12" x2="19" y2="7" />
+    </>
+  ),
+  settings: (
+    <>
+      <line x1="4" y1="21" x2="4" y2="14" />
+      <line x1="4" y1="10" x2="4" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12" y2="3" />
+      <line x1="20" y1="21" x2="20" y2="16" />
+      <line x1="20" y1="12" x2="20" y2="3" />
+      <line x1="1" y1="14" x2="7" y2="14" />
+      <line x1="9" y1="8" x2="15" y2="8" />
+      <line x1="17" y1="16" x2="23" y2="16" />
+    </>
+  ),
+};
+
+export const Icon: React.FC<{ name: keyof typeof ICON_PATHS | string; size?: number; stroke?: number }> = ({ name, size = 20, stroke = 1.8 }) => {
+  const custom = NAV_ICONS[name];
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {custom ? custom : <path d={ICON_PATHS[name] || ''} />}
+    </svg>
+  );
+};
 
 /* ---------- Family Aggregator ---------- */
 

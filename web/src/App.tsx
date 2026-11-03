@@ -166,9 +166,9 @@ export default function App() {
           <span style={{ fontSize: 24, fontWeight: 900, letterSpacing: '0.04em', color: '#38bdf8', lineHeight: 1.1 }}>FQD</span>
           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.03em', textTransform: 'uppercase' }}>Fleet Quota Display</span>
         </div>
-        <NavItem icon="home" label="Home" active={tab === 'home'} onClick={() => go('/')} />
-        <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
-        <NavItem icon="users" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
+        <NavItem icon="overview" label="Overview" active={tab === 'home'} onClick={() => go('/')} />
+        <NavItem icon="accounts" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
+        <NavItem icon="stats" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
         <NavItem icon="radar" label="Radar" active={tab === 'alerts'} onClick={() => go('/alerts')} />
         <NavItem icon="settings" label="Settings" active={tab === 'settings'} onClick={() => go('/settings')} />
         <button className="btn dark wide" onClick={() => go('/add')}>
@@ -180,9 +180,9 @@ export default function App() {
         {page}
       </main>
       <nav className="tabbar">
-        <NavItem icon="home" label="Overview" active={tab === 'home'} onClick={() => go('/')} />
-        <NavItem icon="users" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
-        <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
+        <NavItem icon="overview" label="Overview" active={tab === 'home'} onClick={() => go('/')} />
+        <NavItem icon="accounts" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
+        <NavItem icon="stats" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
         <NavItem icon="radar" label="Radar" active={tab === 'alerts'} onClick={() => go('/alerts')} />
         <NavItem icon="settings" label="Settings" active={tab === 'settings'} onClick={() => go('/settings')} />
       </nav>
@@ -361,27 +361,24 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
 
   return (
     <>
-      <header className="home-head">
+      <header className="review-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: '16px 20px', background: 'var(--card)', borderRadius: 14, border: '1px solid var(--border)', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div className="mobile-brand only-mobile" style={{ alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
-            <span style={{ fontSize: 22, fontWeight: 900, letterSpacing: '0.04em', color: '#38bdf8' }}>FQD</span>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.02em', textTransform: 'uppercase' }}>Fleet Quota Display</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 22, fontWeight: 900, color: '#38bdf8', letterSpacing: '0.04em' }}>FQD</span>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>PWA v2.5</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em', marginLeft: 4 }}>Fleet Quota Display</span>
           </div>
-          <p className="hello">{greeting()}</p>
-          <h1 className="hero-name">Your limits</h1>
-          <p className="muted">All your AI accounts in one place, under control</p>
+          <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, margin: 0 }}>
+            Enterprise multi-gateway quota monitor, burst routing intelligence &amp; token telemetry.
+          </p>
         </div>
-        <div className="home-actions">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button className={`icon-btn ${syncing ? 'spin' : ''}`} onClick={onRefresh} aria-label="Refresh">
             <Icon name="refresh" />
           </button>
-          <button className="icon-btn only-mobile" onClick={() => go('/stats')} aria-label="Stats">
-            <Icon name="chart" />
-          </button>
-          <button className="icon-btn bell" onClick={() => go('/alerts')} aria-label="Radar">
-            <Icon name="radar" />
-            {attention && <i className="dot" />}
-          </button>
+          <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: 'var(--ok-soft)', color: 'var(--ok)' }}>
+            All Systems Healthy
+          </span>
         </div>
       </header>
 
