@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { EngineState } from './cpaWatermarkEngine';
-import type { FullWatermarkPolicy } from './cpaWatermarkPolicy';
+import { validateWatermarkPolicy, type FullWatermarkPolicy } from './cpaWatermarkPolicy';
 
 /**
  * Historical audit event entry stored in cpa_watermark_history.
@@ -93,9 +93,16 @@ export class CpaWatermarkStore {
       let policy: FullWatermarkPolicy | undefined;
       if (row.policy_json) {
         try {
-          policy = JSON.parse(row.policy_json) as FullWatermarkPolicy;
+          const rawPolicy = JSON.parse(row.policy_json);
+          const validation = validateWatermarkPolicy(rawPolicy);
+          if (validation.ok) {
+            policy = validation.policy;
+          } else {
+            console.warn('[cpaWatermarkStore] Invalid persisted policy_json in cpa_watermark_state; setting policy = undefined');
+            policy = undefined;
+          }
         } catch {
-          // ignore corrupted policy_json
+          policy = undefined;
         }
       }
 

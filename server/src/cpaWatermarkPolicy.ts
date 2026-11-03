@@ -464,6 +464,7 @@ export class CpaPolicyLoader {
   private currentPolicy: FullWatermarkPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
   private resolvedPath: string | null = null;
   private lastFileHash: string | null = null;
+  private lastErrorSignature: string | null = null;
   private customFilePath?: string;
   private debounceMs: number;
   private pollIntervalMs: number;
@@ -571,13 +572,10 @@ export class CpaPolicyLoader {
       const stat = fs.statSync(filePath);
       if (stat.size > MAX_POLICY_FILE_SIZE) {
         const oversizeSentinel = `oversize:${stat.size}:${stat.mtimeMs}`;
-        const isAlreadyOversize = this.lastFileHash === oversizeSentinel;
-        if (!isAlreadyOversize) {
-          const err = new Error(
-            `Policy file at ${filePath} exceeds maximum allowed size of 256 KB (${stat.size} bytes)`
-          );
-          this.emitError(err);
-        }
+        const err = new Error(
+          `Policy file at ${filePath} exceeds maximum allowed size of 256 KB (${stat.size} bytes)`
+        );
+        this.emitError(err, oversizeSentinel);
         this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
         this.currentPolicy.mode = 'shadow';
         this.lastFileHash = oversizeSentinel;
@@ -596,7 +594,7 @@ export class CpaPolicyLoader {
             parseErr instanceof Error ? parseErr.message : String(parseErr)
           }`
         );
-        this.emitError(err);
+        this.emitError(err, `yaml_parse:${hash}`);
         this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
         this.currentPolicy.mode = 'shadow';
         this.lastFileHash = hash;
@@ -608,7 +606,7 @@ export class CpaPolicyLoader {
         const err = new Error(
           `Policy validation failed at ${filePath}:\n${validation.errors.join('\n')}`
         );
-        this.emitError(err);
+        this.emitError(err, `validation:${hash}`);
         this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
         this.currentPolicy.mode = 'shadow';
         this.lastFileHash = hash;
@@ -617,23 +615,31 @@ export class CpaPolicyLoader {
 
       this.currentPolicy = validation.policy;
       this.lastFileHash = hash;
+      this.lastErrorSignature = null;
       return this.getPolicy();
     } catch (readErr) {
       // M3: Set this.lastFileHash = null on read error
       this.lastFileHash = null;
+      const errCode = (readErr as { code?: string })?.code;
+      const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
+      const signature = `err:${errCode || errMsg}`;
       const err = new Error(
-        `Failed to read policy file at ${filePath}: ${
-          readErr instanceof Error ? readErr.message : String(readErr)
-        }`
+        `Failed to read policy file at ${filePath}: ${errMsg}`
       );
-      this.emitError(err);
+      this.emitError(err, signature);
       this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
       this.currentPolicy.mode = 'shadow';
       return this.getPolicy();
     }
   }
 
-  public emitError(err: Error): void {
+  public emitError(err: Error, signature?: string): void {
+    if (signature) {
+      if (this.lastErrorSignature === signature) {
+        return;
+      }
+      this.lastErrorSignature = signature;
+    }
     if (this.onError) {
       try {
         this.onError(err);
@@ -742,7 +748,10 @@ export class CpaPolicyLoader {
         this.handleFileChange();
       }
     } catch (err) {
-      this.emitError(err instanceof Error ? err : new Error(String(err)));
+      const errCode = (err as { code?: string })?.code;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const signature = `err:${errCode || errMsg}`;
+      this.emitError(err instanceof Error ? err : new Error(String(err)), signature);
     }
   }
 

@@ -420,6 +420,7 @@ async function run() {
     fs.writeFileSync(policyFileB3, yaml.stringify({ mode: 'shadow' }), 'utf8');
 
     let b3ChangeInvoked = false;
+    let b3ErrorInvoked = false;
     const crashingLoader = new CpaPolicyLoader({
       customFilePath: policyFileB3,
       debounceMs: 20,
@@ -428,6 +429,7 @@ async function run() {
         throw new Error('Explosion in onPolicyChange');
       },
       onError: () => {
+        b3ErrorInvoked = true;
         throw new Error('Explosion in onError');
       },
     });
@@ -440,6 +442,7 @@ async function run() {
     await sleep(150);
 
     assert(b3ChangeInvoked, 'onPolicyChange was invoked and threw');
+    assert(b3ErrorInvoked, 'onError was invoked and threw without crashing process');
     assertEquals(crashingLoader.getPolicy().mode, 'enforce', 'Policy was updated despite throwing callbacks');
 
     // Subsequent reload still works
@@ -449,6 +452,38 @@ async function run() {
 
     crashingLoader.stopWatcher();
     fs.rmSync(tempDirB3, { recursive: true, force: true });
+
+    // Error deduplication: repeated read/stat errors on unreadable file are deduplicated
+    const tempDirUnreadable = createTempDir('cpa-policy-unreadable-');
+    const unreadableFile = path.join(tempDirUnreadable, 'unreadable.yaml');
+    fs.writeFileSync(unreadableFile, yaml.stringify({ mode: 'enforce' }), 'utf8');
+    fs.chmodSync(unreadableFile, 0o000);
+
+    let unreadableErrors = 0;
+    const unreadableLoader = new CpaPolicyLoader({
+      customFilePath: unreadableFile,
+      pollIntervalMs: 50,
+      debounceMs: 20,
+      onError: () => {
+        unreadableErrors++;
+      },
+    });
+
+    const unreadablePolicy = unreadableLoader.loadPolicy();
+    assertEquals(unreadablePolicy.mode, 'shadow', 'Unreadable policy falls back to shadow mode');
+    assertEquals(unreadableErrors, 1, 'Error emitted once on initial read');
+
+    // Simulate polling ticks
+    unreadableLoader.checkFileForChanges();
+    unreadableLoader.checkFileForChanges();
+    assertEquals(unreadableErrors, 1, 'Error was deduplicated across repeated polling checks');
+
+    // Restore readability and verify recovery clears error signature
+    fs.chmodSync(unreadableFile, 0o644);
+    const recoveredPolicy = unreadableLoader.loadPolicy();
+    assertEquals(recoveredPolicy.mode, 'enforce', 'Recovered policy successfully loaded');
+
+    fs.rmSync(tempDirUnreadable, { recursive: true, force: true });
 
     // R2-B2: Oversize policy file (>256 KB) is rejected without crashing or looping
     const tempDirOversize = createTempDir('cpa-policy-oversize-');
@@ -572,6 +607,7 @@ async function run() {
 
     // Strengthened B1: assert generation is still 2 (not 999), and verify no savepoint leaked via BEGIN/ROLLBACK
     assertEquals(store.loadState()?.generation, 2, 'Generation is still 2 after rollback (not 999)');
+    assertEquals(store.getHistory().length, 2, 'Audit history rolled back to length 2');
     db.exec('BEGIN');
     db.exec('ROLLBACK');
 
@@ -702,6 +738,60 @@ async function run() {
     pass('Server Store exposes watermarkStore seamlessly');
   } catch (err) {
     fail('Server Store exposes watermarkStore seamlessly', err);
+  }
+
+  // --------------------------------------------------------------------------
+  // Suite 8: EngineState Shape Integrity Tests (loadState schema validation)
+  // --------------------------------------------------------------------------
+  console.log('\nSuite 8: EngineState Shape Integrity Tests (loadState schema validation)');
+  try {
+    const db = new DatabaseSync(':memory:');
+    const store = new CpaWatermarkStore(db);
+
+    const validState: EngineState = {
+      mode: 'shadow',
+      generation: 1,
+      tierStates: { ag: 'normal' },
+      accountStates: { 'acc-1': { state: 'healthy', enteredAt: 100, targetWeight: 100 } },
+    };
+    store.saveState(validState, 'init');
+
+    // Invalid accountStates shapes: string, array, null
+    for (const badAccountStates of ['not_an_object', [1, 2, 3], null]) {
+      db.prepare('UPDATE cpa_watermark_state SET state_json = ? WHERE id = 1').run(
+        JSON.stringify({ ...validState, accountStates: badAccountStates })
+      );
+      assertEquals(store.loadState(), null, `loadState() returns null when accountStates is ${JSON.stringify(badAccountStates)}`);
+    }
+
+    // Invalid tierStateEnteredAt shapes: string, array, null
+    for (const badTierStateEnteredAt of ['not_an_object', [1, 2, 3], null]) {
+      db.prepare('UPDATE cpa_watermark_state SET state_json = ? WHERE id = 1').run(
+        JSON.stringify({ ...validState, tierStateEnteredAt: badTierStateEnteredAt })
+      );
+      assertEquals(store.loadState(), null, `loadState() returns null when tierStateEnteredAt is ${JSON.stringify(badTierStateEnteredAt)}`);
+    }
+
+    // Invalid rampStep shapes: string, array, null
+    for (const badRampStep of ['not_an_object', [1, 2, 3], null]) {
+      db.prepare('UPDATE cpa_watermark_state SET state_json = ? WHERE id = 1').run(
+        JSON.stringify({ ...validState, rampStep: badRampStep })
+      );
+      assertEquals(store.loadState(), null, `loadState() returns null when rampStep is ${JSON.stringify(badRampStep)}`);
+    }
+
+    // Invalid policy_json validation check in loadState()
+    db.prepare('UPDATE cpa_watermark_state SET state_json = ?, policy_json = ? WHERE id = 1').run(
+      JSON.stringify(validState),
+      JSON.stringify({ mode: 'invalid_policy_mode' })
+    );
+    const withInvalidPolicy = store.loadState();
+    assert(withInvalidPolicy !== null, 'State loads even if policy_json is invalid');
+    assertEquals(withInvalidPolicy?.policy, undefined, 'Invalid policy_json in DB results in policy === undefined');
+
+    pass('loadState() strictly validates EngineState and policy_json shapes and returns null/undefined on corruption');
+  } catch (err) {
+    fail('loadState() strictly validates EngineState and policy_json shapes and returns null/undefined on corruption', err);
   }
 
   // --------------------------------------------------------------------------
