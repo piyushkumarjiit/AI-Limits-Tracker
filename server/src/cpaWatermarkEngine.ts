@@ -105,6 +105,10 @@ function clamp(val: number, min: number, max: number): number {
   return Math.min(Math.max(val, min), max);
 }
 
+export function isWatermarkManaged(snap: WatermarkSnapshot): boolean {
+  return Boolean(snap.managed) && snap.modality === 'subscription_pool';
+}
+
 export function projectQuota(
   quotaEff: number,
   burnRatePerMin: number,
@@ -385,7 +389,7 @@ export function computeWatermarkTargets(
 
     // Collective degraded fallback evaluation for PRO
     // Eligible healthy: managed Pro accounts with initialState === 'healthy'
-    const managedProSnaps = proSnaps.filter((s) => s.managed);
+    const managedProSnaps = proSnaps.filter((s) => isWatermarkManaged(s));
     const N = managedProSnaps.length;
     const K = Math.max(2, Math.ceil(N / 3));
 
@@ -809,7 +813,7 @@ export function computeWatermarkTargets(
   // ----------------------------------------------------
   // Invariants evaluated strictly across managed accounts per provider pool
   for (const [provider, pool] of providerPools.entries()) {
-    const managedPool = pool.filter((s) => s.managed && s.modality !== 'direct_api');
+    const managedPool = pool.filter((s) => isWatermarkManaged(s));
     if (managedPool.length === 0) continue;
 
     // Invariant 1: Hard Floor Invariant (No managed account with nominal or proj <= hardStopPct shall have W > 0)
@@ -923,47 +927,52 @@ export function computeWatermarkTargets(
   const writeBatch: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
 
   if (mode !== 'shadow') {
-    // Increases (W ↑) before Decreases (W ↓)
-    // Emergency demotions bypass make-before-break ONLY when no promotion candidate exists.
-    // If promotion candidates exist, promotions (W ↑) execute before demotions (W ↓).
-    const increases: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
-    const decreases: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
-    const emergencyDemotions: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
+    // Write batch ordering must be evaluated PER PROVIDER POOL, not globally.
+    // A promotion in 'claude' must never delay an emergency demotion in 'antigravity'.
+    for (const [, pool] of providerPools.entries()) {
+      interface WriteOp {
+        name: string;
+        weight: number;
+        currentWeight: number;
+        isEmergency: boolean;
+      }
+      const poolUpdates: WriteOp[] = [];
 
-    for (const snap of snapshots) {
-      if (!snap.managed || snap.modality === 'direct_api' || snap.modality === 'budgeted_allowance') continue;
+      for (const snap of pool) {
+        if (!isWatermarkManaged(snap)) continue;
 
-      const decision = targets.get(snap.cpaName);
-      if (!decision) continue;
+        const decision = targets.get(snap.cpaName);
+        if (!decision) continue;
 
-      const currentW = snap.currentWeight ?? 0;
-      const targetW = decision.targetWeight;
+        const currentW = snap.currentWeight ?? 0;
+        const targetW = decision.targetWeight;
 
-      if (currentW !== targetW) {
-        const isEmergency = Boolean(decision.isEmergency);
-
-        const writeOp = {
-          name: snap.cpaName,
-          weight: targetW,
-          isEmergency,
-        };
-
-        if (targetW > currentW) {
-          increases.push(writeOp);
-        } else if (isEmergency) {
-          emergencyDemotions.push(writeOp);
-        } else {
-          decreases.push(writeOp);
+        if (currentW !== targetW) {
+          poolUpdates.push({
+            name: snap.cpaName,
+            weight: targetW,
+            currentWeight: currentW,
+            isEmergency: Boolean(decision.isEmergency),
+          });
         }
       }
-    }
 
-    // Emergency demotions bypass make-before-break ONLY when no promotion candidate exists.
-    // If promotion candidates exist, promotions (W ↑) execute before demotions (W ↓).
-    if (increases.length > 0) {
-      writeBatch.push(...increases, ...emergencyDemotions, ...decreases);
-    } else {
-      writeBatch.push(...emergencyDemotions, ...decreases);
+      const poolIncreases = poolUpdates.filter((u) => u.weight > u.currentWeight);
+      const poolEmergency = poolUpdates.filter((u) => u.weight < u.currentWeight && u.isEmergency);
+      const poolDecreases = poolUpdates.filter((u) => u.weight < u.currentWeight && !u.isEmergency);
+
+      const poolBatch =
+        poolIncreases.length > 0
+          ? [...poolIncreases, ...poolEmergency, ...poolDecreases]
+          : [...poolEmergency, ...poolDecreases];
+
+      for (const op of poolBatch) {
+        writeBatch.push({
+          name: op.name,
+          weight: op.weight,
+          isEmergency: op.isEmergency,
+        });
+      }
     }
   }
 

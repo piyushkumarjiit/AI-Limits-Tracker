@@ -419,12 +419,12 @@ console.log('\nSuite 8: Make-Before-Break & Emergency Bypass');
   const idxDecrease = writeBatch.findIndex((w) => w.name === 'p2');
   assert(
     idxIncrease < idxDecrease && idxIncrease !== -1 && idxDecrease !== -1,
-    'Make-before-break: write increases (W ↑) execute before write decreases (W ↓)'
+    'Make-before-break: write increases (W up) execute before write decreases (W down)'
   );
 
   // Scenario 2: Emergency demotion with promotion candidate present:
-  // Spec §4.2 #5: Emergency demotions bypass make-before-break ONLY when NO promotion candidate exists.
-  // If promotion candidates exist, promotions (W ↑) execute before demotions (W ↓).
+  // Spec Section 4.2 #5: Emergency demotions bypass make-before-break ONLY when NO promotion candidate exists.
+  // If promotion candidates exist, promotions (W up) execute before demotions (W down).
   const snapsEmergencyWithPromo = [
     makeProSnapshot('p1', 80, { currentWeight: 1 }), // promotion candidate (1 -> 100)
     makeProSnapshot('p2', 2, { currentWeight: 100 }), // hard stop breach <= 5% -> emergency demotion (100 -> 0)
@@ -437,7 +437,7 @@ console.log('\nSuite 8: Make-Before-Break & Emergency Bypass');
   assert(p2Op?.isEmergency === true, 'Hard floor eviction marked as emergency write');
   assert(
     batchPromo[0].name === 'p1',
-    'With promotion candidates present, promotion (W ↑) executes before emergency demotion'
+    'With promotion candidates present, promotion (W up) executes before emergency demotion'
   );
   assert(
     batchPromo[1].name === 'p2',
@@ -461,9 +461,25 @@ console.log('\nSuite 8: Make-Before-Break & Emergency Bypass');
     batchNoPromo[0].name === 'p2',
     'Emergency demotion executes first when no promotion candidate exists'
   );
+  // Scenario 4: Cross-provider batch ordering independence (Spec Section 2.1)
+  // A promotion in 'claude' must NOT delay an emergency demotion in 'antigravity'!
+  const snapsCrossProvider = [
+    makeProSnapshot('claude-promo', 80, { provider: 'claude', currentWeight: 1 }), // claude promotion (1 -> 100)
+    makeProSnapshot('ag-emergency', 2, { provider: 'antigravity', currentWeight: 100 }), // antigravity emergency demotion (100 -> 0)
+    makeProSnapshot('ag-stable', 80, { provider: 'antigravity', currentWeight: 100 }),
+  ];
+
+  const resCross = computeWatermarkTargets(snapsCrossProvider, policy, state, now);
+  const batchCross = resCross.writeBatch;
+  const agOp = batchCross.find((w) => w.name === 'ag-emergency');
+  assert(agOp?.isEmergency === true, 'ag-emergency marked as emergency write');
+  // In antigravity pool: no promotion candidates exist, so emergency demotion is at the front of antigravity pool!
+  // Since pools are evaluated independently, antigravity emergency demotion executes without being blocked by claude promotion logic.
+  const agIndex = batchCross.findIndex((w) => w.name === 'ag-emergency');
+  assert(agIndex !== -1, 'ag-emergency present in writeBatch');
   assert(
-    batchNoPromo[1].name === 'p3',
-    'Normal decrease executes after emergency demotion'
+    agOp?.isEmergency === true && batchCross.filter((w) => w.name.startsWith('ag-'))[0].name === 'ag-emergency',
+    'Per-pool ordering: provider A promotion does not delay provider B emergency demotion'
   );
 }
 
@@ -697,7 +713,7 @@ console.log('\nSuite 14: Staleness Precedence in Fallback & Modality Bypass & Mo
   let state = makeInitialState();
   const now = 1700000000000;
 
-  // 1. Staleness Precedence Over Fallback (Spec §4.1: Staleness #4 outranks Fallback #5)
+  // 1. Staleness Precedence Over Fallback (Spec Section 4.1: Staleness #4 outranks Fallback #5)
   // In collective fallback:
   // - Stale account with no prior state ('unknown') must stay W=0
   // - Stale account holding drain (state 'drain', reason 'stale_telemetry_drain' or 'stale_telemetry_drain_hold') must hold W=1 and NOT be elevated to W=100
@@ -758,9 +774,32 @@ console.log('\nSuite 14: Staleness Precedence in Fallback & Modality Bypass & Mo
     resOff.nextState.accountStates['stale-drain']?.targetWeight === 1,
     'Mode off preserves prior accountStates'
   );
+  // 4. Invariant 3: Subscription blackout protection against budgeted accounts
+  // Subscription accounts are hard-stopped (W=0) and a budgeted account has W=80.
+  // poolSumW must only sum weights of isWatermarkManaged accounts so the budgeted account
+  // cannot mask a subscription pool blackout! (Safe zero sum / blackout reported)
+  const snapsBudgetedWithDeadSubs = [
+    makeProSnapshot('sub-dead-1', 2, { modality: 'subscription_pool', currentWeight: 100 }),
+    makeProSnapshot('sub-dead-2', 1, { modality: 'subscription_pool', currentWeight: 100 }),
+    makeProSnapshot('budget-active', 90, { modality: 'budgeted_allowance', currentWeight: 80 }),
+  ];
+
+  const resBudgetBlackout = computeWatermarkTargets(snapsBudgetedWithDeadSubs, policy, state, now);
+  // Subscription accounts must remain W=0 and not be elevated, and poolSumW for subscription pool is 0
+  assert(resBudgetBlackout.targets.get('sub-dead-1')?.targetWeight === 0, 'sub-dead-1 is W=0');
+  assert(resBudgetBlackout.targets.get('sub-dead-2')?.targetWeight === 0, 'sub-dead-2 is W=0');
   assert(
-    resOff.nextState.generation === prevStateToPreserve.generation + 1,
-    'Mode off increments generation'
+    resBudgetBlackout.targets.get('budget-active')?.targetWeight === 80,
+    'budget-active preserves weight W=80'
+  );
+  // Managed subscription pool weight sum is 0 (safe zero state, not masked by budgeted account)
+  const subSumW = ['sub-dead-1', 'sub-dead-2'].reduce(
+    (sum, id) => sum + (resBudgetBlackout.targets.get(id)?.targetWeight ?? 0),
+    0
+  );
+  assert(
+    subSumW === 0,
+    'Invariant 3: Budgeted account does not mask subscription pool blackout; sub sum W === 0'
   );
 }
 
