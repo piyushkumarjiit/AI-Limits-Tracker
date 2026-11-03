@@ -1,0 +1,92 @@
+/* Scoped TelemetryVelocity Styles */
+.fqd-telemetry-velocity {
+  margin-bottom: 24px;
+}
+
+.fqd-telemetry-velocity__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fqd-telemetry-velocity__title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.fqd-telemetry-velocity__kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.fqd-telemetry-velocity__chart-card {
+  margin-bottom: 14px;
+}
+
+.fqd-telemetry-velocity__legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fqd-telemetry-velocity__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.fqd-telemetry-velocity__legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.fqd-telemetry-velocity__filter-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.fqd-telemetry-velocity__bars {
+  height: 180px;
+  display: flex;
+  align-items: flex-end;
+  padding: 10px 0;
+}
+
+.fqd-telemetry-velocity__bar-slot {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.fqd-telemetry-velocity__bar-stack {
+  width: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.fqd-telemetry-velocity__bar-stack:hover {
+  transform: translateY(-2px);
+}

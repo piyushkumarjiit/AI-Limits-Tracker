@@ -58,7 +58,7 @@
     --ink: #2563eb;
     --shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
   }
-  input, textarea, select {
+  .form-control, .form-input, .field > input, .field > textarea, .field > select, .login-box input, .stack > input, .stack > textarea, .stack > select {
     background: #111827;
     color: #f9fafb;
     border-color: #374151;
@@ -78,11 +78,62 @@ body {
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
 }
-button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; text-align: inherit; }
-input, textarea, select {
-  font: inherit; color: var(--text); width: 100%;
-  background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; outline: none;
+/* Reset buttons - scoped to interactive buttons */
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  text-align: inherit;
 }
+
+/* Safe typography and color inheritance for inputs without force-stretching */
+input, textarea, select {
+  font: inherit;
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+/* Scoped full-width form inputs for standard forms */
+.form-control,
+.form-input,
+.field > input:not([type="checkbox"]):not([type="radio"]),
+.field > textarea,
+.field > select,
+.login-box input:not([type="checkbox"]):not([type="radio"]),
+.stack > input:not([type="checkbox"]):not([type="radio"]),
+.stack > textarea,
+.stack > select,
+.card-form input:not([type="checkbox"]):not([type="radio"]),
+.card-form textarea,
+.card-form select {
+  width: 100%;
+  background: #111827;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.form-control:focus,
+.form-input:focus,
+.field > input:focus,
+.field > textarea:focus,
+.field > select:focus,
+.login-box input:focus,
+.stack > input:focus,
+.stack > textarea:focus,
+.stack > select:focus,
+.card-form input:focus,
+.card-form textarea:focus,
+.card-form select:focus {
+  border-color: var(--ink);
+}
+
 input[type="checkbox"], input[type="radio"] {
   width: auto;
   padding: 0;
@@ -91,7 +142,6 @@ input[type="checkbox"], input[type="radio"] {
   accent-color: var(--ink);
   cursor: pointer;
 }
-input:focus, textarea:focus, select:focus { border-color: var(--ink); }
 textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; resize: vertical; }
 a { color: inherit; }
 h1, h2, h3, p { margin: 0; }
@@ -150,8 +200,7 @@ h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.
   color-scheme: dark;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #07090e; color: var(--text); padding: 16px; line-height: 1.5; }
+/* Top-level layout container */
 
 /* Top Device Simulator Bar */
 .device-simulator-bar {

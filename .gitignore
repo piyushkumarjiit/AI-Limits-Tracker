@@ -59,3 +59,8 @@ integrations/*.config.json
 .env.*
 !.env.example
 data/
+
+# VRT outputs
+tests/vrt/candidate/
+tests/vrt/diff/
+tests/vrt/report/
