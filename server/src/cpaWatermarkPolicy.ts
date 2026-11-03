@@ -5,6 +5,11 @@ import yaml from 'yaml';
 import type { WatermarkPolicyConfig } from './cpaWatermarkEngine';
 
 /**
+ * Maximum allowed YAML policy file size in bytes (256 KB) to prevent DoS.
+ */
+export const MAX_POLICY_FILE_SIZE = 256 * 1024;
+
+/**
  * Classification rule defining glob pattern matching on account credentials or CPA names,
  * assigning provider, tier, modality, and managed status.
  */
@@ -180,7 +185,7 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
   const intervals = isObject(raw.intervals) ? raw.intervals : {};
   const dwell = isObject(raw.dwell) ? raw.dwell : {};
 
-  // Numeric helper
+  // Numeric helper with finite number validation (H2)
   const readNumber = (
     camelName: string,
     snakeName: string,
@@ -196,8 +201,8 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
       return defaultValue;
     }
     const n = Number(val);
-    if (typeof val !== 'number' || Number.isNaN(n)) {
-      errors.push(`Property '${camelName}' must be a valid number, got ${typeof val}`);
+    if (typeof val !== 'number' || !Number.isFinite(n) || Number.isNaN(n)) {
+      errors.push(`Property '${camelName}' must be a valid finite number, got ${typeof val === 'number' ? val : typeof val}`);
       return defaultValue;
     }
     return n;
@@ -327,10 +332,12 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
     );
   }
 
-  // 4. Non-negative dwell and interval checks
+  // 4. Interval and dwell checks (H2: intervalSec > 0 and <= 86400)
+  if (intervalSec <= 0 || intervalSec > 86400) {
+    errors.push(`intervalSec must be strictly positive and at most 86400 seconds (24h), got ${intervalSec}`);
+  }
   const nonNegatives: [string, number][] = [
     ['burnRateMax', burnRateMax],
-    ['intervalSec', intervalSec],
     ['applyLatencySec', applyLatencySec],
     ['fallbackMinDwellSec', fallbackMinDwellSec],
     ['recoveryDwellSec', recoveryDwellSec],
@@ -341,7 +348,7 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
     }
   }
 
-  // 5. Classification rules validation
+  // 5. Classification rules validation (B4: strict boolean check and default false)
   const rawRules = getProp(raw, 'classificationRules', 'classification_rules');
   const classificationRules: ClassificationRule[] = [];
   if (rawRules !== undefined) {
@@ -376,9 +383,26 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
             `Classification rule at index ${idx} modality must be 'subscription_pool', 'budgeted_allowance', or 'direct_api', got '${String(modality)}'`
           );
         }
-        const managed = typeof item.managed === 'boolean' ? item.managed : true;
 
-        if (pattern && provider && (tier === 'pro' || tier === 'non_pro') && (modality === 'subscription_pool' || modality === 'budgeted_allowance' || modality === 'direct_api')) {
+        // B4: Rule-level managed defaults (fail-safe false; reject non-boolean types)
+        let managed = false;
+        if (item.managed === undefined) {
+          managed = false;
+        } else if (typeof item.managed === 'boolean') {
+          managed = item.managed;
+        } else {
+          errors.push(
+            `Classification rule at index ${idx} 'managed' must be a boolean (true/false), got ${typeof item.managed}`
+          );
+        }
+
+        if (
+          pattern &&
+          provider &&
+          (tier === 'pro' || tier === 'non_pro') &&
+          (modality === 'subscription_pool' || modality === 'budgeted_allowance' || modality === 'direct_api') &&
+          typeof managed === 'boolean'
+        ) {
           classificationRules.push({
             pattern,
             provider,
@@ -425,19 +449,22 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
 export interface CpaPolicyLoaderOptions {
   customFilePath?: string;
   debounceMs?: number;
+  pollIntervalMs?: number;
   onPolicyChange?: (newPolicy: FullWatermarkPolicy, oldPolicy: FullWatermarkPolicy) => void;
   onError?: (error: Error) => void;
 }
 
 /**
- * Policy loader and hot-reload watcher with SHA-256 change detection and safe shadow fallback.
+ * Policy loader and hot-reload watcher with SHA-256 change detection,
+ * directory-level watching for atomic renames, polling fallback, and safe shadow fallback.
  */
 export class CpaPolicyLoader {
-  private currentPolicy: FullWatermarkPolicy = { ...DEFAULT_WATERMARK_POLICY };
+  private currentPolicy: FullWatermarkPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
   private resolvedPath: string | null = null;
   private lastFileHash: string | null = null;
   private customFilePath?: string;
   private debounceMs: number;
+  private pollIntervalMs: number;
   private onPolicyChange?: (newPolicy: FullWatermarkPolicy, oldPolicy: FullWatermarkPolicy) => void;
   private onError?: (error: Error) => void;
   private watcher: fs.FSWatcher | null = null;
@@ -447,6 +474,7 @@ export class CpaPolicyLoader {
   constructor(options: CpaPolicyLoaderOptions = {}) {
     this.customFilePath = options.customFilePath;
     this.debounceMs = options.debounceMs ?? 150;
+    this.pollIntervalMs = options.pollIntervalMs ?? 5000;
     this.onPolicyChange = options.onPolicyChange;
     this.onError = options.onError;
   }
@@ -502,10 +530,10 @@ export class CpaPolicyLoader {
   }
 
   /**
-   * Current active policy.
+   * Current active policy (deep clone to prevent mutation of internal state).
    */
   public getPolicy(): FullWatermarkPolicy {
-    return { ...this.currentPolicy };
+    return structuredClone(this.currentPolicy);
   }
 
   /**
@@ -524,19 +552,32 @@ export class CpaPolicyLoader {
 
   /**
    * Loads the watermark policy from file or falls back to shadow defaults.
-   * On validation failure, falls back safely to shadow mode without crashing.
+   * On validation failure or file cap excess, falls back safely to shadow mode without crashing.
    */
   public loadPolicy(): FullWatermarkPolicy {
     const filePath = this.resolvePolicyFile();
     this.resolvedPath = filePath;
 
     if (!filePath) {
-      this.currentPolicy = { ...DEFAULT_WATERMARK_POLICY };
+      this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
       this.lastFileHash = null;
       return this.getPolicy();
     }
 
     try {
+      // M2: Cap file size at 256 KB
+      const stat = fs.statSync(filePath);
+      if (stat.size > MAX_POLICY_FILE_SIZE) {
+        const err = new Error(
+          `Policy file at ${filePath} exceeds maximum allowed size of 256 KB (${stat.size} bytes)`
+        );
+        this.emitError(err);
+        this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
+        this.currentPolicy.mode = 'shadow';
+        this.lastFileHash = null; // M3
+        return this.getPolicy();
+      }
+
       const rawContent = fs.readFileSync(filePath, 'utf8');
       const hash = this.computeHash(rawContent);
 
@@ -550,7 +591,8 @@ export class CpaPolicyLoader {
           }`
         );
         this.emitError(err);
-        this.currentPolicy = { ...DEFAULT_WATERMARK_POLICY, mode: 'shadow' };
+        this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
+        this.currentPolicy.mode = 'shadow';
         this.lastFileHash = hash;
         return this.getPolicy();
       }
@@ -561,7 +603,8 @@ export class CpaPolicyLoader {
           `Policy validation failed at ${filePath}:\n${validation.errors.join('\n')}`
         );
         this.emitError(err);
-        this.currentPolicy = { ...DEFAULT_WATERMARK_POLICY, mode: 'shadow' };
+        this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
+        this.currentPolicy.mode = 'shadow';
         this.lastFileHash = hash;
         return this.getPolicy();
       }
@@ -570,18 +613,21 @@ export class CpaPolicyLoader {
       this.lastFileHash = hash;
       return this.getPolicy();
     } catch (readErr) {
+      // M3: Set this.lastFileHash = null on read error
+      this.lastFileHash = null;
       const err = new Error(
         `Failed to read policy file at ${filePath}: ${
           readErr instanceof Error ? readErr.message : String(readErr)
         }`
       );
       this.emitError(err);
-      this.currentPolicy = { ...DEFAULT_WATERMARK_POLICY, mode: 'shadow' };
+      this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
+      this.currentPolicy.mode = 'shadow';
       return this.getPolicy();
     }
   }
 
-  private emitError(err: Error): void {
+  public emitError(err: Error): void {
     if (this.onError) {
       try {
         this.onError(err);
@@ -593,47 +639,94 @@ export class CpaPolicyLoader {
 
   /**
    * Reload handler invoked when file change is detected.
+   * Debounces notifications and handles atomic replaces (B2 & B3).
    */
-  private handleFileChange(): void {
+  public handleFileChange(): void {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      if (!this.resolvedPath || !fs.existsSync(this.resolvedPath)) {
-        // File may have been deleted or moved
-        const newlyResolved = this.resolvePolicyFile();
-        if (newlyResolved !== this.resolvedPath) {
-          const oldPolicy = this.currentPolicy;
-          this.loadPolicy();
-          if (this.onPolicyChange) {
-            this.onPolicyChange(this.getPolicy(), oldPolicy);
-          }
-        }
-        return;
-      }
-
+      // B3: Wrap entire debounce execution in try/catch to protect Node process
       try {
-        const content = fs.readFileSync(this.resolvedPath, 'utf8');
-        const hash = this.computeHash(content);
-        if (hash === this.lastFileHash) {
-          // File content unchanged (spurious notification)
+        if (!this.resolvedPath || !fs.existsSync(this.resolvedPath)) {
+          // File may have been deleted, replaced atomically, or moved
+          const newlyResolved = this.resolvePolicyFile();
+          if (newlyResolved !== this.resolvedPath || (newlyResolved && fs.existsSync(newlyResolved))) {
+            const oldPolicy = structuredClone(this.currentPolicy);
+            this.loadPolicy();
+            this.notifyChange(this.getPolicy(), oldPolicy);
+          }
           return;
         }
 
-        const oldPolicy = this.currentPolicy;
-        this.loadPolicy();
-        if (this.onPolicyChange) {
-          this.onPolicyChange(this.getPolicy(), oldPolicy);
+        const stat = fs.statSync(this.resolvedPath);
+        if (stat.size > MAX_POLICY_FILE_SIZE) {
+          const oldPolicy = structuredClone(this.currentPolicy);
+          this.loadPolicy();
+          this.notifyChange(this.getPolicy(), oldPolicy);
+          return;
         }
+
+        const content = fs.readFileSync(this.resolvedPath, 'utf8');
+        const hash = this.computeHash(content);
+        if (hash === this.lastFileHash) {
+          // Content unchanged (spurious notification)
+          return;
+        }
+
+        const oldPolicy = structuredClone(this.currentPolicy);
+        this.loadPolicy();
+        this.notifyChange(this.getPolicy(), oldPolicy);
       } catch (err) {
         this.emitError(err instanceof Error ? err : new Error(String(err)));
       }
     }, this.debounceMs);
   }
 
+  private notifyChange(newPolicy: FullWatermarkPolicy, oldPolicy: FullWatermarkPolicy): void {
+    if (this.onPolicyChange) {
+      try {
+        this.onPolicyChange(newPolicy, oldPolicy);
+      } catch (err) {
+        this.emitError(err instanceof Error ? err : new Error(String(err)));
+      }
+    }
+  }
+
   /**
-   * Starts hot-reload file watching on resolvedPolicyFile (or candidate directory).
+   * Checks policy file directly for changes (used by periodic polling fallback).
+   */
+  private checkFileForChanges(): void {
+    try {
+      const targetPath = this.resolvedPath || this.resolvePolicyFile();
+      if (!targetPath) {
+        if (this.lastFileHash !== null) {
+          this.handleFileChange();
+        }
+        return;
+      }
+
+      if (!fs.existsSync(targetPath)) {
+        if (this.lastFileHash !== null) {
+          this.handleFileChange();
+        }
+        return;
+      }
+
+      const content = fs.readFileSync(targetPath, 'utf8');
+      const hash = this.computeHash(content);
+      if (hash !== this.lastFileHash) {
+        this.handleFileChange();
+      }
+    } catch (err) {
+      this.emitError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * Starts hot-reload file watching on directory of resolvedPolicyFile (B2)
+   * with atomic replace resilience and periodic polling fallback.
    */
   public startWatcher(): void {
     this.stopWatcher();
@@ -643,9 +736,13 @@ export class CpaPolicyLoader {
       return;
     }
 
+    const dir = path.dirname(filePath);
+    const targetFile = path.basename(filePath);
+
     try {
-      this.watcher = fs.watch(filePath, (eventType) => {
-        if (eventType === 'change' || eventType === 'rename') {
+      // B2: Watch parent directory to survive inode rebinding on atomic mv
+      this.watcher = fs.watch(dir, (_eventType, filename) => {
+        if (!filename || filename === targetFile) {
           this.handleFileChange();
         }
       });
@@ -655,10 +752,17 @@ export class CpaPolicyLoader {
     } catch (err) {
       this.emitError(err instanceof Error ? err : new Error(String(err)));
     }
+
+    // B2: Periodic polling fallback for Docker mounts / network storage
+    if (this.pollIntervalMs > 0) {
+      this.pollInterval = setInterval(() => {
+        this.checkFileForChanges();
+      }, this.pollIntervalMs);
+    }
   }
 
   /**
-   * Stops the hot-reload watcher.
+   * Stops the hot-reload watcher and polling timer.
    */
   public stopWatcher(): void {
     if (this.debounceTimer) {

@@ -213,9 +213,39 @@ async function run() {
     });
     assert(!negativeInterval.ok, 'Negative interval rejected');
 
-    pass('validateWatermarkPolicy enforces mode, ordering invariants, and non-negative durations');
+    // B4: managed strictly boolean validation
+    const nonBooleanManaged = validateWatermarkPolicy({
+      classification_rules: [
+        {
+          pattern: 'test-*',
+          provider: 'test',
+          tier: 'pro',
+          modality: 'subscription_pool',
+          managed: 'not_a_boolean',
+        },
+      ],
+    });
+    assert(!nonBooleanManaged.ok, 'Non-boolean managed field must be rejected');
+
+    // B4: omission defaults to false
+    const omittedManaged = validateWatermarkPolicy({
+      classification_rules: [
+        {
+          pattern: 'test-*',
+          provider: 'test',
+          tier: 'pro',
+          modality: 'subscription_pool',
+        },
+      ],
+    });
+    assert(omittedManaged.ok, 'Omitted managed field should be accepted');
+    if (omittedManaged.ok) {
+      assertEquals(omittedManaged.policy.classificationRules[0].managed, false, 'Omitted managed defaults strictly to false');
+    }
+
+    pass('validateWatermarkPolicy enforces mode, ordering invariants, non-negative durations, and strict managed boolean');
   } catch (err) {
-    fail('validateWatermarkPolicy enforces mode, ordering invariants, and non-negative durations', err);
+    fail('validateWatermarkPolicy enforces mode, ordering invariants, non-negative durations, and strict managed boolean', err);
   }
 
   // --------------------------------------------------------------------------
@@ -293,7 +323,7 @@ async function run() {
   }
 
   // --------------------------------------------------------------------------
-  // Suite 4: Hot-Reload File Watching & SHA-256 Debouncing
+  // Suite 4: Hot-Reload File Watching & SHA-256 Debouncing (including Atomic Replace B2/B3)
   // --------------------------------------------------------------------------
   console.log('\nSuite 4: Hot-Reload File Watching & SHA-256 Debouncing');
   try {
@@ -353,11 +383,28 @@ async function run() {
     assertEquals(reloadCount, 1, 'Content change triggers hot-reload callback');
     assertEquals(latestMode, 'enforce', 'Hot reloaded policy has new enforce mode');
 
+    // B2: Atomic file replacement (write to temp file then rename over target)
+    const atomicTempFile = path.join(tempDir, 'temp-replace.yaml');
+    fs.writeFileSync(
+      atomicTempFile,
+      yaml.stringify({
+        mode: 'off',
+        interval_sec: 120,
+        pro: { drain_pct: 25, drain_recovery_pct: 30, hard_stop_pct: 5, hard_stop_recovery_pct: 8 },
+      }),
+      'utf8'
+    );
+    fs.renameSync(atomicTempFile, policyFile);
+    await sleep(250);
+
+    assertEquals(reloadCount, 2, 'Atomic rename replace triggers hot-reload callback without unbinding watcher');
+    assertEquals(latestMode, 'off', 'Atomic replace loaded mode off');
+
     loader.stopWatcher();
     fs.rmSync(tempDir, { recursive: true, force: true });
-    pass('Hot-reload watcher debounces updates and detects SHA-256 content changes');
+    pass('Hot-reload watcher debounces updates and detects SHA-256 content changes across atomic renames');
   } catch (err) {
-    fail('Hot-reload watcher debounces updates and detects SHA-256 content changes', err);
+    fail('Hot-reload watcher debounces updates and detects SHA-256 content changes across atomic renames', err);
   }
 
   // --------------------------------------------------------------------------
@@ -420,9 +467,32 @@ async function run() {
     assertEquals(updatedHistory.length, 2, 'Audit history contains 2 entries in reverse chronological order');
     assertEquals(updatedHistory[0].generation, 2, 'Newest history entry is generation 2');
 
-    pass('CpaWatermarkStore atomically saves, loads, and appends audit history');
+    // B1: Test savepoint release on error injection
+    let saveFailed = false;
+    try {
+      // Intentionally cause failure during saveState by corrupting table schema with conflicting trigger
+      db.exec(`
+        CREATE TRIGGER fail_trigger BEFORE INSERT ON cpa_watermark_history
+        BEGIN
+          SELECT RAISE(FAIL, 'simulated store failure');
+        END;
+      `);
+      store.saveState(dummyState, 'failing_tick');
+    } catch {
+      saveFailed = true;
+    }
+    assert(saveFailed, 'Injected failure properly threw');
+
+    // Remove trigger and verify store can continue using savepoints without transaction leak
+    db.exec('DROP TRIGGER fail_trigger;');
+    dummyState.generation = 3;
+    store.saveState(dummyState, 'recovered_tick');
+    const recovered = store.loadState();
+    assertEquals(recovered?.generation, 3, 'Savepoint succeeded after failure without transaction leak');
+
+    pass('CpaWatermarkStore atomically saves, loads, appends audit history, and cleans savepoints on failure');
   } catch (err) {
-    fail('CpaWatermarkStore atomically saves, loads, and appends audit history', err);
+    fail('CpaWatermarkStore atomically saves, loads, appends audit history, and cleans savepoints on failure', err);
   }
 
   // --------------------------------------------------------------------------
@@ -444,7 +514,7 @@ async function run() {
     store.saveState(dummyState, 'tick_2');
     assertEquals(store.getHistory().length, 2, 'Two records present');
 
-    // Prune with 0 ms retention
+    // Prune with future cutoff
     const pruned = store.pruneHistory(-1000); // cutoff in future deletes all
     assert(pruned >= 2, 'Pruned at least 2 records');
     assertEquals(store.getHistory().length, 0, 'History empty after pruning');

@@ -14,6 +14,24 @@ export interface WatermarkHistoryEntry {
   stateJson: string;
 }
 
+function isObject(val: unknown): val is Record<string, unknown> {
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
+}
+
+/**
+ * Validates deserialized EngineState schema to guard against corrupt or malformed DB records.
+ */
+function isValidEngineState(val: unknown): val is EngineState {
+  if (!isObject(val)) return false;
+  if (val.mode !== 'off' && val.mode !== 'shadow' && val.mode !== 'enforce') return false;
+  if (!isObject(val.tierStates)) return false;
+  if (!isObject(val.accountStates)) return false;
+  if (typeof val.generation !== 'number' || !Number.isFinite(val.generation)) return false;
+  if (val.tierStateEnteredAt !== undefined && !isObject(val.tierStateEnteredAt)) return false;
+  if (val.rampStep !== undefined && !isObject(val.rampStep)) return false;
+  return true;
+}
+
 /**
  * Persistent store for CPA Watermark Engine state and history snapshots.
  * Uses node:sqlite DatabaseSync for ACID-compliant atomic transactions.
@@ -54,7 +72,7 @@ export class CpaWatermarkStore {
   }
 
   /**
-   * Loads the current persisted EngineState, or null if no state has been saved yet.
+   * Loads the current persisted EngineState, or null if no state has been saved yet or if corrupted.
    */
   public loadState(): { state: EngineState; generation: number; updatedAt: number; policy?: FullWatermarkPolicy } | null {
     const row = this.db
@@ -66,24 +84,36 @@ export class CpaWatermarkStore {
     }
 
     try {
-      const state = JSON.parse(row.state_json) as EngineState;
+      const parsed = JSON.parse(row.state_json);
+      if (!isValidEngineState(parsed)) {
+        console.warn('[cpaWatermarkStore] Corrupted or invalid EngineState schema in cpa_watermark_state; ignoring');
+        return null;
+      }
+
       let policy: FullWatermarkPolicy | undefined;
       if (row.policy_json) {
-        policy = JSON.parse(row.policy_json) as FullWatermarkPolicy;
+        try {
+          policy = JSON.parse(row.policy_json) as FullWatermarkPolicy;
+        } catch {
+          // ignore corrupted policy_json
+        }
       }
+
       return {
-        state,
+        state: parsed,
         generation: Number(row.generation),
         updatedAt: Number(row.updated_at),
         policy,
       };
-    } catch {
+    } catch (parseErr) {
+      console.warn('[cpaWatermarkStore] JSON parse failure for state_json in cpa_watermark_state:', parseErr);
       return null;
     }
   }
 
   /**
    * Saves engine state atomically: updates state table and appends an audit history entry.
+   * Releases savepoints on success and on error to prevent SQLite savepoint transaction leaks.
    */
   public saveState(
     state: EngineState,
@@ -128,8 +158,9 @@ export class CpaWatermarkStore {
     } catch (err) {
       try {
         this.db.exec('ROLLBACK TO cpa_wm_save');
+        this.db.exec('RELEASE cpa_wm_save');
       } catch {
-        // Rollback failed; swallow rollback error to rethrow original
+        // Rollback/release failed; swallow to rethrow original error
       }
       throw err;
     }
@@ -180,6 +211,7 @@ export class CpaWatermarkStore {
 
   /**
    * Clears state and history tables (useful for tests or operational reset).
+   * Releases savepoint on both success and failure.
    */
   public clear(): void {
     this.db.exec('SAVEPOINT cpa_wm_clear');
@@ -190,6 +222,7 @@ export class CpaWatermarkStore {
     } catch (err) {
       try {
         this.db.exec('ROLLBACK TO cpa_wm_clear');
+        this.db.exec('RELEASE cpa_wm_clear');
       } catch {
         // Ignore
       }
