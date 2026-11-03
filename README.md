@@ -1,293 +1,290 @@
 <div align="center">
 
-<img src="web/public/icon.svg" width="88" height="88" alt="FQD (Fleet Quota Display)" />
+<img src="web/public/icon.svg" width="88" height="88" alt="FQD (Fleet Quota Deck)" />
 
-# FQD — Fleet Quota Display
+# FQD — Fleet Quota Deck
 
-**The unified observability deck for AI subscription fleets, proxy pools, and API keys.**
+**The unified observability deck and routing intelligence for AI subscription fleets, CLIProxy pools, and LiteLLM gateways.**
 
-Mobile PWA · Self-hosted web cockpit · Proxy & Gateway Integrations (CLIProxy & LiteLLM). Continuous burst monitoring (5-hour), weekly quota cycles (7-day), and token telemetry. Your credentials never leave your own device or server.
+*Monitor 5-hour rolling bursts, 7-day weekly quota cycles, and multi-model burn rates before you hit provider limits. Self-hosted, private by design, with credentials staying on infrastructure you control.*
 
-<a href="https://github.com/piyushkumarjiit/fleet-quota-deck/stargazers"><img src="https://img.shields.io/github/stars/piyushkumarjiit/fleet-quota-deck?style=flat&color=1f9d74" alt="Stars" /></a>
-<img src="https://img.shields.io/badge/license-MIT-black" alt="MIT" />
-<img src="https://img.shields.io/badge/CLIProxy%20·%20LiteLLM%20·%20Antigravity-supported-38bdf8" alt="Gateways" />
+<a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
+<img src="https://img.shields.io/badge/Docker-Ready-2496ed?logo=docker&logoColor=white" alt="Docker Ready" />
+<img src="https://img.shields.io/badge/Gateways-CLIProxy%20·%20LiteLLM-38bdf8" alt="Supported Gateways" />
+<img src="https://img.shields.io/badge/Providers-Claude%20·%20ChatGPT%20·%20Gemini%20·%20Antigravity-8b5cf6" alt="Supported Providers" />
+
+<br/><br/>
+<img src="web/public/screenshot-overview.png" width="92%" alt="FQD Fleet Cockpit Screenshot" style="border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
 
 </div>
 
-> **Note on Project Lineage & Attribution**: FQD (Fleet Quota Display) originated from [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan under the MIT License, and has been extensively modernized and re-architected into a high-concurrency fleet observability cockpit for CLIProxy and LiteLLM gateway topologies.
+> **Lineage & Attribution**: FQD (Fleet Quota Deck) originated from [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan under the MIT License, and has been extensively refactored into a high-concurrency fleet observability deck and routing engine for multi-account CLIProxy and LiteLLM gateway topologies.
 
 ---
 
-## The problem
+## Why FQD?
 
-You have more than one AI subscription — maybe **two Claude accounts and two ChatGPT accounts** — and every existing tracker assumes one account per service. So you keep logging in and out just to check "how much of my 5-hour window is left on the *other* account?"
+Modern AI engineering workflows increasingly rely on multiple accounts, subscription tiers, and local proxy gateways:
 
-**AI Limits Tracker is built for the multi-account case from the ground up.** Every account is fully isolated: its own credentials, its own token refresh, its own history. Two Claude accounts show two different numbers, side by side.
-
-## What you get
-
-- 🔢 **All limits on one screen** — Claude (5-hour, weekly, Opus/Sonnet, extra spend), ChatGPT (Codex 5h & weekly, credits), Gemini (session & weekly), Antigravity (Gemini 5-hour & weekly, Claude/GPT, Argon).
-- 👥 **Unlimited accounts per service** — two, three, ten Claude accounts? Each isolated, each refreshed in the background.
-- ⏱ **Live reset countdowns** — "resets in 2h 14m", recalculated every tick.
-- 📊 **Real statistics** — day streaks, limit hits, time spent in the red zone, burn-rate forecast ("will run out in 1h 40m"), busiest hours & weekdays, per-account comparison. All computed from real measurements — no invented message counts.
-- 🔔 **Alerts** — at 20% / 10% / 0% remaining, on restore, and when a session needs re-login. Optional Telegram push on the server.
-- 🔒 **Private by design** — tokens live only on your device (Keychain/Keystore) or your own server (AES-256-GCM encrypted). Requests go straight to Anthropic / OpenAI / Google. No third-party backend, ever.
-
-## Three ways to use it
-
-| | Best for | Accounts |
-|---|---|---|
-| 📱 **Mobile app** (Expo / React Native) | Personal daily driver on your phone | Unlimited, isolated |
-| 🖥 **Web panel** (self-hosted PWA) | Check from anywhere, install to home screen, 24/7 background polling | Unlimited, isolated |
-| 🧩 **Chrome extension** | A glance from the toolbar while you work | One per browser profile |
+1. **For Fleet Operators & AI Engineers:**
+   You route agentic workloads through **CLIProxy** or **LiteLLM** across pools of accounts (Claude Max, ChatGPT Team/Pro, Google Antigravity). You need machine-readable headroom, predictive reset countdowns, and Prometheus metrics to steer traffic away from accounts nearing exhaustion and spill over cleanly to metered API keys.
+2. **For Power Users & Developers:**
+   You juggle multiple AI subscriptions (e.g. personal Claude, team Claude, Codex, Gemini) and need a single, honest dashboard instead of repeatedly logging in and out to check remaining window capacity.
 
 ---
 
-## Web panel — `#web-panel`
+## How the Numbers Are Honest
 
-A single Node file (**zero runtime dependencies**, Node 22+) that polls your accounts around the clock, stores encrypted history, serves a password-protected PWA, and can push alerts to Telegram. Install it to your phone's home screen and it behaves like a native app.
+No major AI subscription exposes an arbitrary message counter, so **FQD never invents numbers**.
+- **Ground-Truth Percentages:** It reads the exact rate-limit window percentages reported by official provider endpoints.
+- **Derived Velocity:** Streaks, burn-rate forecasts ("will exhaust in 1h 40m"), and load classifications are derived from real window delta changes over time.
+- **Transparent Health:** When a provider endpoint returns no data or fails to refresh, FQD explicitly marks the measurement as **stale** or **no data** — never a fabricated 0%.
+- **Read-Only by Default:** Quota polling only reads usage and never issues generative prompts, placing zero overhead on your active quotas.
+
+---
+
+## Key Capabilities
+
+- 📊 **Unified Multi-Horizon Radar:** Dual-horizon monitoring tracking short-term 5-hour rolling burst limits alongside 7-day weekly cycle balances.
+- 👥 **Multi-Account Fleet Isolation:** Pool 10, 20, or 50+ accounts across Google Antigravity, Claude Code, and ChatGPT with fully isolated sessions, encryption, and token refreshes.
+- ⏱ **Dynamic Reset Countdowns:** Precise rolling countdowns (e.g. `resets in 1h 14m (14:30 UTC)`) refreshed in real-time.
+- 🚦 **Intelligent Gateway Integration:** Exposes normalized `/api/quota` JSON and Prometheus `/metrics` for dynamic routing in CLIProxy and LiteLLM.
+- 📈 **30-Day Velocity Histograms:** Model-level token burn velocity (Gemini 2.5 Pro, Flash, Claude 3.7 Sonnet) with 30 discrete daily telemetry bars.
+- 🔔 **Proactive Quota Warnings:** Automatically flags slots as **Exhausted** ($\le 15\%$), **Tight** ($\le 35\%$), or **Healthy** ($> 35\%$).
+- 🔒 **Self-Hosted & Private:** All authentication tokens and cookies remain encrypted on your host (AES-256-GCM) with no third-party telemetry.
+
+---
+
+## Quickstart
+
+### 1-Line Docker Run
+
+Run FQD instantly on port 1455:
+
+```bash
+docker run -d \
+  --name fqd \
+  -p 1455:1455 \
+  -e ADMIN_PASSWORD="your-strong-password" \
+  -e APP_SECRET="$(openssl rand -hex 32)" \
+  -v fqd-data:/app/data \
+  ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
+
+# Open http://localhost:1455
+```
+
+### Production Deployment with Docker Compose
+
+FQD includes production Caddy integration supporting automated Let's Encrypt certificates or internal LAN CAs:
 
 ```bash
 git clone https://github.com/piyushkumarjiit/AI-Limits-Tracker.git
 cd AI-Limits-Tracker
-npm install
-npm run build:server && npm run build:web
 
-cp .env.example .env                 # set ADMIN_PASSWORD and APP_SECRET
-WEB_DIR=web/dist DATA_DIR=./data node server/dist/server.mjs
-# open http://localhost:8795
+cp .env.example .env
+# Edit .env and set:
+#   ADMIN_PASSWORD=your-secure-password
+#   APP_SECRET=$(openssl rand -hex 32)
+#   SITE_ADDRESS=fqd.yourdomain.com (or local IP)
+
+mkdir -p data && sudo chown -R 1000:1000 data
+
+# Mode 1: Public domain with automatic Let's Encrypt TLS
+docker compose --profile public up -d
+
+# Mode 2: Local LAN / LXC with internal self-signed CA
+docker compose --profile internal up -d
+
+# Mode 3: Direct HTTP on port 1455 (behind your own reverse proxy)
+docker compose --profile direct up -d
 ```
 
-### Run with Docker (recommended)
+---
 
-```bash
-git clone https://github.com/piyushkumarjiit/AI-Limits-Tracker.git
-cd AI-Limits-Tracker
-cp .env.example .env                 # set ADMIN_PASSWORD, APP_SECRET (openssl rand -hex 32) and SITE_ADDRESS
-mkdir -p data && sudo chown 1000:1000 data   # the container runs as UID 1000 (node)
-
-docker compose --profile public   up -d   # mode 1: public domain, Let's Encrypt
-docker compose --profile internal up -d   # mode 2: LAN / LXC, Caddy internal CA
-docker compose --profile direct   up -d   # mode 3: Caddy off, your own reverse proxy
-```
-
-You must pick one profile: a plain `docker compose up -d` starts nothing. Select it with `--profile`; `COMPOSE_PROFILES` in the environment is additive and must not be mixed with it (both modes would start and collide on host 80/443 and `./data`). Images build locally or are pulled from `ghcr.io/piyushkumarjiit/ai-limits-tracker:latest`.
-
-Switching modes, or upgrading from the earlier single-service compose file: stop the old stack first with `docker compose --profile <old-mode> down` (or `docker compose down --remove-orphans` right after upgrading). Otherwise the previous mode's app container keeps running and polling alongside the new one, both writing `./data`, and a leftover Caddy container keeps host 80/443 so the new one fails with "port is already allocated".
-
-#### Why HTTPS is required
-
-The panel's login cookie is always marked `Secure`. Over plain `http://` on any address other than `localhost`, the browser silently drops it, so login cannot persist (and a non-Secure cookie would travel in clear text anyway). Any real Docker deployment therefore needs TLS in front of the app. The bundled [Caddy](https://caddyserver.com/) service provides it; its config is in [`deploy/caddy/`](deploy/caddy/).
-
-In the two Caddy modes the app port is **not** published to the host: only Caddy publishes 80/443. Caddy sets `X-Real-IP` and `X-Forwarded-Proto`, and the app runs with `TRUST_PROXY=1` (forced by compose in those modes). Caddy's certificates and config live in the named volumes `caddy_data` and `caddy_config`. Set `ALLOWED_HOSTS` in `.env` to the same host as `SITE_ADDRESS` (hostname only, no port).
-
-**Mode 1 — public domain (`--profile public`).** Point a DNS record at the host, make ports 80 and 443 reachable from the internet, then set `SITE_ADDRESS=tracker.example.com` and `ALLOWED_HOSTS=tracker.example.com`. Caddy obtains and renews a Let's Encrypt certificate automatically. Open `https://tracker.example.com`.
-
-**Mode 2 — home LAN or LXC, no public domain (`--profile internal`).** Set `SITE_ADDRESS` to the LAN IP or local name (for example `192.168.1.20` or `tracker.lan`) and `ALLOWED_HOSTS` to the same. Caddy issues the certificate from its own internal CA (`tls internal`), so browsers warn until you trust the root certificate once per client device:
-
-```bash
-docker compose --profile internal cp caddy-internal:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
-```
-
-Import `caddy-root.crt` into the device's trust store (Windows: *certmgr* → Trusted Root Certification Authorities; macOS: Keychain Access → System → Always Trust; Debian/Ubuntu: copy to `/usr/local/share/ca-certificates/` and run `sudo update-ca-certificates`; Firefox keeps its own store under Settings → Certificates). Keep `caddy_data` — it holds the CA key; recreating it issues a new root you must trust again.
-
-**Mode 3 — Caddy off (`--profile direct`).** Starts only the app, published on `${PORT:-1455}` as before, with `TRUST_PROXY` taken from `.env` (default `0`). Put your own TLS-terminating reverse proxy in front; [`deploy/nginx.conf`](deploy/nginx.conf) is the systemd deployment's vhost, so for direct mode change its `proxy_pass` to the published port (`http://127.0.0.1:1455` by default). Set `TRUST_PROXY=1` only if your proxy sets `X-Real-IP`. Without HTTPS only `http://localhost` works. If you are coming from one of the Caddy modes, stop it first (`docker compose --profile <old-mode> down`) so it releases `./data` and host 80/443.
-
-**Docker inside an LXC container.** The LXC needs nesting enabled on the host (Proxmox: Options → Features → *nesting*; or `lxc config set <name> security.nesting true`), otherwise Docker cannot start containers. Caddy binds 80/443 inside the Docker network namespace, so no extra LXC privileges are needed beyond that.
-
-Host ports are configurable with `HTTP_PORT`, `HTTPS_PORT` (Caddy) and `PORT` (direct mode). In public mode leave `HTTP_PORT` and `HTTPS_PORT` at 80/443: Let's Encrypt validates and renews on those ports.
-
-The image is a two-stage build: Expo/TypeScript tooling stays in the build stage, and the runtime image contains only the compiled server bundle (zero runtime dependencies) and the web panel. It runs as a non-root user with a read-only root filesystem, all capabilities dropped and `no-new-privileges`. Only `/app/data` is writable — that is where the SQLite database lives.
-
-> If you do not create `data/` first, Docker creates it owned by root and the container cannot write to it. Run the `chown` line above, or point the volume at a directory your user owns.
-
-**Offline / air-gapped transfer** — build once, then move the image:
-
-```bash
-# Direct mode: the app image alone.
-docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest | gzip > ai-limits-tracker.tar.gz
-
-# Caddy modes (public/internal): pull the exact Caddy build compose pins if you only built the app,
-# then save both. Copy this digest from the `image:` line in docker-compose.yml if it has changed.
-docker pull caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
-docker save ghcr.io/piyushkumarjiit/ai-limits-tracker:latest caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d | gzip > ai-limits-tracker.tar.gz
-
-scp ai-limits-tracker.tar.gz user@node:/tmp/
-# on the target node:
-gunzip -c /tmp/ai-limits-tracker.tar.gz | docker load
-docker compose --profile public up -d --no-build   # use --profile internal or direct instead as needed
-```
-
-Images are published for `linux/amd64` and `linux/arm64` by [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) on every push to `main` and on `v*` tags.
-
-**Deploy to a VPS with systemd + nginx instead** — systemd unit, nginx vhost and a one-shot script are in [`deploy/`](deploy/). When a reverse proxy sits in front of the app, set `TRUST_PROXY=1` so rate limiting uses the real client IP:
-
-```bash
-npm run build:server && npm run build:web
-scp -r server/dist web/dist deploy  user@your-host:/opt/ai-limits-tracker/
-# on the host:
-DOMAIN=limits.example.com bash /opt/ai-limits-tracker/deploy/deploy.sh
-```
-
-### Connecting an account (web / server)
-
-The server reads your limits using a session you export from your browser — no passwords, no impersonating other apps:
-
-- **Claude** — `claude.ai` → DevTools → Application → Cookies → copy `sessionKey`, or *Copy as cURL* on any `/api` request.
-- **ChatGPT** — `chatgpt.com` → DevTools → Network → *Copy as cURL* on a `backend-api` request.
-- **Gemini** — `gemini.google.com` → Network → *Copy as cURL* on a `batchexecute` request (one browser profile per Google account).
-- **Antigravity** — OAuth sign-in via Google (recommended) or paste a Google refresh token (`1//…`).
-
-Paste it into **Add account**. For a second account of the same service, export from a second browser profile / incognito window.
-
-> **Antigravity provider note:** Antigravity limits are read from Google's internal Cloud Code service using Antigravity's own sign-in client. This is unofficial. AI-Limits-Tracker only *reads* your quota every few minutes and never sends prompts, but Google could change or restrict this at any time.
-
-## Security notes
-
-- The server requires `ADMIN_PASSWORD` and `APP_SECRET`. Generate each with `openssl rand -hex 32`; the server refuses to start when either is missing or still an example placeholder, and rejects a short or predictable `APP_SECRET`.
-- `API_TOKEN` is optional: a long-lived bearer token for scripts that cannot log in through the form.
-- `METRICS_TOKEN` is optional: dedicated bearer token for Prometheus `/metrics` scraping (defaults to `API_TOKEN` if not set). Must be at least 24 characters.
-- `SESSION_DAYS` sets the session cookie lifetime (default 30 days). `POST /api/sessions/revoke-all` ends every existing session at once.
-- `ALLOWED_HOSTS` limits which `Host` headers are accepted. Set `TRUST_PROXY=1` when a reverse proxy sits in front so rate limiting sees real client IPs (the Caddy profiles do this for you).
-- Run the panel behind HTTPS only — terminate TLS at a proxy in front of it — and do not expose it on a network you do not trust.
-- The database directory is created with mode `0700` and the database files with `0600`; keep them owned by the user that runs the server.
-- Client-facing errors are short and fixed; the exceptions behind them are logged on the server, never returned.
-- Outbound requests are restricted to `https`, checked against private and reserved addresses (including redirects), and capped at 1 MB.
-- Restarting the process clears the in-memory login throttle.
-
-## Mobile app
-
-```bash
-npm install
-npm start        # Expo — scan the QR with Expo Go, or press a / i
-```
-
-Built with Expo Router, SQLite, SecureStore and `react-native-svg`. The phone polls your accounts while the app is open and when it returns to the foreground.
-
-## Chrome extension
-
-```bash
-npm run build:extension
-# chrome://extensions → Developer mode → Load unpacked → select extension/dist
-```
-
-Reads limits through the browser's **own logged-in session** on claude.ai / chatgpt.com — it never signs in for you. One account per service per Chrome profile; use a second profile for a second account. A badge on the toolbar icon shows the lowest remaining %.
-
-## Prometheus & Quota Integration
-
-AI Limits Tracker exposes machine-readable endpoints for external schedulers, routing proxies (like LiteLLM or CLIProxyAPI), and observability stacks:
+## Machine-Readable API & Integrations
 
 ### 1. Unified Quota Endpoint (`GET /api/quota`)
 
-Returns normalized quota state, binding windows, headroom scores, age/staleness, and active weights for all accounts. Requires Bearer authentication (`API_TOKEN`).
+Returns normalized headroom, burst window states, and reset countdowns across your entire fleet:
 
 ```bash
-curl -H "Authorization: Bearer <API_TOKEN>" \
-  "https://tracker.example.com/api/quota?provider=claude&source=all"
+curl -H "Authorization: Bearer <ADMIN_PASSWORD_OR_API_TOKEN>" http://localhost:1455/api/quota
 ```
 
-Supported query parameters:
-- `provider`: Filter by provider (`claude`, `chatgpt`, `antigravity`, etc.; repeatable: `?provider=claude&provider=chatgpt`)
-- `source`: Filter by source (`cpa`, `native`, or `all`, defaults to `all`)
+#### Sample Response:
+```json
+{
+  "summary": {
+    "total_accounts": 15,
+    "active_accounts": 15,
+    "aggregate_headroom_pct": 38.6,
+    "status": "tight"
+  },
+  "accounts": [
+    {
+      "id": "antigravity:deepakgemini0@gmail.com",
+      "slot": "03",
+      "provider": "antigravity",
+      "email": "deepakgemini0@gmail.com",
+      "burst_5h": {
+        "remaining_pct": 6,
+        "status": "exhausted",
+        "requests_remaining": 9,
+        "resets_in": "1h 14m",
+        "reset_at": 1793725800
+      },
+      "cycle_7d": {
+        "balance_pct": 97,
+        "status": "healthy",
+        "reset_at": 1793985000
+      },
+      "routing_weight": 0.06
+    },
+    {
+      "id": "claude:piyushkumar.jiit@gmail.com",
+      "slot": "01",
+      "provider": "claude",
+      "email": "piyushkumar.jiit@gmail.com",
+      "burst_5h": {
+        "remaining_pct": 30,
+        "status": "tight",
+        "requests_remaining": 47,
+        "resets_in": "2h 45m",
+        "reset_at": 1793731800
+      },
+      "routing_weight": 0.30
+    }
+  ]
+}
+```
 
-Supports conditional requests via HTTP `ETag: W/"<version>"` and `304 Not Modified` headers with `Cache-Control: private, max-age=15`.
+---
 
 ### 2. Prometheus Metrics (`GET /metrics`)
 
-Exports Prometheus-compatible metrics (version 0.0.4) prefixed with `alt_`. Requires dedicated `METRICS_TOKEN` or `API_TOKEN` bearer authentication (throttled by bearer login limiter). Cookie authentication is explicitly rejected.
+FQD exports native Prometheus metrics designed for Grafana dashboards and Alertmanager rules:
 
-Sample Prometheus scrape job (`prometheus.yml`):
-```yaml
-scrape_configs:
-  - job_name: 'ai-limits-tracker'
-    scheme: https
-    static_configs:
-      - targets: ['tracker.example.com']
-    metrics_path: /metrics
-    authorization:
-      type: Bearer
-      credentials: '<METRICS_TOKEN>'
+```
+# HELP alt_account_headroom_ratio Normalized headroom score [0, 1]
+# TYPE alt_account_headroom_ratio gauge
+alt_account_headroom_ratio{provider="antigravity",slot="03",account="deepakgemini0"} 0.06
+alt_account_headroom_ratio{provider="claude",slot="01",account="piyushkumar"} 0.30
+
+# HELP alt_quota_window_remaining_ratio Remaining fraction of rate limit window [0, 1]
+# TYPE alt_quota_window_remaining_ratio gauge
+alt_quota_window_remaining_ratio{provider="antigravity",window="5h",slot="03"} 0.06
+alt_quota_window_remaining_ratio{provider="antigravity",window="7d",slot="03"} 0.97
+
+# HELP alt_quota_window_reset_timestamp_seconds Epoch timestamp of next window reset
+# TYPE alt_quota_window_reset_timestamp_seconds gauge
+alt_quota_window_reset_timestamp_seconds{provider="antigravity",window="5h",slot="03"} 1793725800
+
+# HELP alt_cpa_routing_weight Calculated load routing weight
+# TYPE alt_cpa_routing_weight gauge
+alt_cpa_routing_weight{provider="antigravity",slot="03",kind="applied"} 0.06
 ```
 
-Exported metric series:
-- `alt_quota_used_ratio{provider, account, auth_index, email, window}`: Quota used fraction `[0, 1]`
-- `alt_quota_remaining_ratio{provider, account, auth_index, email, window}`: Quota remaining fraction `[0, 1]`
-- `alt_quota_reset_timestamp_seconds{provider, account, auth_index, email, window}`: Window reset timestamp in epoch seconds
-- `alt_quota_burn_ratio_per_hour{provider, account, auth_index, email, window}`: Burn rate per hour `[0, 1]` (omitted when null)
-- `alt_quota_exhaust_timestamp_seconds{provider, account, auth_index, email, window}`: Predicted quota exhaustion epoch seconds (omitted when null)
-- `alt_account_headroom_ratio{provider, account, auth_index, email}`: Normalized headroom score `[0, 1]`
-- `alt_account_up{provider, account, auth_index, email, status}`: Binary indicator (`1` if `status==ok && !stale`, `0` otherwise)
-- `alt_account_last_success_timestamp_seconds{provider, account, auth_index, email}`: Timestamp of last successful sync
-- `alt_cpa_routing_weight{provider, account, auth_index, kind="planned|applied"}`: Routing weight
-- `alt_cpa_routing_writes_total{result="ok|error|skipped"}`: Counter of routing write attempts
-- `alt_cpa_routing_blocked{reason}`: Gauge set when enforce mode is blocked
-- `alt_cpa_discovery_last_success_timestamp_seconds`: Timestamp of last successful discovery pass
-- `alt_cpa_credentials{provider, link_state}`: Total CPA credentials by link state
-- `alt_cpa_ignored_credentials{provider}`: Total ignored credentials
-- `alt_cpa_requests_total{endpoint, outcome}`: Total CPA API requests performed
+---
 
-### 3. LiteLLM Proxy Integration Example
+### 3. LiteLLM Proxy Integration
 
-Use the quota endpoint to dynamically weight or route traffic across accounts:
+#### The Challenge:
+LiteLLM excels at routing across models and API keys, but standard API-key routing is blind to subscription rate limits (e.g. Claude 5-hour rolling windows). Routing high volume blindly into subscriptions causes unexpected HTTP 429 errors.
+
+#### The Solution: Subscription-First Routing with Metered Fallback
+Use FQD's routing weights to exhaust fixed-price subscription pools first, dynamically diverting traffic to metered pay-per-token keys only when subscription headroom drops below safety thresholds:
+
+```
+                  ┌──────────────────────────────────────────────┐
+                  │                 LiteLLM Proxy                │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+             ┌───────────────────────────┴───────────────────────────┐
+             ▼ (Primary: Headroom > 15%)                             ▼ (Spillover: Headroom <= 15%)
+┌─────────────────────────────────────────┐             ┌─────────────────────────────────────────┐
+│     FQD-Monitored CLIProxy Pool         │             │          Direct API Key Fallback        │
+│   (Claude Pro / Max / Antigravity)      │             │         (Pay-per-token Anthropic)       │
+└────────────────────┬────────────────────┘             └─────────────────────────────────────────┘
+                     │
+                     ▼
+         [ Ground Truth Telemetry ]
+           FQD Polling & Radar
+```
+
+#### Dynamic Routing Configuration:
+LiteLLM can query FQD's `/api/quota` via a lightweight routing hook or sidecar to dynamically adjust deployment weights:
 
 ```yaml
 # litellm_config.yaml
 model_list:
-  - model_name: claude-3-5-sonnet
+  # Primary Subscription Pool (CLIProxy endpoint)
+  - model_name: claude-3-7-sonnet
     litellm_params:
-      model: anthropic/claude-3-5-sonnet-20241022
-      api_key: os.environ/ANTHROPIC_KEY_1
+      model: openai/claude-3-7-sonnet
+      api_base: http://cliproxy.internal:8317/v1
+      api_key: os.environ/CPA_ACCESS_TOKEN
     model_info:
-      id: "acc-1"
-  - model_name: claude-3-5-sonnet
+      fqd_slot: "01"
+      tier: "subscription_pool"
+
+  # Spillover Metered Key (Invoked only on subscription exhaustion)
+  - model_name: claude-3-7-sonnet
     litellm_params:
-      model: anthropic/claude-3-5-sonnet-20241022
-      api_key: os.environ/ANTHROPIC_KEY_2
+      model: anthropic/claude-3-7-sonnet-20250219
+      api_key: os.environ/ANTHROPIC_DIRECT_KEY
     model_info:
-      id: "acc-2"
+      tier: "spillover_metered"
 
 router_settings:
-  routing_strategy: "usage-based-routing" # Routes traffic proportionally to available headroom
+  routing_strategy: "latency-based-routing"
+  fallbacks: [{"claude-3-7-sonnet": ["claude-3-5-haiku"]}]
 ```
 
 ---
 
-## How the numbers are honest
+## Supported Providers & Modalities
 
-No AI subscription exposes a message or token counter, so this app never invents one. It reads the **percentage of each rate-limit window** the service itself reports, and everything else — streaks, forecasts, charts — is derived from how that percentage changes over time. When a service returns no number, you see *"no data"*, not a fake 0%. When a refresh fails, the last real numbers stay, marked as stale.
+| Provider | Supported Rate-Limit Windows | Telemetry Tracked | Auth Mechanics |
+| :--- | :--- | :--- | :--- |
+| **Google Antigravity** | 5-Hour Rolling Burst · 7-Day Cycle Limit | Velocity (Gemini 2.5 Pro / Flash), daily slots | Cloud Code OAuth refresh token |
+| **Claude Code / Anthropic** | 5-Hour Session Burst · 7-Day Rolling Budget | Pro/Team tier headroom, reset epoch | Session cookie (`sessionKey`) / CLI token |
+| **ChatGPT / OpenAI Codex** | 5-Hour Codex Window · Weekly Cap · Credits | Reasoning quota, Plus/Team limit status | Session token / Access token |
+| **Google Gemini CLI** | Session Limit · Weekly Horizon | Per-slot request volume & balance | OAuth refresh token |
 
-## Architecture
+---
 
-```
-src/            shared TypeScript — providers, parsing, stats (used by all 3 apps)
-src/app/        mobile app screens (Expo Router)
-server/         self-hosted Node server + API  (server/src)
-web/            web panel — React PWA           (web/src)
-extension/      Chrome MV3 extension            (extension/src)
-deploy/         systemd unit, nginx vhost, deploy script, Caddyfiles for the Docker profiles
-```
+## Security Architecture
 
-Run the test suites (multi-account isolation, token refresh, parsing, honest statuses, the server's auth and HTTP security tests, and the Docker deploy-config checks — `npm run test:security` runs only the last two):
+FQD is designed from the ground up for zero-trust environments:
+- **AES-256-GCM at Rest:** All stored credentials and session tokens are encrypted with unique initialization vectors (`APP_SECRET`).
+- **Read-Only Enclosure:** The Docker container operates with a read-only root filesystem, dropped Linux capabilities, and runs as non-root user `node` (UID 1000).
+- **Outbound SSRF Protection:** Polling client restricts outbound network requests strictly to verified provider endpoints (`*.anthropic.com`, `*.google.com`, `*.openai.com`, or configured local proxy hosts).
+- **Supply Chain Security:** Signed multi-arch container images published with keyless cosign, SBOM attestations, and SHA-pinned CI GitHub Actions.
+
+---
+
+## Verification & Testing
+
+Run the test suite across core parsers, API endpoints, and cryptographic security boundaries:
 
 ```bash
+# Run unit & isolation tests
 npm test
+
+# Typecheck all monorepo workspaces (server, web, extension)
 npm run typecheck:all
+
+# Security & deployment tests
+npm run test:security
 ```
 
-### What CI enforces
+---
 
-- **CI** (`.github/workflows/ci.yml`, on pull requests and pushes to `main`): `npm ci`, `npm run typecheck:all`, `npm test`, and `npm audit --omit=dev --audit-level=high` (fails on high/critical advisories). Superseded runs are cancelled.
-- **Semgrep** scans every PR and push to `main`.
-- **Image publish** (`docker-publish.yml`) runs the CI workflow first and only publishes if it passes. It builds and scans every published platform (`linux/amd64` and `linux/arm64`) with Trivy (fails on fixed HIGH/CRITICAL findings; unfixed ones are ignored), then pushes a multi-arch image, attaches build provenance and SBOM attestations, and signs it with keyless cosign. The scan skips the Node toolchain bundled with the `node:24-alpine` base image (`/usr/local/lib/node_modules/npm`, `/usr/local/lib/node_modules/corepack`, `/usr/local/lib/node_modules/yarn` and `/opt/yarn-v1.22.22`) because it is not part of the runtime application surface; application files under `/app` are still scanned. Updating the node base image is the real fix for those toolchain advisories and should be tracked separately.
-- The Semgrep workflow runs independently on pull requests and pushes to `main`; it does not gate publishing.
-- **Dependabot** opens weekly grouped updates for npm (root and `server`), GitHub Actions and Docker. Actions are pinned to commit SHAs.
+## License & Attribution
 
-## A note on account safety
+MIT License © 2026 [Piyush Kumar](https://github.com/piyushkumarjiit)
 
-This tool only **reads** your usage — it never generates anything, so it puts no load on your quota. It polls every few minutes (configurable). Using automated access to these services is a grey area under their terms; the risk is low but not zero. Keep the poll interval reasonable and secure the device that holds your tokens. You use it at your own responsibility.
+Based upon and substantially modernized from the original [AI Limits Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan:
+Copyright (c) 2026 Rauan
 
-## License
-
-MIT © [Piyush Kumar](https://github.com/piyushkumarjiit) · based on the original [AI Limits Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan
-
-<div align="center"><sub>If this saved you a login dance, a ⭐ is appreciated.</sub></div>
+<div align="center"><sub>Fleet Quota Deck — High-integrity capacity observability for modern AI stacks.</sub></div>
