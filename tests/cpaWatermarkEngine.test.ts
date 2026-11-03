@@ -462,6 +462,186 @@ console.log('\nSuite 9: Invariant Guard Rails');
   assert(totalWDead === 0, 'All accounts hard-stopped: sum of weights is 0 (CLIProxy returns 503 for LiteLLM failover)');
 }
 
+// -----------------------------------------------------------------------------
+// Suite 10: Shadow Mode Write Batch Suppression
+// -----------------------------------------------------------------------------
+console.log('\nSuite 10: Shadow Mode Write Batch Suppression');
+{
+  const policy: WatermarkPolicyConfig = { mode: 'shadow' };
+  const state = makeInitialState('shadow');
+  const now = 1700000000000;
+  const snaps = [
+    makeProSnapshot('p1', 80, { currentWeight: 0 }),
+    makeProSnapshot('p2', 2, { currentWeight: 100 }),
+  ];
+  const res = computeWatermarkTargets(snaps, policy, state, now);
+  assert(res.writeBatch.length === 0, 'Shadow mode produces empty writeBatch');
+  assert(res.targets.get('p1')?.targetWeight === 100, 'Shadow mode computes targets for observability');
+  assert(res.targets.get('p2')?.targetWeight === 0, 'Shadow mode evaluates hard stop target');
+}
+
+// -------------------------------------------------------------
+// Suite 11: Anti-Thundering-Herd Ramping Sequence
+// -------------------------------------------------------------
+console.log('\nSuite 11: Anti-Thundering-Herd Ramping Sequence');
+{
+  const policy: WatermarkPolicyConfig = { mode: 'enforce' };
+  let state = makeInitialState();
+  const now = 1700000000000;
+
+  // Step 0: Account p1 is hard-stopped at 2%, p2 and p3 are healthy at 80% (N=3, K=2, so tier stays normal!)
+  const snapHard = [
+    makeProSnapshot('p1', 2, { currentWeight: 0 }),
+    makeProSnapshot('p2', 80, { currentWeight: 100 }),
+    makeProSnapshot('p3', 80, { currentWeight: 100 }),
+  ];
+  let res = computeWatermarkTargets(snapHard, policy, state, now);
+  state = res.nextState;
+  assert(res.targets.get('p1')?.targetWeight === 0, 'Ramping: p1 hard-stopped at 0');
+
+  // Step 1: p1 recovers to 50% (well above 8% recovery threshold)
+  const snapRecov = [
+    makeProSnapshot('p1', 50, { currentWeight: 0 }),
+    makeProSnapshot('p2', 80, { currentWeight: 100 }),
+    makeProSnapshot('p3', 80, { currentWeight: 100 }),
+  ];
+  res = computeWatermarkTargets(snapRecov, policy, state, now + 1000);
+  state = res.nextState;
+  assert(res.targets.get('p1')?.targetWeight === 25, 'Ramping: p1 recovers with first ramp step W=25');
+  assert(state.accountStates['p1']?.state === 'ramping', 'Ramping: state is ramping on step 1');
+
+  // Step 2: Second tick -> W=50
+  res = computeWatermarkTargets(snapRecov, policy, state, now + 2000);
+  state = res.nextState;
+  assert(res.targets.get('p1')?.targetWeight === 50, 'Ramping: p1 progresses to second ramp step W=50');
+  assert(state.accountStates['p1']?.state === 'ramping', 'Ramping: state is ramping on step 2');
+
+  // Step 3: Third tick -> W=100
+  res = computeWatermarkTargets(snapRecov, policy, state, now + 3000);
+  state = res.nextState;
+  assert(res.targets.get('p1')?.targetWeight === 100, 'Ramping: p1 progresses to full capacity W=100');
+  assert(state.accountStates['p1']?.state === 'healthy', 'Ramping: state is healthy on step 3');
+  assert(state.rampStep?.['p1'] === undefined, 'Ramping: rampStep cleaned up once W=100');
+
+  // Fallback exit ramp:
+  // Setup 3 accounts in collective fallback
+  const snapsFallback = [
+    makeProSnapshot('f1', 15, { currentWeight: 100 }),
+    makeProSnapshot('f2', 15, { currentWeight: 100 }),
+    makeProSnapshot('f3', 15, { currentWeight: 100 }),
+  ];
+  let fbState = makeInitialState();
+  res = computeWatermarkTargets(snapsFallback, policy, fbState, now);
+  fbState = res.nextState;
+  assert(fbState.tierStates['claude:pro'] === 'collective_fallback', 'Fallback exit: tier in collective_fallback');
+
+  // Now all 3 recover to 80% after 600s dwell time
+  const snapsRecovered = [
+    makeProSnapshot('f1', 80, { currentWeight: 100 }),
+    makeProSnapshot('f2', 80, { currentWeight: 100 }),
+    makeProSnapshot('f3', 80, { currentWeight: 100 }),
+  ];
+  const exitNow = now + 650000; // > 600s
+  res = computeWatermarkTargets(snapsRecovered, policy, fbState, exitNow);
+  fbState = res.nextState;
+  assert(fbState.tierStates['claude:pro'] === 'normal', 'Fallback exit: tier exited to normal');
+  assert(res.targets.get('f1')?.targetWeight === 25, 'Fallback exit: f1 ramps at W=25');
+  assert(res.targets.get('f2')?.targetWeight === 25, 'Fallback exit: f2 ramps at W=25');
+
+  // Next tick: W=50
+  res = computeWatermarkTargets(snapsRecovered, policy, fbState, exitNow + 1000);
+  fbState = res.nextState;
+  assert(res.targets.get('f1')?.targetWeight === 50, 'Fallback exit: f1 ramps to W=50');
+
+  // Next tick: W=100
+  res = computeWatermarkTargets(snapsRecovered, policy, fbState, exitNow + 2000);
+  fbState = res.nextState;
+  assert(res.targets.get('f1')?.targetWeight === 100, 'Fallback exit: f1 reaches W=100');
+  assert(fbState.rampStep?.['f1'] === undefined, 'Fallback exit: rampStep cleaned up after reaching W=100');
+}
+
+// -------------------------------------------------------------
+// Suite 12: Non-Pro Stickiness & Standby Stability
+// -------------------------------------------------------------
+console.log('\nSuite 12: Non-Pro Stickiness & Standby Stability');
+{
+  const policy: WatermarkPolicyConfig = { mode: 'enforce' };
+  let state = makeInitialState();
+  const now = 1700000000000;
+
+  // Same provider 'antigravity' across all snapshots for this pool
+  // Pro accounts are exhausted (0 Pro eligible), Non-Pro active
+  // NonPro-B was already active (targetWeight = 100).
+  // NonPro-A is healthy. Alphabetically NonPro-A comes first, but stickiness must keep NonPro-B!
+  state.accountStates['np-b'] = { state: 'healthy', enteredAt: now, targetWeight: 100 };
+  state.accountStates['np-a'] = { state: 'healthy', enteredAt: now, targetWeight: 0 };
+
+  const snaps = [
+    makeProSnapshot('pro1', 2, { provider: 'antigravity', currentWeight: 0 }),
+    makeNonProSnapshot('np-a', 80, { currentWeight: 0 }),
+    makeNonProSnapshot('np-b', 75, { currentWeight: 100 }),
+  ];
+
+  let res = computeWatermarkTargets(snaps, policy, state, now);
+  state = res.nextState;
+  assert(res.targets.get('np-b')?.targetWeight === 100, 'Non-Pro Stickiness: np-b stays active W=100 (not preempted by np-a)');
+  assert(res.targets.get('np-a')?.targetWeight === 0, 'Non-Pro Stickiness: np-a stays on standby W=0');
+
+  // Standby stability when Pro recovers:
+  // Pro1 recovers to 90%.
+  // Active np-b must step down to W=1 (cross_tier_drain_stepdown).
+  // Standby np-a must stay at W=0 (standby_pro_active) and NOT oscillate!
+  const snapsProBack = [
+    makeProSnapshot('pro1', 90, { provider: 'antigravity', currentWeight: 0 }),
+    makeNonProSnapshot('np-a', 80, { currentWeight: 0 }),
+    makeNonProSnapshot('np-b', 75, { currentWeight: 100 }),
+  ];
+
+  // Tick 1
+  res = computeWatermarkTargets(snapsProBack, policy, state, now + 1000);
+  state = res.nextState;
+  assert(res.targets.get('np-b')?.targetWeight === 1, 'Standby Stability: active np-b steps down to W=1');
+  assert(res.targets.get('np-a')?.targetWeight === 0, 'Standby Stability: standby np-a stays at W=0');
+
+  // Tick 2: Both non-pro should be at W=0, no oscillation
+  res = computeWatermarkTargets(snapsProBack, policy, state, now + 2000);
+  state = res.nextState;
+  assert(res.targets.get('np-b')?.targetWeight === 0, 'Standby Stability: np-b steps down to W=0 on tick 2');
+  assert(res.targets.get('np-a')?.targetWeight === 0, 'Standby Stability: np-a stays at W=0 on tick 2');
+
+  // Tick 3: Both non-pro remain at W=0
+  res = computeWatermarkTargets(snapsProBack, policy, state, now + 3000);
+  assert(res.targets.get('np-b')?.targetWeight === 0, 'Standby Stability: np-b stable at W=0 on tick 3');
+  assert(res.targets.get('np-a')?.targetWeight === 0, 'Standby Stability: np-a stable at W=0 on tick 3');
+}
+
+// -----------------------------------------------------------------------------
+// Suite 13: Invariant 3 Safety & Violation Observability
+// -----------------------------------------------------------------------------
+console.log('\nSuite 13: Invariant 3 Safety & Violation Observability');
+{
+  const policy: WatermarkPolicyConfig = { mode: 'enforce' };
+  const state = makeInitialState();
+  const now = 1700000000000;
+
+  // Pool with 2 accounts: both breached hard stop (3% and 1%)
+  const snaps = [
+    makeProSnapshot('dead1', 3, { currentWeight: 100 }),
+    makeProSnapshot('dead2', 1, { currentWeight: 100 }),
+  ];
+
+  const res = computeWatermarkTargets(snaps, policy, state, now);
+  assert(res.targets.get('dead1')?.targetWeight === 0, 'Invariant 3: dead1 is W=0');
+  assert(res.targets.get('dead2')?.targetWeight === 0, 'Invariant 3: dead2 is W=0');
+
+  let totalW = 0;
+  for (const [, t] of res.targets) {
+    totalW += t.targetWeight;
+  }
+  assert(totalW === 0, 'Invariant 3 Safety: sum(W) === 0, never promotes hard-stopped accounts');
+  assert(Array.isArray(res.invariantViolations), 'Invariant Violations: array present on result');
+}
+
 console.log('\n========================================');
 console.log(`SUMMARY: Total: ${totalTests} | Passed: ${passedTests} | Failed: ${failedTests}`);
 console.log('========================================\n');
