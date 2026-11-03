@@ -686,6 +686,7 @@ export class CpaPolicyLoader {
         }
 
         const content = fs.readFileSync(this.resolvedPath, 'utf8');
+        this.lastErrorSignature = null;
         const hash = this.computeHash(content);
         if (hash === this.lastFileHash) {
           // Content unchanged (spurious notification)
@@ -695,7 +696,6 @@ export class CpaPolicyLoader {
         const oldPolicy = structuredClone(this.currentPolicy);
         this.loadPolicy();
         this.notifyChange(this.getPolicy(), oldPolicy);
-        this.lastErrorSignature = null;
       } catch (err) {
         this.emitError(err instanceof Error ? err : new Error(String(err)), this.errorSignature(err));
       }
@@ -746,6 +746,7 @@ export class CpaPolicyLoader {
       }
 
       const content = fs.readFileSync(targetPath, 'utf8');
+      this.lastErrorSignature = null;
       const hash = this.computeHash(content);
       if (hash !== this.lastFileHash) {
         this.handleFileChange();

@@ -499,8 +499,61 @@ async function run() {
       const recoveredPolicy = hermeticLoader.loadPolicy();
       assertEquals(recoveredPolicy.mode, 'enforce', 'Recovered policy successfully loaded');
     } finally {
-      fs.readFileSync = origReadFileSync;
+      (fs as any).readFileSync = origReadFileSync;
       fs.rmSync(tempDirHermetic, { recursive: true, force: true });
+    }
+
+    // Transient failure recovery & second outage detection
+    const tempDirTransient = createTempDir('cpa-policy-transient-');
+    const transientFile = path.join(tempDirTransient, 'transient.yaml');
+    fs.writeFileSync(transientFile, yaml.stringify({ mode: 'enforce' }), 'utf8');
+
+    let transientStubThrow = false;
+    const origReadTransient = fs.readFileSync;
+    (fs as any).readFileSync = function (p: any, ...args: any[]) {
+      if (typeof p === 'string' && path.resolve(p) === path.resolve(transientFile) && transientStubThrow) {
+        throw Object.assign(new Error('EACCES: permission denied, open ' + p), { code: 'EACCES' });
+      }
+      return origReadTransient.apply(fs, [p, ...args] as any);
+    };
+
+    try {
+      let transientErrors = 0;
+      const transientLoader = new CpaPolicyLoader({
+        customFilePath: transientFile,
+        pollIntervalMs: 50,
+        debounceMs: 20,
+        onError: () => {
+          transientErrors++;
+        },
+      });
+
+      // 1. Load valid file
+      const initialPolicy = transientLoader.loadPolicy();
+      assertEquals(initialPolicy.mode, 'enforce', 'Valid file loaded');
+      assertEquals(transientErrors, 0, 'No errors on initial load');
+
+      // 2. Stub read to throw EACCES, call checkFileForChanges() -> assert errors === 1
+      transientStubThrow = true;
+      transientLoader.checkFileForChanges();
+      assertEquals(transientErrors, 1, 'Error emitted on first outage');
+
+      // Repeated polling during same outage is suppressed
+      transientLoader.checkFileForChanges();
+      assertEquals(transientErrors, 1, 'Error suppressed during continued outage');
+
+      // 3. Un-stub read, call checkFileForChanges() -> successful read clears lastErrorSignature
+      transientStubThrow = false;
+      transientLoader.checkFileForChanges();
+      assertEquals(transientErrors, 1, 'No new error on recovery');
+
+      // 4. Re-stub read to throw EACCES, call checkFileForChanges() -> assert errors === 2
+      transientStubThrow = true;
+      transientLoader.checkFileForChanges();
+      assertEquals(transientErrors, 2, 'Second outage correctly observed and not suppressed');
+    } finally {
+      (fs as any).readFileSync = origReadTransient;
+      fs.rmSync(tempDirTransient, { recursive: true, force: true });
     }
 
     // R2-B2: Oversize policy file (>256 KB) is rejected without crashing or looping
