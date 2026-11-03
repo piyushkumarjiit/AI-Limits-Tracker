@@ -8,7 +8,7 @@
 
 *Monitor 5-hour rolling bursts, 7-day weekly quota cycles, and multi-model burn rates before you hit provider limits. Self-hosted, private by design, with credentials staying on infrastructure you control.*
 
-<a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
+<a href="https://github.com/piyushkumarjiit/FQD"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
 <img src="https://img.shields.io/badge/Docker-Ready-2496ed?logo=docker&logoColor=white" alt="Docker Ready" />
 <img src="https://img.shields.io/badge/Gateways-CLIProxy%20·%20LiteLLM-38bdf8" alt="Supported Gateways" />
 <img src="https://img.shields.io/badge/Providers-Claude%20·%20ChatGPT%20·%20Gemini%20·%20Antigravity-8b5cf6" alt="Supported Providers" />
@@ -67,7 +67,7 @@ docker run -d \
   -e ADMIN_PASSWORD="your-strong-password" \
   -e APP_SECRET="$(openssl rand -hex 32)" \
   -v fqd-data:/app/data \
-  ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
+  ghcr.io/piyushkumarjiit/fqd:latest
 
 # Open http://localhost:1455
 ```
@@ -77,8 +77,8 @@ docker run -d \
 FQD includes production Caddy integration supporting automated Let's Encrypt certificates or internal LAN CAs:
 
 ```bash
-git clone https://github.com/piyushkumarjiit/AI-Limits-Tracker.git
-cd AI-Limits-Tracker
+git clone https://github.com/piyushkumarjiit/FQD.git
+cd FQD
 
 cp .env.example .env
 # Edit .env and set:

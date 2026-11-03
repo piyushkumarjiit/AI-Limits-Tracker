@@ -218,7 +218,7 @@ export function App() {
           <span>•</span>
           <span>Fleet Quota Display</span>
           <span>•</span>
-          <a href="https://github.com/piyushkumarjiit/AI-Limits-Tracker" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://github.com/piyushkumarjiit/FQD" target="_blank" rel="noreferrer">GitHub</a>
           <span>•</span>
           <a href="#/settings">Documentation</a>
           <span>•</span>

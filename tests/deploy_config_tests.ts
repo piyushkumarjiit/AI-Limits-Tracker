@@ -183,7 +183,7 @@ if (!hasDocker) {
     const insp = run('docker', ['image', 'inspect', tag, '--format', '{{json .Config}}']);
     const c = insp.status === 0 ? JSON.parse(insp.stdout) : {};
     assert(c.Labels?.['org.opencontainers.image.base.name'] === 'docker.io/library/node:24-alpine', 'image carries OCI base image label', c.Labels?.['org.opencontainers.image.base.name']);
-    assert(c.Labels?.['org.opencontainers.image.source']?.includes('fleet-quota-deck') || c.Labels?.['org.opencontainers.image.source']?.includes('AI-Limits-Tracker'), 'image carries OCI source label', JSON.stringify(c.Labels));
+    assert(c.Labels?.['org.opencontainers.image.source']?.includes('FQD') || c.Labels?.['org.opencontainers.image.source']?.includes('fleet-quota-deck') || c.Labels?.['org.opencontainers.image.source']?.includes('AI-Limits-Tracker'), 'image carries OCI source label', JSON.stringify(c.Labels));
     assert(!!c.Labels?.['org.opencontainers.image.licenses'], 'image carries OCI license label');
     assert(c.User === 'node', 'image runs as the unprivileged node user', String(c.User));
     assert((c.Healthcheck?.Test ?? []).join(' ').includes('/api/health'), 'image healthcheck probes /api/health', JSON.stringify(c.Healthcheck));

@@ -20,7 +20,7 @@ RUN npm run build:web && npm run build:server
 FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS runner
 LABEL org.opencontainers.image.title="FQD - Fleet Quota Display" \
       org.opencontainers.image.description="Unified observability deck for AI subscription fleets, proxy pools, and API keys" \
-      org.opencontainers.image.source="https://github.com/piyushkumarjiit/fleet-quota-deck" \
+      org.opencontainers.image.source="https://github.com/piyushkumarjiit/FQD" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.base.name="docker.io/library/node:24-alpine"
 WORKDIR /app
