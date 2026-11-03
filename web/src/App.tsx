@@ -162,13 +162,14 @@ export default function App() {
   return (
     <div className="shell">
       <nav className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">⚡</span> Fleet Quota Deck
+        <div className="brand" style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '0 12px 24px', alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 24, fontWeight: 900, letterSpacing: '0.04em', color: '#38bdf8', lineHeight: 1.1 }}>FQD</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.03em', textTransform: 'uppercase' }}>Fleet Quota Display</span>
         </div>
         <NavItem icon="home" label="Home" active={tab === 'home'} onClick={() => go('/')} />
         <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
         <NavItem icon="users" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
-        <NavItem icon="bell" label="Alerts" active={tab === 'alerts'} onClick={() => go('/alerts')} />
+        <NavItem icon="radar" label="Radar" active={tab === 'alerts'} onClick={() => go('/alerts')} />
         <NavItem icon="settings" label="Settings" active={tab === 'settings'} onClick={() => go('/settings')} />
         <button className="btn dark wide" onClick={() => go('/add')}>
           <Icon name="plus" size={18} /> Add account
@@ -178,11 +179,11 @@ export default function App() {
         <InsecureBanner />
         {page}
       </main>
-      <nav className="tabbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+      <nav className="tabbar">
         <NavItem icon="home" label="Overview" active={tab === 'home'} onClick={() => go('/')} />
         <NavItem icon="users" label="Accounts" active={tab === 'accounts'} onClick={() => go('/accounts')} />
         <NavItem icon="chart" label="Stats" active={tab === 'stats'} onClick={() => go('/stats')} />
-        <NavItem icon="bell" label="Radar" active={tab === 'alerts'} onClick={() => go('/alerts')} />
+        <NavItem icon="radar" label="Radar" active={tab === 'alerts'} onClick={() => go('/alerts')} />
         <NavItem icon="settings" label="Settings" active={tab === 'settings'} onClick={() => go('/settings')} />
       </nav>
     </div>
@@ -362,6 +363,10 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
     <>
       <header className="home-head">
         <div>
+          <div className="mobile-brand only-mobile" style={{ alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+            <span style={{ fontSize: 22, fontWeight: 900, letterSpacing: '0.04em', color: '#38bdf8' }}>FQD</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', letterSpacing: '0.02em', textTransform: 'uppercase' }}>Fleet Quota Display</span>
+          </div>
           <p className="hello">{greeting()}</p>
           <h1 className="hero-name">Your limits</h1>
           <p className="muted">All your AI accounts in one place, under control</p>
@@ -373,8 +378,8 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
           <button className="icon-btn only-mobile" onClick={() => go('/stats')} aria-label="Stats">
             <Icon name="chart" />
           </button>
-          <button className="icon-btn bell" onClick={() => go('/alerts')} aria-label="Alerts">
-            <Icon name="bell" />
+          <button className="icon-btn bell" onClick={() => go('/alerts')} aria-label="Radar">
+            <Icon name="radar" />
             {attention && <i className="dot" />}
           </button>
         </div>
@@ -470,41 +475,7 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
         </div>
       )}
 
-      <section className="card summary">
-        <div className="summary-top">
-          <div>
-            <p className="label">Capacity left</p>
-            <p className="big">{capacityLeft === null ? '—' : `${capacityLeft}%`}</p>
-          </div>
-          {streak !== null && streak > 0 && (
-            <div className="streak-pill" title="Days in a row with activity">
-              <Icon name="flame" size={16} /> {streak} {streak === 1 ? 'day' : 'days'} in a row
-            </div>
-          )}
-        </div>
-        <div className="track"><i style={{ width: `${Math.min(100, capacityLeft ?? 0)}%` }} /></div>
-        <div className="stats4">
-          <Stat v={String(accounts.length)} l={accounts.length === 1 ? 'account' : 'accounts'} />
-          <Stat v={String(healthy)} l="active" />
-          <Stat v={String(low)} l="running low" />
-          <Stat v={nearest ? formatTimeRemaining(nearest) : '—'} l="until reset" />
-        </div>
-      </section>
 
-      {showFamilyStrip && (
-        <div className="family-strip">
-          {summaries.map((summary) => (
-            <FamilyCard
-              key={summary.family}
-              summary={summary}
-              weighting={weighting}
-              colors={colors}
-              active={filter === summary.family}
-              onSelect={(f) => setFilter((curr) => (curr === f ? 'all' : f))}
-            />
-          ))}
-        </div>
-      )}
 
       {accounts.length > 0 && (
         <div className="chips">
