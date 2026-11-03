@@ -940,51 +940,96 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
           <button
             className="filter-btn"
             onClick={() => setShowColsMenu(!showColsMenu)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             Columns ▾
           </button>
           {showColsMenu && (
-            <div
-              style={{
-                position: 'absolute',
-                right: 0,
-                top: '100%',
-                marginTop: 4,
-                background: '#1e293b',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                padding: '10px 14px',
-                zIndex: 30,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-                minWidth: 170,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 2 }}>Toggle Columns</div>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
-                <input type="checkbox" checked={visibleCols.slot} onChange={(e) => setVisibleCols({ ...visibleCols, slot: e.target.checked })} /> Slot
-              </label>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
-                <input type="checkbox" checked={visibleCols.email} onChange={(e) => setVisibleCols({ ...visibleCols, email: e.target.checked })} /> Account Email
-              </label>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
-                <input type="checkbox" checked={visibleCols.provider} onChange={(e) => setVisibleCols({ ...visibleCols, provider: e.target.checked })} /> Provider
-              </label>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
-                <input type="checkbox" checked={visibleCols.burst} onChange={(e) => setVisibleCols({ ...visibleCols, burst: e.target.checked })} /> 5H Burst
-              </label>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
-                <input type="checkbox" checked={visibleCols.cycle} onChange={(e) => setVisibleCols({ ...visibleCols, cycle: e.target.checked })} /> 7D Cycle
-              </label>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
-                <input type="checkbox" checked={visibleCols.reset} onChange={(e) => setVisibleCols({ ...visibleCols, reset: e.target.checked })} /> Next 5H Reset
-              </label>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
-                <input type="checkbox" checked={visibleCols.status} onChange={(e) => setVisibleCols({ ...visibleCols, status: e.target.checked })} /> Status
-              </label>
-            </div>
+            <>
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 25 }}
+                onClick={() => setShowColsMenu(false)}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '100%',
+                  marginTop: 6,
+                  background: '#151d2f',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 10,
+                  padding: '8px 6px',
+                  zIndex: 30,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  minWidth: 185,
+                  boxShadow: '0 8px 30px rgba(0,0,0,0.65)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: 'var(--muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.6px',
+                    padding: '4px 10px 8px',
+                    borderBottom: '1px solid rgba(255,255,255,0.08)',
+                    marginBottom: 4,
+                    textAlign: 'left',
+                  }}
+                >
+                  Toggle Columns
+                </div>
+                {[
+                  { key: 'slot', label: 'Slot' },
+                  { key: 'email', label: 'Account Email' },
+                  { key: 'provider', label: 'Provider' },
+                  { key: 'burst', label: '5H Burst' },
+                  { key: 'cycle', label: '7D Cycle' },
+                  { key: 'reset', label: 'Next 5H Reset' },
+                  { key: 'status', label: 'Status' },
+                ].map((col) => (
+                  <label
+                    key={col.key}
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      cursor: 'pointer',
+                      color: '#e2e8f0',
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      userSelect: 'none',
+                      transition: 'background 0.12s ease',
+                      textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleCols[col.key as keyof typeof visibleCols]}
+                      onChange={(e) => setVisibleCols({ ...visibleCols, [col.key]: e.target.checked })}
+                      style={{
+                        width: 15,
+                        height: 15,
+                        margin: 0,
+                        padding: 0,
+                        flexShrink: 0,
+                        cursor: 'pointer',
+                        accentColor: '#2563eb',
+                      }}
+                    />
+                    <span style={{ whiteSpace: 'nowrap', textAlign: 'left' }}>{col.label}</span>
+                  </label>
+                ))}
+              </div>
+            </>
           )}
         </div>
         <button
