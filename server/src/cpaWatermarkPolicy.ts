@@ -532,6 +532,10 @@ export class CpaPolicyLoader {
     return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
   }
 
+  private errorSignature(err: any): string {
+    return `err:${err?.code || err?.message || String(err)}`;
+  }
+
   /**
    * Current active policy (deep clone to prevent mutation of internal state).
    */
@@ -620,13 +624,11 @@ export class CpaPolicyLoader {
     } catch (readErr) {
       // M3: Set this.lastFileHash = null on read error
       this.lastFileHash = null;
-      const errCode = (readErr as { code?: string })?.code;
       const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
-      const signature = `err:${errCode || errMsg}`;
       const err = new Error(
         `Failed to read policy file at ${filePath}: ${errMsg}`
       );
-      this.emitError(err, signature);
+      this.emitError(err, this.errorSignature(readErr));
       this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
       this.currentPolicy.mode = 'shadow';
       return this.getPolicy();
@@ -693,8 +695,9 @@ export class CpaPolicyLoader {
         const oldPolicy = structuredClone(this.currentPolicy);
         this.loadPolicy();
         this.notifyChange(this.getPolicy(), oldPolicy);
+        this.lastErrorSignature = null;
       } catch (err) {
-        this.emitError(err instanceof Error ? err : new Error(String(err)));
+        this.emitError(err instanceof Error ? err : new Error(String(err)), this.errorSignature(err));
       }
     }, this.debounceMs);
   }
@@ -748,10 +751,7 @@ export class CpaPolicyLoader {
         this.handleFileChange();
       }
     } catch (err) {
-      const errCode = (err as { code?: string })?.code;
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const signature = `err:${errCode || errMsg}`;
-      this.emitError(err instanceof Error ? err : new Error(String(err)), signature);
+      this.emitError(err instanceof Error ? err : new Error(String(err)), this.errorSignature(err));
     }
   }
 

@@ -453,37 +453,55 @@ async function run() {
     crashingLoader.stopWatcher();
     fs.rmSync(tempDirB3, { recursive: true, force: true });
 
-    // Error deduplication: repeated read/stat errors on unreadable file are deduplicated
-    const tempDirUnreadable = createTempDir('cpa-policy-unreadable-');
-    const unreadableFile = path.join(tempDirUnreadable, 'unreadable.yaml');
-    fs.writeFileSync(unreadableFile, yaml.stringify({ mode: 'enforce' }), 'utf8');
-    fs.chmodSync(unreadableFile, 0o000);
+    // Error deduplication: repeated read/stat errors on unreadable file are deduplicated (hermetic via fs.readFileSync stub)
+    const tempDirHermetic = createTempDir('cpa-policy-hermetic-');
+    const hermeticFile = path.join(tempDirHermetic, 'hermetic.yaml');
+    fs.writeFileSync(hermeticFile, yaml.stringify({ mode: 'enforce' }), 'utf8');
 
-    let unreadableErrors = 0;
-    const unreadableLoader = new CpaPolicyLoader({
-      customFilePath: unreadableFile,
-      pollIntervalMs: 50,
-      debounceMs: 20,
-      onError: () => {
-        unreadableErrors++;
-      },
-    });
+    const origReadFileSync = fs.readFileSync;
+    let stubShouldThrow = true;
+    (fs as any).readFileSync = function (p: any, ...args: any[]) {
+      if (typeof p === 'string' && path.resolve(p) === path.resolve(hermeticFile) && stubShouldThrow) {
+        throw Object.assign(new Error('EACCES: permission denied, open ' + p), { code: 'EACCES' });
+      }
+      return origReadFileSync.apply(fs, [p, ...args] as any);
+    };
 
-    const unreadablePolicy = unreadableLoader.loadPolicy();
-    assertEquals(unreadablePolicy.mode, 'shadow', 'Unreadable policy falls back to shadow mode');
-    assertEquals(unreadableErrors, 1, 'Error emitted once on initial read');
+    try {
+      let hermeticErrors = 0;
+      const hermeticLoader = new CpaPolicyLoader({
+        customFilePath: hermeticFile,
+        pollIntervalMs: 50,
+        debounceMs: 20,
+        onError: () => {
+          hermeticErrors++;
+        },
+      });
 
-    // Simulate polling ticks
-    unreadableLoader.checkFileForChanges();
-    unreadableLoader.checkFileForChanges();
-    assertEquals(unreadableErrors, 1, 'Error was deduplicated across repeated polling checks');
+      const hermeticPolicy = hermeticLoader.loadPolicy();
+      assertEquals(hermeticPolicy.mode, 'shadow', 'Unreadable policy falls back to shadow mode');
+      assertEquals(hermeticErrors, 1, 'Error emitted once on initial read');
 
-    // Restore readability and verify recovery clears error signature
-    fs.chmodSync(unreadableFile, 0o644);
-    const recoveredPolicy = unreadableLoader.loadPolicy();
-    assertEquals(recoveredPolicy.mode, 'enforce', 'Recovered policy successfully loaded');
+      // Polling-path deduplication: checkFileForChanges() repeatedly does not re-emit
+      hermeticLoader.checkFileForChanges();
+      hermeticLoader.checkFileForChanges();
+      assertEquals(hermeticErrors, 1, 'Error deduplicated across repeated polling checks');
 
-    fs.rmSync(tempDirUnreadable, { recursive: true, force: true });
+      // Watch-path deduplication: handleFileChange() repeatedly on erroring file does not re-emit
+      hermeticLoader.handleFileChange();
+      await sleep(50);
+      hermeticLoader.handleFileChange();
+      await sleep(50);
+      assertEquals(hermeticErrors, 1, 'Error deduplicated across repeated handleFileChange invocations');
+
+      // Restore readability and verify recovery clears error signature
+      stubShouldThrow = false;
+      const recoveredPolicy = hermeticLoader.loadPolicy();
+      assertEquals(recoveredPolicy.mode, 'enforce', 'Recovered policy successfully loaded');
+    } finally {
+      fs.readFileSync = origReadFileSync;
+      fs.rmSync(tempDirHermetic, { recursive: true, force: true });
+    }
 
     // R2-B2: Oversize policy file (>256 KB) is rejected without crashing or looping
     const tempDirOversize = createTempDir('cpa-policy-oversize-');
@@ -554,7 +572,37 @@ async function run() {
       },
     };
 
-    store.saveState(dummyState, 'init_tick', DEFAULT_WATERMARK_POLICY);
+    const nonDefaultPolicy: FullWatermarkPolicy = {
+      mode: 'enforce',
+      intervalSec: 42,
+      applyLatencySec: 7,
+      burnRateMax: 18,
+      pro: {
+        drainPct: 22,
+        drainRecoveryPct: 27,
+        hardStopPct: 4,
+        hardStopRecoveryPct: 7,
+        fallbackMinDwellSec: 350,
+        recoveryDwellSec: 450,
+      },
+      nonPro: {
+        drainPct: 42,
+        drainRecoveryPct: 48,
+        hardStopPct: 3,
+        hardStopRecoveryPct: 6,
+      },
+      classificationRules: [
+        {
+          pattern: 'custom-*',
+          provider: 'custom_prov',
+          tier: 'pro',
+          modality: 'subscription_pool',
+          managed: true,
+        },
+      ],
+    };
+
+    store.saveState(dummyState, 'init_tick', nonDefaultPolicy);
 
     const loaded = store.loadState();
     assert(loaded !== null, 'Loaded state should not be null');
@@ -563,7 +611,7 @@ async function run() {
       assertEquals(loaded.state.mode, 'shadow', 'Engine mode matches');
       assertEquals(loaded.state.tierStates.antigravity_pro, 'normal', 'Tier state matches');
       assertEquals(loaded.state.accountStates['acc-ag-1'].targetWeight, 100, 'Account weight matches');
-      assertEquals(loaded.policy?.mode, 'shadow', 'Persisted policy matches');
+      assertEquals(loaded.policy, nonDefaultPolicy, 'Non-default FullWatermarkPolicy roundtrips identically');
     }
 
     const history = store.getHistory(10);
