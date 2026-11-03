@@ -57,6 +57,12 @@ export interface EngineState {
   rampStep?: Record<string, number>;
 }
 
+export interface WatermarkDecision {
+  targetWeight: number;
+  reason: string;
+  isEmergency?: boolean;
+}
+
 export interface InvariantViolation {
   accountId: string;
   invariant: string;
@@ -65,7 +71,7 @@ export interface InvariantViolation {
 }
 
 export interface WatermarkComputationResult {
-  targets: Map<string, { targetWeight: number; reason: string }>;
+  targets: Map<string, WatermarkDecision>;
   nextState: EngineState;
   writeBatch: Array<{ name: string; weight: number; isEmergency: boolean }>;
   invariantViolations: InvariantViolation[];
@@ -99,6 +105,41 @@ function clamp(val: number, min: number, max: number): number {
   return Math.min(Math.max(val, min), max);
 }
 
+export function projectQuota(
+  quotaEff: number,
+  burnRatePerMin: number,
+  stalenessSec: number,
+  horizonSec: number,
+  burnRateMax: number
+): number {
+  const clampedBurn = clamp(burnRatePerMin, 0, burnRateMax);
+  return quotaEff - clampedBurn * ((horizonSec + stalenessSec) / 60);
+}
+
+export function evalHardStop(
+  quotaEff: number,
+  quotaProj: number,
+  hardFloorPct: number,
+  hardFloorRecoveryPct: number,
+  wasInHardStop: boolean
+): boolean {
+  return wasInHardStop
+    ? quotaEff < hardFloorRecoveryPct
+    : quotaEff <= hardFloorPct || quotaProj <= hardFloorPct;
+}
+
+export function evalDrain(
+  quotaEff: number,
+  quotaProj: number,
+  drainPct: number,
+  drainRecoveryPct: number,
+  wasInDrain: boolean
+): boolean {
+  return wasInDrain
+    ? quotaEff < drainRecoveryPct
+    : quotaProj <= drainPct;
+}
+
 /**
  * Pure calculation engine for CPA watermark targeting (WP-1).
  *
@@ -119,7 +160,7 @@ export function computeWatermarkTargets(
   const mode = policy.mode ?? prevState?.mode ?? 'shadow';
 
   if (mode === 'off') {
-    const emptyTargets = new Map<string, { targetWeight: number; reason: string }>();
+    const emptyTargets = new Map<string, WatermarkDecision>();
     for (const snap of snapshots) {
       emptyTargets.set(snap.cpaName, { targetWeight: snap.currentWeight ?? 0, reason: 'mode_off' });
     }
@@ -127,8 +168,10 @@ export function computeWatermarkTargets(
       targets: emptyTargets,
       nextState: {
         mode: 'off',
-        tierStates: {},
-        accountStates: {},
+        tierStates: { ...(prevState?.tierStates ?? {}) },
+        tierStateEnteredAt: { ...(prevState?.tierStateEnteredAt ?? {}) },
+        accountStates: { ...(prevState?.accountStates ?? {}) },
+        rampStep: { ...(prevState?.rampStep ?? {}) },
         generation: (prevState?.generation ?? 0) + 1,
       },
       writeBatch: [],
@@ -154,7 +197,7 @@ export function computeWatermarkTargets(
     providerPools.set(snap.provider, list);
   }
 
-  const targets = new Map<string, { targetWeight: number; reason: string }>();
+  const targets = new Map<string, WatermarkDecision>();
   const nextAccountStates: Record<string, AccountEngineState> = {};
   const nextTierStates: Record<string, 'normal' | 'collective_fallback' | 'fail_static'> = {
     ...(prevState?.tierStates ?? {}),
@@ -167,12 +210,12 @@ export function computeWatermarkTargets(
   };
 
   for (const [provider, pool] of providerPools.entries()) {
-    // 1. Direct API modality accounts are completely bypassed from watermark eviction
-    const directApiSnaps = pool.filter((s) => s.modality === 'direct_api');
-    for (const snap of directApiSnaps) {
+    // 1. Direct API and budgeted allowance modality accounts are completely bypassed from watermark eviction
+    const bypassedSnaps = pool.filter((s) => s.modality === 'direct_api' || s.modality === 'budgeted_allowance');
+    for (const snap of bypassedSnaps) {
       targets.set(snap.cpaName, {
         targetWeight: snap.currentWeight ?? 100,
-        reason: 'direct_api_bypass',
+        reason: `${snap.modality}_bypass`,
       });
       nextAccountStates[snap.cpaName] = {
         state: 'unmanaged',
@@ -181,7 +224,7 @@ export function computeWatermarkTargets(
       };
     }
 
-    const nonDirectPool = pool.filter((s) => s.modality !== 'direct_api');
+    const nonDirectPool = pool.filter((s) => s.modality !== 'direct_api' && s.modality !== 'budgeted_allowance');
     if (nonDirectPool.length === 0) continue;
 
     // 2. Telemetry staleness check for pool (all stale > 300s -> fail_static)
@@ -261,8 +304,7 @@ export function computeWatermarkTargets(
       const drainRecoveryPct = proCfg.drainRecoveryPct;
 
       const quotaEff = snap.quotaEffectivePct;
-      const clampedBurn = clamp(snap.burnRatePerMin, 0, burnRateMax);
-      const quotaProj = quotaEff - clampedBurn * ((horizonSec + snap.stalenessSec) / 60);
+      const quotaProj = projectQuota(quotaEff, snap.burnRatePerMin, snap.stalenessSec, horizonSec, burnRateMax);
 
       const isStale = snap.stalenessSec > 300;
 
@@ -279,9 +321,13 @@ export function computeWatermarkTargets(
       } else {
         // Evaluate hard floor with hysteresis
         const wasInHardStop = prev?.state === 'hard_stop';
-        const hardStopBreached = wasInHardStop
-          ? quotaEff < hardFloorRecoveryPct
-          : quotaProj <= hardFloorPct || quotaEff <= hardFloorPct;
+        const hardStopBreached = evalHardStop(
+          quotaEff,
+          quotaProj,
+          hardFloorPct,
+          hardFloorRecoveryPct,
+          wasInHardStop
+        );
 
         if (hardStopBreached) {
           st = 'hard_stop';
@@ -304,9 +350,13 @@ export function computeWatermarkTargets(
         } else {
           // Two-stage drain with hysteresis
           const wasInDrain = prev?.state === 'drain';
-          const inDrain = wasInDrain
-            ? quotaEff < drainRecoveryPct
-            : quotaProj <= drainPct;
+          const inDrain = evalDrain(
+            quotaEff,
+            quotaProj,
+            drainPct,
+            drainRecoveryPct,
+            wasInDrain
+          );
 
           if (inDrain) {
             st = 'drain';
@@ -391,24 +441,42 @@ export function computeWatermarkTargets(
       let reason = ev.initialReason;
       let finalState = ev.initialState;
 
+      let isEmergency = false;
       if (!snap.managed) {
         targetWeight = snap.currentWeight ?? 0;
         reason = 'unmanaged';
       } else if (ev.initialState === 'cooldown') {
         targetWeight = 0;
         reason = 'cooldown';
+        isEmergency = true;
         delete nextRampStep[snap.cpaName];
       } else if (ev.initialState === 'hard_stop') {
         targetWeight = 0;
         reason = 'hard_stop';
+        isEmergency = true;
         delete nextRampStep[snap.cpaName];
       } else if (nextTierState === 'collective_fallback') {
-        // Fallback: all managed accounts not in hard_stop or cooldown get W = 100
-        targetWeight = 100;
-        reason = 'collective_fallback';
-        finalState = 'healthy';
-        delete nextRampStep[snap.cpaName];
-        proEligibleCount++;
+        // Fallback: Staleness (#4) outranks Fallback (#5)
+        // - Accounts in state 'unknown' (stale with no prior state) stay W=0
+        // - Stale accounts holding drain (state 'drain', reason 'stale_telemetry_drain' or 'stale_telemetry_drain_hold')
+        //   must hold W=1 and NOT be elevated to W=100
+        // - Only non-stale, non-hardstop, non-cooldown accounts participate in collective fallback elevation to W=100
+        if (ev.initialState === 'unknown') {
+          targetWeight = 0;
+          reason = ev.initialReason;
+          delete nextRampStep[snap.cpaName];
+        } else if (ev.isStale && ev.initialState === 'drain') {
+          targetWeight = 1;
+          reason = ev.initialReason;
+          delete nextRampStep[snap.cpaName];
+          proEligibleCount++;
+        } else {
+          targetWeight = 100;
+          reason = 'collective_fallback';
+          finalState = 'healthy';
+          delete nextRampStep[snap.cpaName];
+          proEligibleCount++;
+        }
       } else {
         // Normal tier watermark / drain policy
         if (ev.initialState === 'drain') {
@@ -459,7 +527,7 @@ export function computeWatermarkTargets(
         }
       }
 
-      targets.set(snap.cpaName, { targetWeight, reason });
+      targets.set(snap.cpaName, { targetWeight, reason, isEmergency });
       const enteredAt =
         prevState?.accountStates?.[snap.cpaName]?.state === finalState
           ? prevState?.accountStates?.[snap.cpaName]?.enteredAt ?? now
@@ -475,9 +543,30 @@ export function computeWatermarkTargets(
     // ----------------------------------------------------
     // Tier 2: NON-PRO Accounts (Sequential Sticky Fill-First)
     // ----------------------------------------------------
-    // Non-Pro activates ONLY when 0 Pro accounts in provider pool are eligible
+    // Non-Pro activates ONLY when 0 Pro accounts in provider pool are eligible.
+    // Spec §3.4: When Pro recovers, Non-Pro accounts must remain active until >=1 Pro account has been healthy
+    // or ramping continuously for >= recoveryDwellSec (default 600s).
     const nonProTierKey = `${provider}:non_pro`;
-    const proHasEligible = proEligibleCount > 0;
+    const proHealthyKey = `${provider}:pro_healthy`;
+
+    const proHasHealthyOrRamping = proSnaps.some((s) => {
+      const st = nextAccountStates[s.cpaName]?.state;
+      return st === 'healthy' || st === 'ramping';
+    });
+
+    let proHealthySince = prevState?.tierStateEnteredAt?.[proHealthyKey];
+    if (proHasHealthyOrRamping) {
+      if (proHealthySince === undefined) {
+        proHealthySince = now;
+      }
+      nextTierStateEnteredAt[proHealthyKey] = proHealthySince;
+    } else {
+      delete nextTierStateEnteredAt[proHealthyKey];
+      proHealthySince = undefined;
+    }
+
+    const proRecoveryDwellElapsed =
+      proHealthySince !== undefined && (now - proHealthySince) / 1000 >= proCfg.recoveryDwellSec;
 
     const prevNonProTierState = prevState?.tierStates?.[nonProTierKey] ?? 'normal';
     const prevNonProTierEnteredAt = prevState?.tierStateEnteredAt?.[nonProTierKey];
@@ -486,7 +575,18 @@ export function computeWatermarkTargets(
     nextTierStateEnteredAt[nonProTierKey] =
       prevNonProTierState === 'normal' ? nonProTierEnteredAt : now;
 
-    if (!proHasEligible && nonProSnaps.length > 0) {
+    // Was Non-Pro previously active?
+    const wasNonProActive = nonProSnaps.some(
+      (s) => (prevState?.accountStates?.[s.cpaName]?.targetWeight ?? 0) > 0
+    );
+
+    // Non-Pro tier is active if:
+    // 1. Pro has no eligible accounts (proEligibleCount === 0), OR
+    // 2. Non-Pro was already active and Pro recovery dwell (10 min) has not yet elapsed.
+    const keepNonProActive =
+      proEligibleCount === 0 || (wasNonProActive && !proRecoveryDwellElapsed);
+
+    if (keepNonProActive && nonProSnaps.length > 0) {
       // Non-Pro tier is active
       // Sequential Sticky Fill-First:
       // Prefer currently active candidate (prevAcc?.targetWeight === 100 && !drained && !hard_stop) over alphabetical sorting.
@@ -496,17 +596,24 @@ export function computeWatermarkTargets(
         const prev = prevState?.accountStates?.[snap.cpaName];
         if (prev?.targetWeight === 100) {
           const quotaEff = snap.quotaEffectivePct;
-          const clampedBurn = clamp(snap.burnRatePerMin, 0, burnRateMax);
-          const quotaProj = quotaEff - clampedBurn * ((horizonSec + snap.stalenessSec) / 60);
+          const quotaProj = projectQuota(quotaEff, snap.burnRatePerMin, snap.stalenessSec, horizonSec, burnRateMax);
           const wasHardStop = prev?.state === 'hard_stop';
-          const hardStopBreached = wasHardStop
-            ? quotaEff < nonProCfg.hardStopRecoveryPct
-            : quotaProj <= nonProCfg.hardStopPct || quotaEff <= nonProCfg.hardStopPct;
+          const hardStopBreached = evalHardStop(
+            quotaEff,
+            quotaProj,
+            nonProCfg.hardStopPct,
+            nonProCfg.hardStopRecoveryPct,
+            wasHardStop
+          );
           const isStale = snap.stalenessSec > 300;
           const wasDrain = prev?.state === 'drain';
-          const inDrain = wasDrain
-            ? quotaEff < nonProCfg.drainRecoveryPct
-            : quotaProj <= nonProCfg.drainPct;
+          const inDrain = evalDrain(
+            quotaEff,
+            quotaProj,
+            nonProCfg.drainPct,
+            nonProCfg.drainRecoveryPct,
+            wasDrain
+          );
 
           if (!hardStopBreached && !isStale && !inDrain) {
             activeCandidateName = snap.cpaName;
@@ -521,17 +628,24 @@ export function computeWatermarkTargets(
           if (!snap.managed || snap.isCooldown) continue;
           const prev = prevState?.accountStates?.[snap.cpaName];
           const quotaEff = snap.quotaEffectivePct;
-          const clampedBurn = clamp(snap.burnRatePerMin, 0, burnRateMax);
-          const quotaProj = quotaEff - clampedBurn * ((horizonSec + snap.stalenessSec) / 60);
+          const quotaProj = projectQuota(quotaEff, snap.burnRatePerMin, snap.stalenessSec, horizonSec, burnRateMax);
           const wasHardStop = prev?.state === 'hard_stop';
-          const hardStopBreached = wasHardStop
-            ? quotaEff < nonProCfg.hardStopRecoveryPct
-            : quotaProj <= nonProCfg.hardStopPct || quotaEff <= nonProCfg.hardStopPct;
+          const hardStopBreached = evalHardStop(
+            quotaEff,
+            quotaProj,
+            nonProCfg.hardStopPct,
+            nonProCfg.hardStopRecoveryPct,
+            wasHardStop
+          );
           const isStale = snap.stalenessSec > 300;
           const wasDrain = prev?.state === 'drain';
-          const inDrain = wasDrain
-            ? quotaEff < nonProCfg.drainRecoveryPct
-            : quotaProj <= nonProCfg.drainPct;
+          const inDrain = evalDrain(
+            quotaEff,
+            quotaProj,
+            nonProCfg.drainPct,
+            nonProCfg.drainRecoveryPct,
+            wasDrain
+          );
 
           if (!hardStopBreached && !isStale && !inDrain) {
             activeCandidateName = snap.cpaName;
@@ -545,6 +659,7 @@ export function computeWatermarkTargets(
         let targetWeight = 0;
         let reason = 'standby';
         let state: AccountEngineStateKind = 'healthy';
+        let isEmergency = false;
 
         if (!snap.managed) {
           targetWeight = snap.currentWeight ?? 0;
@@ -554,21 +669,26 @@ export function computeWatermarkTargets(
           targetWeight = 0;
           reason = 'cooldown';
           state = 'cooldown';
+          isEmergency = true;
           delete nextRampStep[snap.cpaName];
         } else {
           const quotaEff = snap.quotaEffectivePct;
-          const clampedBurn = clamp(snap.burnRatePerMin, 0, burnRateMax);
-          const quotaProj = quotaEff - clampedBurn * ((horizonSec + snap.stalenessSec) / 60);
+          const quotaProj = projectQuota(quotaEff, snap.burnRatePerMin, snap.stalenessSec, horizonSec, burnRateMax);
 
           const wasHardStop = prev?.state === 'hard_stop';
-          const hardStopBreached = wasHardStop
-            ? quotaEff < nonProCfg.hardStopRecoveryPct
-            : quotaProj <= nonProCfg.hardStopPct || quotaEff <= nonProCfg.hardStopPct;
+          const hardStopBreached = evalHardStop(
+            quotaEff,
+            quotaProj,
+            nonProCfg.hardStopPct,
+            nonProCfg.hardStopRecoveryPct,
+            wasHardStop
+          );
 
           if (hardStopBreached) {
             targetWeight = 0;
             reason = 'hard_stop';
             state = 'hard_stop';
+            isEmergency = true;
             delete nextRampStep[snap.cpaName];
           } else if (snap.stalenessSec > 300) {
             targetWeight = 0;
@@ -578,9 +698,13 @@ export function computeWatermarkTargets(
           } else {
             // Check drain threshold <= 40% (recovery >= 44%)
             const wasDrain = prev?.state === 'drain';
-            const inDrain = wasDrain
-              ? quotaEff < nonProCfg.drainRecoveryPct
-              : quotaProj <= nonProCfg.drainPct;
+            const inDrain = evalDrain(
+              quotaEff,
+              quotaProj,
+              nonProCfg.drainPct,
+              nonProCfg.drainRecoveryPct,
+              wasDrain
+            );
 
             if (inDrain) {
               targetWeight = 1;
@@ -601,7 +725,7 @@ export function computeWatermarkTargets(
           }
         }
 
-        targets.set(snap.cpaName, { targetWeight, reason });
+        targets.set(snap.cpaName, { targetWeight, reason, isEmergency });
         const enteredAt =
           prev?.state === state ? prev?.enteredAt ?? now : now;
         nextAccountStates[snap.cpaName] = {
@@ -611,7 +735,7 @@ export function computeWatermarkTargets(
         };
       }
     } else if (nonProSnaps.length > 0) {
-      // Pro HAS eligible accounts -> Non-Pro must step down
+      // Pro HAS eligible accounts AND dwell has elapsed -> Non-Pro must step down
       // When Pro recovers, only accounts that were previously active (>0 weight) step down to drain W=1.
       // Standby accounts (targetWeight === 0) stay at W=0; do not oscillate 1,0,1,0.
       for (const snap of nonProSnaps) {
@@ -619,6 +743,7 @@ export function computeWatermarkTargets(
         let targetWeight = 0;
         let reason = 'standby_pro_active';
         let state: AccountEngineStateKind = 'healthy';
+        let isEmergency = false;
 
         if (!snap.managed) {
           targetWeight = snap.currentWeight ?? 0;
@@ -628,21 +753,26 @@ export function computeWatermarkTargets(
           targetWeight = 0;
           reason = 'cooldown';
           state = 'cooldown';
+          isEmergency = true;
           delete nextRampStep[snap.cpaName];
         } else {
           const quotaEff = snap.quotaEffectivePct;
-          const clampedBurn = clamp(snap.burnRatePerMin, 0, burnRateMax);
-          const quotaProj = quotaEff - clampedBurn * ((horizonSec + snap.stalenessSec) / 60);
+          const quotaProj = projectQuota(quotaEff, snap.burnRatePerMin, snap.stalenessSec, horizonSec, burnRateMax);
 
           const wasHardStop = prev?.state === 'hard_stop';
-          const hardStopBreached = wasHardStop
-            ? quotaEff < nonProCfg.hardStopRecoveryPct
-            : quotaProj <= nonProCfg.hardStopPct || quotaEff <= nonProCfg.hardStopPct;
+          const hardStopBreached = evalHardStop(
+            quotaEff,
+            quotaProj,
+            nonProCfg.hardStopPct,
+            nonProCfg.hardStopRecoveryPct,
+            wasHardStop
+          );
 
           if (hardStopBreached) {
             targetWeight = 0;
             reason = 'hard_stop';
             state = 'hard_stop';
+            isEmergency = true;
             delete nextRampStep[snap.cpaName];
           } else if (snap.stalenessSec > 300) {
             targetWeight = 0;
@@ -663,7 +793,7 @@ export function computeWatermarkTargets(
           }
         }
 
-        targets.set(snap.cpaName, { targetWeight, reason });
+        targets.set(snap.cpaName, { targetWeight, reason, isEmergency });
         const enteredAt = prev?.state === state ? prev?.enteredAt ?? now : now;
         nextAccountStates[snap.cpaName] = {
           state,
@@ -691,18 +821,22 @@ export function computeWatermarkTargets(
       const wasInHardStop = prev?.state === 'hard_stop';
       const hardFloorPct = snap.tier === 'pro' ? proCfg.hardStopPct : nonProCfg.hardStopPct;
       const hardFloorRecoveryPct = snap.tier === 'pro' ? proCfg.hardStopRecoveryPct : nonProCfg.hardStopRecoveryPct;
-      const clampedBurn = clamp(snap.burnRatePerMin, 0, burnRateMax);
       const quotaEff = snap.quotaEffectivePct;
-      const quotaProj = quotaEff - clampedBurn * ((horizonSec + snap.stalenessSec) / 60);
+      const quotaProj = projectQuota(quotaEff, snap.burnRatePerMin, snap.stalenessSec, horizonSec, burnRateMax);
 
-      const hardStopBreached = wasInHardStop
-        ? quotaEff < hardFloorRecoveryPct
-        : quotaEff <= hardFloorPct || quotaProj <= hardFloorPct;
+      const hardStopBreached = evalHardStop(
+        quotaEff,
+        quotaProj,
+        hardFloorPct,
+        hardFloorRecoveryPct,
+        wasInHardStop
+      );
 
       if (hardStopBreached && decision.targetWeight > 0) {
         // Enforce invariant by forcing W = 0
         decision.targetWeight = 0;
         decision.reason = 'invariant_hard_floor_abort';
+        decision.isEmergency = true;
         const oldState = nextAccountStates[snap.cpaName].state;
         if (oldState !== 'hard_stop') {
           nextAccountStates[snap.cpaName].enteredAt = now;
@@ -726,6 +860,7 @@ export function computeWatermarkTargets(
       if (snap.isCooldown && decision.targetWeight > 0) {
         decision.targetWeight = 0;
         decision.reason = 'invariant_cooldown_abort';
+        decision.isEmergency = true;
         const oldState = nextAccountStates[snap.cpaName].state;
         if (oldState !== 'cooldown') {
           nextAccountStates[snap.cpaName].enteredAt = now;
@@ -789,13 +924,14 @@ export function computeWatermarkTargets(
 
   if (mode !== 'shadow') {
     // Increases (W ↑) before Decreases (W ↓)
-    // Emergency writes (hard floor breached or cooldown / 429) outrank make-before-break when demoting
+    // Emergency demotions bypass make-before-break ONLY when no promotion candidate exists.
+    // If promotion candidates exist, promotions (W ↑) execute before demotions (W ↓).
     const increases: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
     const decreases: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
-    const emergencies: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
+    const emergencyDemotions: Array<{ name: string; weight: number; isEmergency: boolean }> = [];
 
     for (const snap of snapshots) {
-      if (!snap.managed || snap.modality === 'direct_api') continue;
+      if (!snap.managed || snap.modality === 'direct_api' || snap.modality === 'budgeted_allowance') continue;
 
       const decision = targets.get(snap.cpaName);
       if (!decision) continue;
@@ -804,11 +940,7 @@ export function computeWatermarkTargets(
       const targetW = decision.targetWeight;
 
       if (currentW !== targetW) {
-        const isEmergency =
-          decision.reason === 'hard_stop' ||
-          decision.reason === 'cooldown' ||
-          decision.reason === 'invariant_hard_floor_abort' ||
-          decision.reason === 'invariant_cooldown_abort';
+        const isEmergency = Boolean(decision.isEmergency);
 
         const writeOp = {
           name: snap.cpaName,
@@ -816,18 +948,23 @@ export function computeWatermarkTargets(
           isEmergency,
         };
 
-        if (isEmergency) {
-          emergencies.push(writeOp);
-        } else if (targetW > currentW) {
+        if (targetW > currentW) {
           increases.push(writeOp);
+        } else if (isEmergency) {
+          emergencyDemotions.push(writeOp);
         } else {
           decreases.push(writeOp);
         }
       }
     }
 
-    // Order: emergencies -> increases -> decreases
-    writeBatch.push(...emergencies, ...increases, ...decreases);
+    // Emergency demotions bypass make-before-break ONLY when no promotion candidate exists.
+    // If promotion candidates exist, promotions (W ↑) execute before demotions (W ↓).
+    if (increases.length > 0) {
+      writeBatch.push(...increases, ...emergencyDemotions, ...decreases);
+    } else {
+      writeBatch.push(...emergencyDemotions, ...decreases);
+    }
   }
 
   return {

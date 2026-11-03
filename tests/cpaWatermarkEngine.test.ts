@@ -346,7 +346,8 @@ console.log('\nSuite 6: Cross-Tier Activation');
   assert(res2.targets.get('ag-free-2')?.targetWeight === 0, 'Non-pro 2 remains standby W=0 (sticky fill-first)');
   state = res2.nextState;
 
-  // Scenario 3: Pro recovers -> Non-pro transitions to drain (W = 1) for in-flight turn completion
+  // Scenario 3: Pro recovers -> Non-pro remains active during 10-minute recovery dwell
+  // Before recovery dwell (e.g. at +120s < 600s), Non-Pro remains active!
   const snaps3 = [
     makeProSnapshot('ag-pro', 85, { provider: 'antigravity', isCooldown: false }),
     makeNonProSnapshot('ag-free-1', 90, { currentWeight: 100 }),
@@ -355,8 +356,16 @@ console.log('\nSuite 6: Cross-Tier Activation');
   const res3 = computeWatermarkTargets(snaps3, policy, state, now + 120000);
   assert(res3.targets.get('ag-pro')?.targetWeight === 100, 'Pro account recovers to W=100');
   assert(
-    res3.targets.get('ag-free-1')?.targetWeight === 1,
-    'Non-pro 1 steps down through drain (W=1) to prevent in-flight context fragmentation'
+    res3.targets.get('ag-free-1')?.targetWeight === 100,
+    'Non-pro 1 remains active during 10-min Pro recovery dwell'
+  );
+  state = res3.nextState;
+
+  // Scenario 4: After Pro recovery dwell (>= 600s, e.g. at +600s dwell), Non-pro steps down through drain (W=1)
+  const res4 = computeWatermarkTargets(snaps3, policy, state, now + 120000 + 600000);
+  assert(
+    res4.targets.get('ag-free-1')?.targetWeight === 1,
+    'Non-pro 1 steps down through drain (W=1) after 10-min recovery dwell'
   );
 }
 
@@ -413,18 +422,49 @@ console.log('\nSuite 8: Make-Before-Break & Emergency Bypass');
     'Make-before-break: write increases (W ↑) execute before write decreases (W ↓)'
   );
 
-  // Scenario 2: Emergency demotion (hard floor breached or 429) outranks make-before-break
-  const snapsEmergency = [
-    makeProSnapshot('p1', 80, { currentWeight: 1 }), // promotion candidate
-    makeProSnapshot('p2', 2, { currentWeight: 100 }),  // hard stop breach <= 5% -> emergency demotion!
+  // Scenario 2: Emergency demotion with promotion candidate present:
+  // Spec §4.2 #5: Emergency demotions bypass make-before-break ONLY when NO promotion candidate exists.
+  // If promotion candidates exist, promotions (W ↑) execute before demotions (W ↓).
+  const snapsEmergencyWithPromo = [
+    makeProSnapshot('p1', 80, { currentWeight: 1 }), // promotion candidate (1 -> 100)
+    makeProSnapshot('p2', 2, { currentWeight: 100 }), // hard stop breach <= 5% -> emergency demotion (100 -> 0)
     makeProSnapshot('p3', 80, { currentWeight: 100 }),
   ];
 
-  const resEmergency = computeWatermarkTargets(snapsEmergency, policy, state, now);
-  const batchEmergency = resEmergency.writeBatch;
-  const p2Op = batchEmergency.find((w) => w.name === 'p2');
+  const resPromo = computeWatermarkTargets(snapsEmergencyWithPromo, policy, state, now);
+  const batchPromo = resPromo.writeBatch;
+  const p2Op = batchPromo.find((w) => w.name === 'p2');
   assert(p2Op?.isEmergency === true, 'Hard floor eviction marked as emergency write');
-  assert(batchEmergency[0].name === 'p2', 'Emergency demotion executes first in writeBatch');
+  assert(
+    batchPromo[0].name === 'p1',
+    'With promotion candidates present, promotion (W ↑) executes before emergency demotion'
+  );
+  assert(
+    batchPromo[1].name === 'p2',
+    'Emergency demotion follows promotions when promotion candidates exist'
+  );
+
+  // Scenario 3: Emergency demotion WITHOUT promotion candidates:
+  // Emergency demotion executes first (bypasses make-before-break).
+  const snapsEmergencyNoPromo = [
+    makeProSnapshot('p1', 80, { currentWeight: 100 }), // no change
+    makeProSnapshot('p2', 2, { currentWeight: 100 }),  // hard stop breach -> emergency demotion (100 -> 0)
+    makeProSnapshot('p3', 15, { currentWeight: 100 }), // normal decrease (100 -> 100 in fallback? No, N=3, K=2, healthy=1 -> collective fallback elevated to 100!)
+    makeProSnapshot('p4', 80, { currentWeight: 100 }),
+    makeProSnapshot('p5', 80, { currentWeight: 100 }),
+    makeProSnapshot('p6', 80, { currentWeight: 100 }),
+  ];
+
+  const resNoPromo = computeWatermarkTargets(snapsEmergencyNoPromo, policy, state, now);
+  const batchNoPromo = resNoPromo.writeBatch;
+  assert(
+    batchNoPromo[0].name === 'p2',
+    'Emergency demotion executes first when no promotion candidate exists'
+  );
+  assert(
+    batchNoPromo[1].name === 'p3',
+    'Normal decrease executes after emergency demotion'
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -589,7 +629,8 @@ console.log('\nSuite 12: Non-Pro Stickiness & Standby Stability');
 
   // Standby stability when Pro recovers:
   // Pro1 recovers to 90%.
-  // Active np-b must step down to W=1 (cross_tier_drain_stepdown).
+  // Before 10-minute Pro recovery dwell has elapsed, Non-Pro remains active at W=100.
+  // After 10-minute dwell (>= 600s), active np-b must step down to W=1 (cross_tier_drain_stepdown).
   // Standby np-a must stay at W=0 (standby_pro_active) and NOT oscillate!
   const snapsProBack = [
     makeProSnapshot('pro1', 90, { provider: 'antigravity', currentWeight: 0 }),
@@ -597,20 +638,25 @@ console.log('\nSuite 12: Non-Pro Stickiness & Standby Stability');
     makeNonProSnapshot('np-b', 75, { currentWeight: 100 }),
   ];
 
-  // Tick 1
-  res = computeWatermarkTargets(snapsProBack, policy, state, now + 1000);
+  // At +1000ms (< 600s dwell), np-b remains active W=100
+  const resDwell = computeWatermarkTargets(snapsProBack, policy, state, now + 1000);
+  assert(resDwell.targets.get('np-b')?.targetWeight === 100, 'Standby Stability: np-b remains active before recovery dwell');
+  state = resDwell.nextState;
+
+  // Tick 1 after dwell (now + 601s): active np-b steps down to W=1
+  res = computeWatermarkTargets(snapsProBack, policy, state, now + 601000);
   state = res.nextState;
-  assert(res.targets.get('np-b')?.targetWeight === 1, 'Standby Stability: active np-b steps down to W=1');
+  assert(res.targets.get('np-b')?.targetWeight === 1, 'Standby Stability: active np-b steps down to W=1 after dwell');
   assert(res.targets.get('np-a')?.targetWeight === 0, 'Standby Stability: standby np-a stays at W=0');
 
   // Tick 2: Both non-pro should be at W=0, no oscillation
-  res = computeWatermarkTargets(snapsProBack, policy, state, now + 2000);
+  res = computeWatermarkTargets(snapsProBack, policy, state, now + 602000);
   state = res.nextState;
   assert(res.targets.get('np-b')?.targetWeight === 0, 'Standby Stability: np-b steps down to W=0 on tick 2');
   assert(res.targets.get('np-a')?.targetWeight === 0, 'Standby Stability: np-a stays at W=0 on tick 2');
 
   // Tick 3: Both non-pro remain at W=0
-  res = computeWatermarkTargets(snapsProBack, policy, state, now + 3000);
+  res = computeWatermarkTargets(snapsProBack, policy, state, now + 603000);
   assert(res.targets.get('np-b')?.targetWeight === 0, 'Standby Stability: np-b stable at W=0 on tick 3');
   assert(res.targets.get('np-a')?.targetWeight === 0, 'Standby Stability: np-a stable at W=0 on tick 3');
 }
@@ -640,6 +686,82 @@ console.log('\nSuite 13: Invariant 3 Safety & Violation Observability');
   }
   assert(totalW === 0, 'Invariant 3 Safety: sum(W) === 0, never promotes hard-stopped accounts');
   assert(Array.isArray(res.invariantViolations), 'Invariant Violations: array present on result');
+}
+
+// -----------------------------------------------------------------------------
+// Suite 14: Staleness Precedence in Fallback & Modality Bypass & Mode Off State Preservation
+// -----------------------------------------------------------------------------
+console.log('\nSuite 14: Staleness Precedence in Fallback & Modality Bypass & Mode Off');
+{
+  const policy: WatermarkPolicyConfig = { mode: 'enforce' };
+  let state = makeInitialState();
+  const now = 1700000000000;
+
+  // 1. Staleness Precedence Over Fallback (Spec §4.1: Staleness #4 outranks Fallback #5)
+  // In collective fallback:
+  // - Stale account with no prior state ('unknown') must stay W=0
+  // - Stale account holding drain (state 'drain', reason 'stale_telemetry_drain' or 'stale_telemetry_drain_hold') must hold W=1 and NOT be elevated to W=100
+  // - Fresh account in fallback gets elevated to W=100
+  state.accountStates['stale-drain'] = { state: 'drain', enteredAt: now, targetWeight: 1 };
+  const snapsFallbackStale = [
+    makeProSnapshot('fresh-pro', 15, { provider: 'antigravity', currentWeight: 100 }), // drain eligible -> triggers collective fallback! (healthy < K)
+    makeProSnapshot('stale-pro-drain', 15, { provider: 'antigravity', cpaName: 'stale-drain', stalenessSec: 350, currentWeight: 1 }), // stale with prior drain
+    makeProSnapshot('stale-pro-unknown', 80, { provider: 'antigravity', stalenessSec: 350, currentWeight: 0 }), // stale unknown (no prior state)
+  ];
+
+  const resFallback = computeWatermarkTargets(snapsFallbackStale, policy, state, now);
+  assert(resFallback.nextState.tierStates['antigravity:pro'] === 'collective_fallback', 'Tier entered collective fallback');
+  assert(
+    resFallback.targets.get('fresh-pro')?.targetWeight === 100,
+    'Fresh account elevated to W=100 in collective fallback'
+  );
+  assert(
+    resFallback.targets.get('stale-drain')?.targetWeight === 1,
+    'Stale account holding drain holds W=1 in collective fallback (staleness outranks fallback)'
+  );
+  assert(
+    resFallback.targets.get('stale-pro-unknown')?.targetWeight === 0,
+    'Stale account with no prior state stays W=0 in collective fallback'
+  );
+
+  // 2. Direct API & Budgeted Allowance Modality Bypass
+  const snapsModality = [
+    makeProSnapshot('direct-1', 50, { modality: 'direct_api', currentWeight: 100 }),
+    makeProSnapshot('budget-1', 50, { modality: 'budgeted_allowance', currentWeight: 80 }),
+    makeProSnapshot('managed-pro', 80, { currentWeight: 100 }),
+  ];
+
+  const resModality = computeWatermarkTargets(snapsModality, policy, state, now);
+  assert(
+    resModality.targets.get('direct-1')?.targetWeight === 100,
+    'direct_api modality account preserves weight'
+  );
+  assert(
+    resModality.targets.get('budget-1')?.targetWeight === 80,
+    'budgeted_allowance modality account preserves weight'
+  );
+  const modalityWrites = resModality.writeBatch.filter(
+    (w) => w.name === 'direct-1' || w.name === 'budget-1'
+  );
+  assert(modalityWrites.length === 0, 'Zero writes generated for direct_api and budgeted_allowance');
+
+  // 3. Mode 'off' State Preservation
+  const prevStateToPreserve = resFallback.nextState;
+  const offPolicy: WatermarkPolicyConfig = { mode: 'off' };
+  const resOff = computeWatermarkTargets(snapsFallbackStale, offPolicy, prevStateToPreserve, now + 10000);
+  assert(resOff.writeBatch.length === 0, 'Mode off produces empty write batch');
+  assert(
+    resOff.nextState.tierStates['antigravity:pro'] === 'collective_fallback',
+    'Mode off preserves prior tierStates'
+  );
+  assert(
+    resOff.nextState.accountStates['stale-drain']?.targetWeight === 1,
+    'Mode off preserves prior accountStates'
+  );
+  assert(
+    resOff.nextState.generation === prevStateToPreserve.generation + 1,
+    'Mode off increments generation'
+  );
 }
 
 console.log('\n========================================');
