@@ -186,9 +186,7 @@ export function App() {
             <p className="tagline">Enterprise multi-gateway quota monitor, burst routing intelligence &amp; token telemetry.</p>
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className={`filter-btn ${syncing ? 'spin' : ''}`} style={{ padding: '4px 10px', fontSize: 11 }} onClick={refreshAll} aria-label="Refresh">
-              <Icon name="refresh" size={14} /> Refresh
-            </button>
+            <button className={`filter-btn ${syncing ? 'spin' : ''}`} style={{ padding: '4px 10px', fontSize: 11 }} onClick={refreshAll} aria-label="Refresh">{syncing ? 'Refreshing…' : 'Refresh'}</button>
             <span className="badge badge-ok">All Systems Healthy</span>
           </div>
         </header>
@@ -417,6 +415,37 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
     ? (simSize <= 20 ? 'cell' : simSize <= 40 ? 'matrix' : 'aggregate')
     : capView;
 
+  const getSlotHeadroom = (a: Account, idx: number) => {
+    const isClaude = a.providerType === 'claude';
+    const ring = dualRingData(a.latestSnapshot);
+    const rawRem = ring.outer !== undefined && ring.outer !== null
+      ? Math.round(ring.outer.remaining)
+      : (ring.inner ? Math.round(ring.inner.remaining) : (isClaude ? 84 : (90 + ((idx * 3) % 10))));
+    const rem = Math.max(0, Math.min(100, rawRem));
+    const isExhausted = rem <= 15;
+    const isTight = rem <= 35;
+    const status: 'exhausted' | 'tight' | 'healthy' = isExhausted ? 'exhausted' : isTight ? 'tight' : 'healthy';
+    const label = isExhausted ? 'Exhausted' : isTight ? 'Tight' : 'Healthy';
+    const color = isExhausted ? '#ef4444' : isTight ? '#fbbf24' : '#4ade80';
+    const fill = isExhausted
+      ? 'linear-gradient(0deg, #7f1d1d, #ef4444)'
+      : isTight
+      ? 'linear-gradient(0deg, #78350f, #d97706)'
+      : isClaude
+      ? 'linear-gradient(0deg, #7c2d12, #ea580c)'
+      : 'linear-gradient(0deg, #1e3a8a, #2563eb)';
+    const waterlineColor = isExhausted ? '#fca5a5' : isTight ? '#fef08a' : isClaude ? '#fdba74' : '#93c5fd';
+    const waterlineBg = isExhausted ? '#ef4444' : isTight ? '#f59e0b' : isClaude ? '#ea580c' : '#60a5fa';
+    const badge = isExhausted ? 'badge-bad' : isTight ? 'badge-warn' : 'badge-ok';
+    const reqs = Math.round((rem / 100) * 156);
+    return { rem, isTight, isExhausted, status, label, color, fill, waterlineColor, waterlineBg, badge, reqs };
+  };
+
+  const attentionAccounts = effectiveAccounts
+    .map((a, i) => ({ account: a, info: getSlotHeadroom(a, i), idx: i }))
+    .filter(item => item.info.isTight);
+
+
   return (
     <div id="tab-home" className="view-panel active">
       {/* 4 KPI Metric Stat Boxes */}
@@ -431,7 +460,9 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
           <span className="stat-val" style={{ color: Number(aggregateHeadroom) < 30 ? 'var(--bad)' : Number(aggregateHeadroom) < 50 ? 'var(--warn)' : 'var(--ok)' }}>
             {aggregateHeadroom}%
           </span>
-          <span className="stat-sub">Optimal capacity</span>
+          <span className="stat-sub" style={{ color: Number(aggregateHeadroom) < 30 ? 'var(--bad)' : Number(aggregateHeadroom) < 50 ? 'var(--warn)' : 'var(--ok)' }}>
+            {Number(aggregateHeadroom) >= 50 ? 'Optimal capacity' : Number(aggregateHeadroom) >= 30 ? 'Elevated load / Tight' : 'Critical exhaustion risk'}
+          </span>
         </div>
         <div className="card stat-box">
           <span className="stat-sub">Routing Latency</span>
@@ -491,17 +522,15 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
             </div>
             <div className="gradient-bar-track">
               {agyAccounts.map((acc, idx) => {
-                const ring = dualRingData(acc.latestSnapshot);
-                const isTight = acc.email?.includes('vishakha') || idx === 13;
-                const rem = isTight ? 34 : (ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : (90 + ((idx * 3) % 10)));
+                const h = getSlotHeadroom(acc, idx);
                 const slotLabel = String(idx + 1).padStart(2, '0');
-                const isSelected = hoverAccount?.id === acc.id || (!hoverAccount && isTight);
+                const isSelected = hoverAccount?.id === acc.id || (!hoverAccount && h.isTight);
                 return (
                   <div
                     key={acc.id}
                     className="grad-segment"
                     style={{
-                      borderColor: isSelected ? (isTight ? '#f59e0b' : '#60a5fa') : undefined,
+                      borderColor: isSelected ? (h.isTight ? h.color : '#60a5fa') : undefined,
                       transform: isSelected ? 'translateY(-2px)' : undefined,
                     }}
                     onMouseEnter={() => setHoverAccount(acc)}
@@ -511,21 +540,21 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
                     <div
                       className="grad-segment-fill"
                       style={{
-                        height: `${Math.max(10, rem)}%`,
-                        background: isTight ? 'linear-gradient(0deg, #78350f, #d97706)' : 'linear-gradient(0deg, #1e3a8a, #2563eb)',
+                        height: `${Math.max(10, h.rem)}%`,
+                        background: h.fill,
                       }}
                     >
                       <div
                         className="grad-segment-waterline"
                         style={{
-                          color: isTight ? '#f59e0b' : '#60a5fa',
-                          background: isTight ? '#fef08a' : '#93c5fd',
+                          color: h.waterlineColor,
+                          background: h.waterlineBg,
                         }}
                       />
                     </div>
-                    <div className="grad-segment-tooltip" style={{ borderColor: isTight ? '#f59e0b' : undefined }}>
+                    <div className="grad-segment-tooltip" style={{ borderColor: h.isTight ? h.color : undefined }}>
                       <strong>{acc.email || acc.name}</strong> (Slot {slotLabel})<br />
-                      <span style={{ color: isTight ? '#fbbf24' : '#4ade80' }}>{Math.round(rem)}% {isTight ? 'Tight' : 'Healthy'}</span>
+                      <span style={{ color: h.color }}>{h.rem}% {h.label}</span>
                     </div>
                   </div>
                 );
@@ -578,9 +607,7 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
             {hoverAccount && (() => {
               const hovIdx = agyAccounts.findIndex(a => a.id === hoverAccount.id);
               const isClaude = hoverAccount.providerType === 'claude';
-              const isTight = hoverAccount.email?.includes('vishakha') || hovIdx === 13;
-              const ring = dualRingData(hoverAccount.latestSnapshot);
-              const rem = isClaude ? 84 : (isTight ? 34 : Math.round(ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : 88));
+              const h = getSlotHeadroom(hoverAccount, hovIdx >= 0 ? hovIdx : 0);
               const slotStr = isClaude ? 'slot_01' : `slot_${String(hovIdx >= 0 ? hovIdx + 1 : 14).padStart(2, '0')}`;
               return (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, padding: '8px 12px', background: 'var(--card-hi)', borderRadius: 8, fontSize: 11 }}>
@@ -589,8 +616,8 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
                     <strong style={{ color: '#fff' }}>{hoverAccount.email || hoverAccount.name}</strong>
                   </div>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span style={{ color: isTight ? '#fbbf24' : '#4ade80', fontWeight: 700 }}>{rem}% ({isTight ? '45 reqs' : '156 reqs'})</span>
-                    <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>{isTight ? 'Tight' : 'Healthy'}</span>
+                    <span style={{ color: h.color, fontWeight: 700 }}>{h.rem}% ({h.reqs} reqs)</span>
+                    <span className={`badge ${h.badge}`}>{h.label}</span>
                   </div>
                 </div>
               );
@@ -655,41 +682,51 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="card-header">
           <span className="card-title">Active Attention &amp; Quota Warnings</span>
-          <span className="badge badge-warn">1 Attention Required</span>
+          <span className={`badge ${attentionAccounts.length > 0 ? 'badge-warn' : 'badge-ok'}`}>
+            {attentionAccounts.length > 0 ? `${attentionAccounts.length} Attention Required` : 'All Accounts Optimal'}
+          </span>
         </div>
         <div style={{ display: 'grid', gap: 10 }}>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '12px 14px',
-              background: 'rgba(245,158,11,0.08)',
-              border: '1px solid rgba(245,158,11,0.3)',
-              borderRadius: 8,
-              cursor: 'pointer',
-            }}
-            onClick={() => {
-              const acc = effectiveAccounts.find(a => a.email?.includes('vishakha')) || effectiveAccounts[effectiveAccounts.length - 1];
-              if (acc) setDrawerAccount(acc);
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span className="badge badge-slot">slot_14</span>
-              <div>
-                <strong style={{ color: '#fff', fontSize: 13 }}>vishakhagemini0@gmail.com</strong>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                  Accelerated prompt volume detected • 5h Burst window at 34% (45 reqs)
+          {attentionAccounts.length === 0 ? (
+            <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>All accounts operating above 35% headroom floor.</div>
+          ) : (
+            attentionAccounts.slice(0, 3).map(({ account: a, info: h, idx }) => {
+              const slotStr = a.providerType === 'claude' ? 'slot_01' : `slot_${String(idx + 1).padStart(2, '0')}`;
+              const resetStr = h.isExhausted ? 'in 1h 14m (14:30 UTC)' : 'Rolling window recovery in progress';
+              return (
+                <div
+                  key={a.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '12px 14px',
+                    background: h.isExhausted ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)',
+                    border: '1px solid ' + (h.isExhausted ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'),
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => setDrawerAccount(a)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span className="badge badge-slot">{slotStr}</span>
+                    <div>
+                      <strong style={{ color: '#fff', fontSize: 13 }}>{a.email || a.name}</strong>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                        High consumption detected • 5h Burst window at {h.rem}% ({h.reqs} reqs)
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span className={`badge ${h.badge}`}>{h.label} ({h.rem}%)</span>
+                    <div style={{ fontSize: 11, color: h.color, marginTop: 4 }}>
+                      Next Recovery: {resetStr}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <span className="badge badge-warn">Tight (34%)</span>
-              <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>
-                Next Recovery: in 1h 14m (14:30 UTC)
-              </div>
-            </div>
-          </div>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -728,6 +765,16 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
   const [drawerAccount, setDrawerAccount] = useState<Account | null>(null);
   const [sortKey, setSortKey] = useState<string>('slot');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [showColsMenu, setShowColsMenu] = useState(false);
+  const [visibleCols, setVisibleCols] = useState({
+    slot: true,
+    email: true,
+    provider: true,
+    burst: true,
+    cycle: true,
+    reset: true,
+    status: true,
+  });
 
   const effectiveAccounts = accounts.length > 0 ? accounts : [...getMockAgyAccounts(), getMockClaudeAccount()];
 
@@ -889,9 +936,57 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
           <option value="claude">Claude Code</option>
         </select>
 
-        <button className="filter-btn" style={{ marginLeft: 'auto' }}>
-          Columns ▾
-        </button>
+        <div style={{ position: 'relative', marginLeft: 'auto' }}>
+          <button
+            className="filter-btn"
+            onClick={() => setShowColsMenu(!showColsMenu)}
+          >
+            Columns ▾
+          </button>
+          {showColsMenu && (
+            <div
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: '100%',
+                marginTop: 4,
+                background: '#1e293b',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '10px 14px',
+                zIndex: 30,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                minWidth: 170,
+                boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 2 }}>Toggle Columns</div>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
+                <input type="checkbox" checked={visibleCols.slot} onChange={(e) => setVisibleCols({ ...visibleCols, slot: e.target.checked })} /> Slot
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
+                <input type="checkbox" checked={visibleCols.email} onChange={(e) => setVisibleCols({ ...visibleCols, email: e.target.checked })} /> Account Email
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
+                <input type="checkbox" checked={visibleCols.provider} onChange={(e) => setVisibleCols({ ...visibleCols, provider: e.target.checked })} /> Provider
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
+                <input type="checkbox" checked={visibleCols.burst} onChange={(e) => setVisibleCols({ ...visibleCols, burst: e.target.checked })} /> 5H Burst
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
+                <input type="checkbox" checked={visibleCols.cycle} onChange={(e) => setVisibleCols({ ...visibleCols, cycle: e.target.checked })} /> 7D Cycle
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
+                <input type="checkbox" checked={visibleCols.reset} onChange={(e) => setVisibleCols({ ...visibleCols, reset: e.target.checked })} /> Next 5H Reset
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: '#fff' }}>
+                <input type="checkbox" checked={visibleCols.status} onChange={(e) => setVisibleCols({ ...visibleCols, status: e.target.checked })} /> Status
+              </label>
+            </div>
+          )}
+        </div>
         <button
           className="btn small"
           style={{ background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}
@@ -906,27 +1001,41 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
         <table className="data-table">
           <thead>
             <tr>
-              <th className={`sortable-th ${sortKey === 'slot' ? 'sort-active' : ''}`} onClick={() => handleSort('slot')}>
-                SLOT {renderSortIndicator('slot')}
-              </th>
-              <th className={`sortable-th ${sortKey === 'email' ? 'sort-active' : ''}`} onClick={() => handleSort('email')}>
-                ACCOUNT EMAIL {renderSortIndicator('email')}
-              </th>
-              <th className={`sortable-th ${sortKey === 'provider' ? 'sort-active' : ''}`} onClick={() => handleSort('provider')}>
-                PROVIDER {renderSortIndicator('provider')}
-              </th>
-              <th className={`sortable-th ${sortKey === 'burst' ? 'sort-active' : ''}`} onClick={() => handleSort('burst')}>
-                5H BURST {renderSortIndicator('burst')}
-              </th>
-              <th className={`sortable-th ${sortKey === 'cycle' ? 'sort-active' : ''}`} onClick={() => handleSort('cycle')}>
-                7D CYCLE {renderSortIndicator('cycle')}
-              </th>
-              <th className={`sortable-th ${sortKey === 'reset' ? 'sort-active' : ''}`} onClick={() => handleSort('reset')}>
-                NEXT 5H RESET {renderSortIndicator('reset')}
-              </th>
-              <th className={`sortable-th ${sortKey === 'status' ? 'sort-active' : ''}`} onClick={() => handleSort('status')}>
-                STATUS {renderSortIndicator('status')}
-              </th>
+              {visibleCols.slot && (
+                <th className={`sortable-th ${sortKey === 'slot' ? 'sort-active' : ''}`} onClick={() => handleSort('slot')}>
+                  SLOT {renderSortIndicator('slot')}
+                </th>
+              )}
+              {visibleCols.email && (
+                <th className={`sortable-th ${sortKey === 'email' ? 'sort-active' : ''}`} onClick={() => handleSort('email')}>
+                  ACCOUNT EMAIL {renderSortIndicator('email')}
+                </th>
+              )}
+              {visibleCols.provider && (
+                <th className={`sortable-th ${sortKey === 'provider' ? 'sort-active' : ''}`} onClick={() => handleSort('provider')}>
+                  PROVIDER {renderSortIndicator('provider')}
+                </th>
+              )}
+              {visibleCols.burst && (
+                <th className={`sortable-th ${sortKey === 'burst' ? 'sort-active' : ''}`} onClick={() => handleSort('burst')}>
+                  5H BURST {renderSortIndicator('burst')}
+                </th>
+              )}
+              {visibleCols.cycle && (
+                <th className={`sortable-th ${sortKey === 'cycle' ? 'sort-active' : ''}`} onClick={() => handleSort('cycle')}>
+                  7D CYCLE {renderSortIndicator('cycle')}
+                </th>
+              )}
+              {visibleCols.reset && (
+                <th className={`sortable-th ${sortKey === 'reset' ? 'sort-active' : ''}`} onClick={() => handleSort('reset')}>
+                  NEXT 5H RESET {renderSortIndicator('reset')}
+                </th>
+              )}
+              {visibleCols.status && (
+                <th className={`sortable-th ${sortKey === 'status' ? 'sort-active' : ''}`} onClick={() => handleSort('status')}>
+                  STATUS {renderSortIndicator('status')}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -943,25 +1052,31 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
 
               return (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setDrawerAccount(a)}>
-                  <td><span className="badge badge-slot">{slotStr}</span></td>
-                  <td><strong>{a.email || a.name}</strong></td>
-                  <td>{provStr}</td>
-                  <td>
-                    <span style={{ color: isTight ? '#fbbf24' : '#4ade80', fontWeight: 700 }}>
-                      {burstRem}% ({isTight ? '45 reqs' : '156 reqs'})
-                    </span>
-                  </td>
-                  <td>{a.providerType === 'claude' ? 'Pro Tier' : `${cycleRem}% Balance`}</td>
-                  <td>
-                    <span style={{ color: isTight ? '#f59e0b' : 'var(--muted)', fontSize: 11 }}>
-                      {resetStr}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>
-                      {isTight ? 'Tight' : 'Healthy'}
-                    </span>
-                  </td>
+                  {visibleCols.slot && <td><span className="badge badge-slot">{slotStr}</span></td>}
+                  {visibleCols.email && <td><strong>{a.email || a.name}</strong></td>}
+                  {visibleCols.provider && <td>{provStr}</td>}
+                  {visibleCols.burst && (
+                    <td>
+                      <span style={{ color: isTight ? '#fbbf24' : '#4ade80', fontWeight: 700 }}>
+                        {burstRem}% ({isTight ? '45 reqs' : '156 reqs'})
+                      </span>
+                    </td>
+                  )}
+                  {visibleCols.cycle && <td>{a.providerType === 'claude' ? 'Pro Tier' : `${cycleRem}% Balance`}</td>}
+                  {visibleCols.reset && (
+                    <td>
+                      <span style={{ color: isTight ? '#f59e0b' : 'var(--muted)', fontSize: 11 }}>
+                        {resetStr}
+                      </span>
+                    </td>
+                  )}
+                  {visibleCols.status && (
+                    <td>
+                      <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>
+                        {isTight ? 'Tight' : 'Healthy'}
+                      </span>
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -1055,12 +1170,32 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
     { id: 'd6', label: 'Sun', height: 28, pro: 12, flash: 7, c37: 6, c35: 2, haiku: 1, interval: 'Sunday' },
   ];
 
-  const bars30d = [
-    { id: 'w0', label: 'Week 1', height: 65, pro: 26, flash: 14, c37: 15, c35: 7, haiku: 3, interval: 'Week 1 (Oct 05 - 11)' },
-    { id: 'w1', label: 'Week 2', height: 75, pro: 30, flash: 18, c37: 17, c35: 7, haiku: 3, interval: 'Week 2 (Oct 12 - 18)' },
-    { id: 'w2', label: 'Week 3 (Peak)', height: 95, pro: 42, flash: 22, c37: 20, c35: 8, haiku: 3, interval: 'Week 3 (Oct 19 - 25 - Peak)' },
-    { id: 'w3', label: 'Week 4', height: 85, pro: 36, flash: 20, c37: 18, c35: 8, haiku: 3, interval: 'Week 4 (Oct 26 - Nov 01)' },
-  ];
+  const bars30d = Array.from({ length: 30 }).map((_, i) => {
+    const dayNum = i + 1;
+    const isPeak = dayNum === 22;
+    const baseHeight = 25 + Math.round(Math.sin((i / 29) * Math.PI) * 50) + ((i * 7) % 18);
+    const height = isPeak ? 96 : Math.min(92, Math.max(20, baseHeight));
+    const pro = Math.round(height * 0.42);
+    const flash = Math.round(height * 0.22);
+    const c37 = Math.round(height * 0.20);
+    const c35 = Math.round(height * 0.10);
+    const haiku = Math.max(1, height - (pro + flash + c37 + c35));
+    const d = new Date(Date.now() - (29 - i) * 86400000);
+    const dateStr = `${MONTHS_SHORT[d.getMonth()]} ${String(d.getDate()).padStart(2, '0')}`;
+    const showLabel = i === 0 || i === 7 || i === 14 || i === 21 || i === 29;
+    return {
+      id: `d30-${dayNum}`,
+      label: showLabel ? dateStr : '',
+      dateStr,
+      height,
+      pro,
+      flash,
+      c37,
+      c35,
+      haiku,
+      interval: `Day ${dayNum} (${dateStr}${isPeak ? ' - Peak' : ''})`,
+    };
+  });
 
   const currentBars = horizon === 'today' ? barsToday : horizon === '7d' ? bars7d : bars30d;
 
@@ -1084,7 +1219,7 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
           </button>
           <button
             className={`filter-btn ${horizon === '30d' ? 'active' : ''}`}
-            onClick={() => { setHorizon('30d'); setActiveFilter('all'); setSelectedInterval('Week 3 (Oct 19 - 25 - Peak)'); }}
+            onClick={() => { setHorizon('30d'); setActiveFilter('all'); setSelectedInterval('Day 22 (Oct 26 - Peak)'); }}
           >
             30 Days
           </button>
@@ -1161,7 +1296,7 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
         )}
 
         {/* Burn Chart Bars */}
-        <div className="burn-chart-container" style={{ height: 180, display: 'flex', alignItems: 'flex-end', gap: 14, padding: '10px 0' }}>
+        <div className="burn-chart-container" style={{ height: 180, display: 'flex', alignItems: 'flex-end', gap: horizon === '30d' ? 4 : 14, padding: '10px 0' }}>
           {currentBars.map((b) => {
             const isSelected = selectedInterval === b.interval;
             return (
@@ -1171,7 +1306,7 @@ const StatsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
                   style={{
                     height: `${b.height}%`,
                     width: '100%',
-                    maxWidth: 54,
+                    maxWidth: horizon === '30d' ? 22 : 54,
                     display: 'flex',
                     flexDirection: 'column-reverse',
                     borderRadius: 4,
@@ -1356,21 +1491,84 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
     isTight: true,
   });
 
+  const effectiveAccounts = accounts.length > 0 ? accounts : [...getMockAgyAccounts(), getMockClaudeAccount()];
+
+  const accountCards = useMemo(() => {
+    return effectiveAccounts.map((a, idx) => {
+      const isClaude = a.providerType === 'claude';
+      const ring = dualRingData(a.latestSnapshot);
+      const rawBurst = ring.outer !== undefined && ring.outer !== null
+        ? Math.round(ring.outer.remaining)
+        : (ring.inner ? Math.round(ring.inner.remaining) : (isClaude ? 84 : (90 + ((idx * 3) % 10))));
+      const burstRem = Math.max(0, Math.min(100, rawBurst));
+      const cycleRem = Math.round(ring.inner ? ring.inner.remaining : (isClaude ? 100 : 88));
+      const isExhausted = burstRem <= 15;
+      const isTight = burstRem <= 35 && !isExhausted;
+      const isHealthy = burstRem > 35;
+      const status: 'exhausted' | 'tight' | 'healthy' = isExhausted ? 'exhausted' : isTight ? 'tight' : 'healthy';
+      const reqs = Math.round((burstRem / 100) * 156);
+      const slotStr = isClaude ? 'slot_01' : `slot_${String(idx + 1).padStart(2, '0')}`;
+      const email = a.email || a.name;
+      const badge = isExhausted ? 'badge-bad' : isTight ? 'badge-warn' : 'badge-ok';
+      const label = isExhausted ? `${burstRem}% Exhausted` : isTight ? `${burstRem}% Burst` : `${burstRem}% Healthy`;
+      const fill = isExhausted
+        ? 'linear-gradient(90deg, #ef4444, #b91c1c)'
+        : isTight
+        ? 'linear-gradient(90deg, #f59e0b, #d97706)'
+        : isClaude
+        ? 'linear-gradient(90deg, #ea580c, #c2410c)'
+        : 'linear-gradient(90deg, #10b981, #059669)';
+      return {
+        account: a,
+        slotStr,
+        email,
+        burstRem,
+        cycleRem,
+        isExhausted,
+        isTight,
+        isHealthy,
+        status,
+        reqs,
+        isClaude,
+        badge,
+        label,
+        fill,
+      };
+    });
+  }, [effectiveAccounts]);
+
+  const exhaustedCount = accountCards.filter(c => c.isExhausted).length;
+  const tightCount = accountCards.filter(c => c.isTight).length;
+  const healthyCount = accountCards.filter(c => c.isHealthy).length;
+
+  const filteredCards = useMemo(() => {
+    return accountCards.filter(c => {
+      if (filterAlert === 'exhausted' && !c.isExhausted) return false;
+      if (filterAlert === 'tight' && !c.isTight) return false;
+      if (filterAlert === 'healthy' && !c.isHealthy) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return c.email.toLowerCase().includes(q) || c.slotStr.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [accountCards, filterAlert, searchQuery]);
+
   return (
     <div id="tab-alerts" className="view-panel active">
       {/* Top Radar Toolbar */}
       <div className="filter-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
         <button className={`filter-btn ${filterAlert === 'all' ? 'active' : ''}`} onClick={() => setFilterAlert('all')}>
-          All Alerts
+          All Alerts ({accountCards.length})
         </button>
         <button className={`filter-btn ${filterAlert === 'exhausted' ? 'active' : ''}`} style={{ borderColor: '#ef4444', color: '#ef4444' }} onClick={() => setFilterAlert('exhausted')}>
-          Exhausted (1)
+          Exhausted ({exhaustedCount})
         </button>
         <button className={`filter-btn ${filterAlert === 'tight' ? 'active' : ''}`} style={{ borderColor: '#f59e0b', color: '#f59e0b' }} onClick={() => setFilterAlert('tight')}>
-          Tight (1)
+          Tight ({tightCount})
         </button>
         <button className={`filter-btn ${filterAlert === 'healthy' ? 'active' : ''}`} onClick={() => setFilterAlert('healthy')}>
-          Healthy (13)
+          Healthy ({healthyCount})
         </button>
 
         {/* Clean search bar - no search icon */}
@@ -1390,6 +1588,24 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
               minWidth: 200,
             }}
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              style={{
+                position: 'absolute',
+                right: 8,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                color: 'var(--muted)',
+                cursor: 'pointer',
+                fontSize: 11,
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
 
@@ -1399,107 +1615,66 @@ const AlertsPage: React.FC<{ accounts: Account[] }> = ({ accounts }) => {
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>Click any day pill below to inspect detailed daily telemetry</span>
         </div>
 
-        <div className="grid-3">
-          {/* Card 1: Tight Google Account */}
-          <div className="dual-horizon-card">
-            <div className="dh-account-title">
-              <strong style={{ fontSize: 13 }}>vishakhagemini0@...</strong>
-              <span className="badge badge-warn">34% Burst</span>
-            </div>
-            <div className="dh-meter-row">
-              <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(59,130,246,0.18)', color: '#60a5fa' }}>5-HOUR BURST</span></span>
-                <span style={{ color: '#fbbf24', fontWeight: 700 }}>34% (45 reqs)</span>
-              </div>
-              <div className="dh-progress-capsule">
-                <div className="dh-fill-burst" style={{ width: '34%', background: 'linear-gradient(90deg, #f59e0b, #d97706)' }} />
-              </div>
-            </div>
-            <div className="dh-meter-row" style={{ marginTop: 10 }}>
-              <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(16,185,129,0.18)', color: '#34d399' }}>7-DAY CYCLE</span></span>
-                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>68% Balance</span>
-              </div>
-              {/* Clean D1-D7 pills without checkmark or dot icons, interactive click */}
-              <div className="dh-calendar-strip">
-                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 1 Diagnostic: vishakhagemini0@gmail.com', models: 'gemini-2.5-pro: 520k • gemini-2.0-flash: 90k', time: 'Normal load (09:00 - 17:00 UTC)', headroom: '78% Headroom', isTight: false })}>D1</div>
-                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 2 Diagnostic: vishakhagemini0@gmail.com', models: 'gemini-2.5-pro: 610k • gemini-2.0-flash: 120k', time: 'Moderate load (11:00 - 18:00 UTC)', headroom: '72% Headroom', isTight: false })}>D2</div>
-                <div className="dh-day-pill tight active-selected" onClick={() => setSelectedDayReport({ title: 'Day 3 Diagnostic: vishakhagemini0@gmail.com', models: 'gemini-2.5-pro: 640k (82%) • gemini-2.0-flash: 140k (18%)', time: 'Accelerated burn detected between 14:00-16:00 UTC (45 reqs)', headroom: '34% Headroom (Tight)', isTight: true })}>D3</div>
-                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 4 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window begins tomorrow', headroom: '100% Projected', isTight: false })}>D4</div>
-                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 5 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window', headroom: '100% Projected', isTight: false })}>D5</div>
-                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 6 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window', headroom: '100% Projected', isTight: false })}>D6</div>
-                <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: 'Day 7 Diagnostic: vishakhagemini0@gmail.com', models: 'No usage recorded yet', time: 'Scheduled window', headroom: '100% Projected', isTight: false })}>D7</div>
-              </div>
-            </div>
-            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
-              Next recovery: <strong style={{ color: '#e5e7eb' }}>in 1h 14m (14:30 UTC)</strong>
-            </div>
+        {filteredCards.length === 0 ? (
+          <div style={{ padding: 36, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+            No accounts matching <strong>"{searchQuery}"</strong> in radar view.
           </div>
-
-          {/* Card 2: Healthy Google Account */}
-          <div className="dual-horizon-card">
-            <div className="dh-account-title">
-              <strong style={{ fontSize: 13 }}>piyushkumar.jiit@...</strong>
-              <span className="badge badge-ok">99% Burst</span>
-            </div>
-            <div className="dh-meter-row">
-              <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(59,130,246,0.18)', color: '#60a5fa' }}>5-HOUR BURST</span></span>
-                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>99% (156 reqs)</span>
+        ) : (
+          <div className="grid-3">
+            {filteredCards.map((c) => (
+              <div key={c.account.id} className="dual-horizon-card">
+                <div className="dh-account-title">
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', overflow: 'hidden' }}>
+                    <span className="badge badge-slot">{c.slotStr}</span>
+                    <strong style={{ fontSize: 13, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                      {c.email}
+                    </strong>
+                  </div>
+                  <span className={`badge ${c.badge}`}>{c.label}</span>
+                </div>
+                <div className="dh-meter-row">
+                  <div className="dh-meter-label">
+                    <span>
+                      <span className="pill-badge" style={{ background: c.isClaude ? 'rgba(234,88,12,0.18)' : 'rgba(59,130,246,0.18)', color: c.isClaude ? '#fb923c' : '#60a5fa' }}>
+                        {c.isClaude ? 'ROLLING SESSION' : '5-HOUR BURST'}
+                      </span>
+                    </span>
+                    <span style={{ color: c.isExhausted ? '#ef4444' : c.isTight ? '#fbbf24' : '#4ade80', fontWeight: 700 }}>
+                      {c.burstRem}% ({c.reqs} reqs)
+                    </span>
+                  </div>
+                  <div className="dh-progress-capsule">
+                    <div className="dh-fill-burst" style={{ width: `${Math.max(5, c.burstRem)}%`, background: c.fill }} />
+                  </div>
+                </div>
+                <div className="dh-meter-row" style={{ marginTop: 10 }}>
+                  <div className="dh-meter-label">
+                    <span>
+                      <span className="pill-badge" style={{ background: c.isClaude ? 'rgba(168,85,247,0.18)' : 'rgba(16,185,129,0.18)', color: c.isClaude ? '#c084fc' : '#34d399' }}>
+                        {c.isClaude ? 'TIER STATUS' : '7-DAY CYCLE'}
+                      </span>
+                    </span>
+                    <span style={{ color: c.isClaude ? 'var(--purple)' : 'var(--ok)', fontWeight: 700 }}>
+                      {c.isClaude ? 'Pro Tier' : `${c.cycleRem}% Balance`}
+                    </span>
+                  </div>
+                  <div className="dh-calendar-strip">
+                    <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: `Day 1 Diagnostic: ${c.email}`, models: 'Baseline operation • Normal prompt volume', time: '09:00 - 17:00 UTC', headroom: '88% Headroom', isTight: false })}>D1</div>
+                    <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: `Day 2 Diagnostic: ${c.email}`, models: 'Moderate workload', time: '11:00 - 18:00 UTC', headroom: '78% Headroom', isTight: false })}>D2</div>
+                    <div className={`dh-day-pill ${c.isExhausted ? 'tight' : c.isTight ? 'tight' : 'current'}`} onClick={() => setSelectedDayReport({ title: `Day 3 Diagnostic: ${c.email}`, models: c.isTight ? 'Accelerated prompt burn detected' : 'Optimal model allocation', time: '14:00 - 16:00 UTC (Active)', headroom: `${c.burstRem}% Headroom (${c.isExhausted ? 'Exhausted' : c.isTight ? 'Tight' : 'Healthy'})`, isTight: c.isTight || c.isExhausted })}>D3</div>
+                    <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: `Day 4 Diagnostic: ${c.email}`, models: 'Scheduled session', time: 'Upcoming window', headroom: '100% Projected', isTight: false })}>D4</div>
+                    <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: `Day 5 Diagnostic: ${c.email}`, models: 'Scheduled session', time: 'Upcoming window', headroom: '100% Projected', isTight: false })}>D5</div>
+                    <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: `Day 6 Diagnostic: ${c.email}`, models: 'Scheduled session', time: 'Upcoming window', headroom: '100% Projected', isTight: false })}>D6</div>
+                    <div className="dh-day-pill" onClick={() => setSelectedDayReport({ title: `Day 7 Diagnostic: ${c.email}`, models: 'Scheduled session', time: 'Upcoming window', headroom: '100% Projected', isTight: false })}>D7</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
+                  Next recovery: <strong style={{ color: '#e5e7eb' }}>{c.isExhausted ? 'in 1h 14m (14:30 UTC)' : c.isTight ? 'in 2h 45m (15:30 UTC)' : 'Rolling window clear'}</strong>
+                </div>
               </div>
-              <div className="dh-progress-capsule">
-                <div className="dh-fill-burst" style={{ width: '99%', background: 'linear-gradient(90deg, #10b981, #059669)' }} />
-              </div>
-            </div>
-            <div className="dh-meter-row" style={{ marginTop: 10 }}>
-              <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(16,185,129,0.18)', color: '#34d399' }}>7-DAY CYCLE</span></span>
-                <span style={{ color: 'var(--ok)', fontWeight: 700 }}>100% Balance</span>
-              </div>
-              <div className="dh-calendar-strip">
-                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 1 Diagnostic: piyushkumar.jiit@gmail.com', models: 'gemini-2.5-pro: 110k', time: 'Baseline usage', headroom: '99% Headroom', isTight: false })}>D1</div>
-                <div className="dh-day-pill past" onClick={() => setSelectedDayReport({ title: 'Day 2 Diagnostic: piyushkumar.jiit@gmail.com', models: 'gemini-2.5-pro: 140k', time: 'Baseline usage', headroom: '98% Headroom', isTight: false })}>D2</div>
-                <div className="dh-day-pill current" onClick={() => setSelectedDayReport({ title: 'Day 3 Diagnostic: piyushkumar.jiit@gmail.com', models: 'gemini-2.5-pro: 80k', time: 'Optimal operation', headroom: '99% Headroom', isTight: false })}>D3</div>
-                <div className="dh-day-pill">D4</div>
-                <div className="dh-day-pill">D5</div>
-                <div className="dh-day-pill">D6</div>
-                <div className="dh-day-pill">D7</div>
-              </div>
-            </div>
-            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
-              Status: <strong style={{ color: '#e5e7eb' }}>Rolling window clear</strong>
-            </div>
+            ))}
           </div>
-
-          {/* Card 3: Claude Code Account */}
-          <div className="dual-horizon-card">
-            <div className="dh-account-title">
-              <strong style={{ fontSize: 13 }}>claude-2f8e2ab5...</strong>
-              <span className="badge badge-ok">84% Session</span>
-            </div>
-            <div className="dh-meter-row">
-              <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(234,88,12,0.18)', color: '#fb923c' }}>ROLLING SESSION</span></span>
-                <span style={{ color: '#fb923c', fontWeight: 700 }}>84% Available</span>
-              </div>
-              <div className="dh-progress-capsule">
-                <div className="dh-fill-burst" style={{ width: '84%', background: 'linear-gradient(90deg, #ea580c, #c2410c)' }} />
-              </div>
-            </div>
-            <div className="dh-meter-row" style={{ marginTop: 10 }}>
-              <div className="dh-meter-label">
-                <span><span className="pill-badge" style={{ background: 'rgba(168,85,247,0.18)', color: '#c084fc' }}>TIER STATUS</span></span>
-                <span style={{ color: 'var(--purple)', fontWeight: 700 }}>Pro Tier</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', padding: '6px 0' }}>
-                Anthropic rolling window resets continuously per sliding session.
-              </div>
-            </div>
-            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)' }}>
-              Rolling reset: <strong style={{ color: '#e5e7eb' }}>in 3h 10m (16:20 UTC)</strong>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Day Diagnostic Inspector Panel */}
         {selectedDayReport && (

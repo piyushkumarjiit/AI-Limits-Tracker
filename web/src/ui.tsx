@@ -1416,29 +1416,6 @@ export const WebAccountDrawer: React.FC<WebAccountDrawerProps> = ({
             </>
           )}
         </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            onClose();
-            onViewFleet?.(account.providerType, account.id);
-          }}
-          style={{
-            marginTop: 'auto',
-            background: '#2563eb',
-            color: '#ffffff',
-            padding: '14px',
-            borderRadius: 12,
-            fontWeight: 700,
-            fontSize: 15,
-            textAlign: 'center',
-            cursor: 'pointer',
-            border: 'none',
-            boxShadow: '0 2px 8px rgba(37,99,235,0.4)',
-          }}
-        >
-          View in Fleet Tab ➔
-        </button>
       </div>
     </div>
   );
