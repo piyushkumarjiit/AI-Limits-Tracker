@@ -57,6 +57,9 @@ export interface EngineState {
   rampStep?: Record<string, number>;
 }
 
+/**
+ * Watermark decision for an individual account slot.
+ */
 export interface WatermarkDecision {
   targetWeight: number;
   reason: string;
@@ -105,10 +108,19 @@ function clamp(val: number, min: number, max: number): number {
   return Math.min(Math.max(val, min), max);
 }
 
+/**
+ * Predicate determining if an account participates in watermark management and write batches.
+ * Only managed accounts belonging to the subscription_pool modality are watermark-managed.
+ * Direct API and budgeted allowance accounts are unmanaged by watermark targeting.
+ */
 export function isWatermarkManaged(snap: WatermarkSnapshot): boolean {
   return Boolean(snap.managed) && snap.modality === 'subscription_pool';
 }
 
+/**
+ * Velocity projection estimating effective quota percentage after evaluating horizon
+ * (evaluation interval + write application latency) and account telemetry staleness delay.
+ */
 export function projectQuota(
   quotaEff: number,
   burnRatePerMin: number,
@@ -120,6 +132,11 @@ export function projectQuota(
   return quotaEff - clampedBurn * ((horizonSec + stalenessSec) / 60);
 }
 
+/**
+ * Two-stage hysteresis evaluation for hard stop condition.
+ * Enters hard stop when effective or projected quota drops to or below hardFloorPct.
+ * Recovers from hard stop only when effective quota rises strictly above hardFloorRecoveryPct.
+ */
 export function evalHardStop(
   quotaEff: number,
   quotaProj: number,
@@ -132,6 +149,11 @@ export function evalHardStop(
     : quotaEff <= hardFloorPct || quotaProj <= hardFloorPct;
 }
 
+/**
+ * Two-stage hysteresis evaluation for proactive drain condition.
+ * Enters drain when projected quota drops to or below drainPct.
+ * Recovers from drain only when effective quota rises strictly above drainRecoveryPct.
+ */
 export function evalDrain(
   quotaEff: number,
   quotaProj: number,
