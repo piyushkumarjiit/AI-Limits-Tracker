@@ -122,10 +122,10 @@ curl -H "Authorization: Bearer <ADMIN_PASSWORD_OR_API_TOKEN>" http://localhost:1
   },
   "accounts": [
     {
-      "id": "antigravity:deepakgemini0@gmail.com",
+      "id": "antigravity:test-account-01@example.com",
       "slot": "03",
       "provider": "antigravity",
-      "email": "deepakgemini0@gmail.com",
+      "email": "test-account-01@example.com",
       "burst_5h": {
         "remaining_pct": 6,
         "status": "exhausted",
@@ -141,10 +141,10 @@ curl -H "Authorization: Bearer <ADMIN_PASSWORD_OR_API_TOKEN>" http://localhost:1
       "routing_weight": 0.06
     },
     {
-      "id": "claude:piyushkumar.jiit@gmail.com",
+      "id": "claude:test-account-02@example.com",
       "slot": "01",
       "provider": "claude",
-      "email": "piyushkumar.jiit@gmail.com",
+      "email": "test-account-02@example.com",
       "burst_5h": {
         "remaining_pct": 30,
         "status": "tight",
@@ -167,8 +167,8 @@ FQD exports native Prometheus metrics designed for Grafana dashboards and Alertm
 ```
 # HELP alt_account_headroom_ratio Normalized headroom score [0, 1]
 # TYPE alt_account_headroom_ratio gauge
-alt_account_headroom_ratio{provider="antigravity",slot="03",account="deepakgemini0"} 0.06
-alt_account_headroom_ratio{provider="claude",slot="01",account="piyushkumar"} 0.30
+alt_account_headroom_ratio{provider="antigravity",slot="03",account="test_account_01"} 0.06
+alt_account_headroom_ratio{provider="claude",slot="01",account="test_account_02"} 0.30
 
 # HELP alt_quota_window_remaining_ratio Remaining fraction of rate limit window [0, 1]
 # TYPE alt_quota_window_remaining_ratio gauge
