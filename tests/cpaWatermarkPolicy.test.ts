@@ -243,6 +243,17 @@ async function run() {
       assertEquals(omittedManaged.policy.classificationRules[0].managed, false, 'Omitted managed defaults strictly to false');
     }
 
+    // R2-B2: non-string pattern or provider rejected
+    const nonStringPattern = validateWatermarkPolicy({
+      classification_rules: [{ pattern: 12345, provider: 'antigravity', tier: 'pro', modality: 'subscription_pool' }],
+    });
+    assert(!nonStringPattern.ok, 'Non-string pattern rejected');
+
+    const nonStringProvider = validateWatermarkPolicy({
+      classification_rules: [{ pattern: 'ag-*', provider: { name: 'antigravity' }, tier: 'pro', modality: 'subscription_pool' }],
+    });
+    assert(!nonStringProvider.ok, 'Non-string provider rejected');
+
     pass('validateWatermarkPolicy enforces mode, ordering invariants, non-negative durations, and strict managed boolean');
   } catch (err) {
     fail('validateWatermarkPolicy enforces mode, ordering invariants, non-negative durations, and strict managed boolean', err);
@@ -402,6 +413,81 @@ async function run() {
 
     loader.stopWatcher();
     fs.rmSync(tempDir, { recursive: true, force: true });
+
+    // B3: onPolicyChange and onError throwing does not crash process and subsequent reload works
+    const tempDirB3 = createTempDir('cpa-policy-b3-');
+    const policyFileB3 = path.join(tempDirB3, 'policy.yaml');
+    fs.writeFileSync(policyFileB3, yaml.stringify({ mode: 'shadow' }), 'utf8');
+
+    let b3ChangeInvoked = false;
+    const crashingLoader = new CpaPolicyLoader({
+      customFilePath: policyFileB3,
+      debounceMs: 20,
+      onPolicyChange: () => {
+        b3ChangeInvoked = true;
+        throw new Error('Explosion in onPolicyChange');
+      },
+      onError: () => {
+        throw new Error('Explosion in onError');
+      },
+    });
+
+    crashingLoader.loadPolicy();
+    crashingLoader.startWatcher();
+
+    // Trigger policy change which invokes onPolicyChange (which throws) and onError (which also throws)
+    fs.writeFileSync(policyFileB3, yaml.stringify({ mode: 'enforce' }), 'utf8');
+    await sleep(150);
+
+    assert(b3ChangeInvoked, 'onPolicyChange was invoked and threw');
+    assertEquals(crashingLoader.getPolicy().mode, 'enforce', 'Policy was updated despite throwing callbacks');
+
+    // Subsequent reload still works
+    fs.writeFileSync(policyFileB3, yaml.stringify({ mode: 'off' }), 'utf8');
+    await sleep(150);
+    assertEquals(crashingLoader.getPolicy().mode, 'off', 'Subsequent reload works cleanly without process crash');
+
+    crashingLoader.stopWatcher();
+    fs.rmSync(tempDirB3, { recursive: true, force: true });
+
+    // R2-B2: Oversize policy file (>256 KB) is rejected without crashing or looping
+    const tempDirOversize = createTempDir('cpa-policy-oversize-');
+    const oversizeFile = path.join(tempDirOversize, 'huge.yaml');
+    // 300 KB file
+    const hugeContent = 'mode: enforce\n# ' + 'x'.repeat(300 * 1024);
+    fs.writeFileSync(oversizeFile, hugeContent, 'utf8');
+
+    let oversizeErrors = 0;
+    const oversizeLoader = new CpaPolicyLoader({
+      customFilePath: oversizeFile,
+      pollIntervalMs: 50,
+      debounceMs: 20,
+      onError: (err) => {
+        if (err.message.includes('exceeds maximum allowed size')) {
+          oversizeErrors++;
+        }
+      },
+    });
+
+    const oversizePolicy = oversizeLoader.loadPolicy();
+    assertEquals(oversizePolicy.mode, 'shadow', 'Oversize policy falls back to shadow mode');
+    assertEquals(oversizeErrors, 1, 'Error emitted once for oversize file');
+
+    // Start watcher/polling and verify no infinite error loop
+    oversizeLoader.startWatcher();
+    await sleep(150);
+
+    // Call checkFileForChanges directly to simulate polling ticks
+    oversizeLoader.checkFileForChanges();
+    oversizeLoader.checkFileForChanges();
+    await sleep(100);
+
+    assertEquals(oversizeErrors, 1, 'Error is NOT re-emitted infinitely on subsequent poll cycles');
+    assertEquals(oversizeLoader.getPolicy().mode, 'shadow', 'Policy remains safely in shadow mode');
+
+    oversizeLoader.stopWatcher();
+    fs.rmSync(tempDirOversize, { recursive: true, force: true });
+
     pass('Hot-reload watcher debounces updates and detects SHA-256 content changes across atomic renames');
   } catch (err) {
     fail('Hot-reload watcher debounces updates and detects SHA-256 content changes across atomic renames', err);
@@ -477,11 +563,17 @@ async function run() {
           SELECT RAISE(FAIL, 'simulated store failure');
         END;
       `);
+      dummyState.generation = 999;
       store.saveState(dummyState, 'failing_tick');
     } catch {
       saveFailed = true;
     }
     assert(saveFailed, 'Injected failure properly threw');
+
+    // Strengthened B1: assert generation is still 2 (not 999), and verify no savepoint leaked via BEGIN/ROLLBACK
+    assertEquals(store.loadState()?.generation, 2, 'Generation is still 2 after rollback (not 999)');
+    db.exec('BEGIN');
+    db.exec('ROLLBACK');
 
     // Remove trigger and verify store can continue using savepoints without transaction leak
     db.exec('DROP TRIGGER fail_trigger;');
@@ -489,6 +581,55 @@ async function run() {
     store.saveState(dummyState, 'recovered_tick');
     const recovered = store.loadState();
     assertEquals(recovered?.generation, 3, 'Savepoint succeeded after failure without transaction leak');
+
+    // R2-B1 / C-7: Roundtrip persistence of EngineState with tierStateEnteredAt and rampStep
+    const stateWithC7: EngineState = {
+      mode: 'enforce',
+      generation: 10,
+      tierStates: {
+        antigravity_pro: 'normal',
+      },
+      accountStates: {
+        'acc-ag-1': {
+          state: 'healthy',
+          enteredAt: 1000,
+          targetWeight: 100,
+        },
+      },
+      tierStateEnteredAt: {
+        antigravity_pro: 2500,
+      },
+      rampStep: {
+        'acc-ag-1': 2,
+      },
+    };
+    store.saveState(stateWithC7, 'c7_persistence');
+    const loadedC7 = store.loadState();
+    assert(loadedC7 !== null, 'Loaded state with C-7 fields exists');
+    assertEquals(loadedC7?.generation, 10, 'C-7 generation matches');
+    assertEquals(loadedC7?.state.tierStateEnteredAt?.antigravity_pro, 2500, 'tierStateEnteredAt roundtrips correctly');
+    assertEquals(loadedC7?.state.rampStep?.['acc-ag-1'], 2, 'rampStep roundtrips correctly');
+
+    // R2-B1 / B5: loadState() returns null on corrupt JSON in cpa_watermark_state table
+    db.prepare("UPDATE cpa_watermark_state SET state_json = '{ corrupted JSON invalid!' WHERE id = 1").run();
+    const corruptLoaded = store.loadState();
+    assertEquals(corruptLoaded, null, 'loadState() returns null on corrupt JSON');
+
+    // R2-B1 / B5: loadState() returns null on invalid shape in state_json
+    db.prepare("UPDATE cpa_watermark_state SET state_json = ? WHERE id = 1").run(
+      JSON.stringify({ mode: 'invalid_mode', generation: 1, tierStates: {}, accountStates: {} })
+    );
+    assertEquals(store.loadState(), null, 'loadState() returns null on bad mode');
+
+    db.prepare("UPDATE cpa_watermark_state SET state_json = ? WHERE id = 1").run(
+      JSON.stringify({ mode: 'shadow', generation: 'not_a_finite_number', tierStates: {}, accountStates: {} })
+    );
+    assertEquals(store.loadState(), null, 'loadState() returns null on non-finite generation');
+
+    db.prepare("UPDATE cpa_watermark_state SET state_json = ? WHERE id = 1").run(
+      JSON.stringify({ mode: 'shadow', generation: 1, tierStates: 'not_an_object', accountStates: {} })
+    );
+    assertEquals(store.loadState(), null, 'loadState() returns null on non-object tierStates');
 
     pass('CpaWatermarkStore atomically saves, loads, appends audit history, and cleans savepoints on failure');
   } catch (err) {

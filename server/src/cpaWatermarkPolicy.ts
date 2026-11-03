@@ -361,14 +361,14 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
           errors.push(`Classification rule at index ${idx} must be an object`);
           continue;
         }
-        const pattern = String(item.pattern || '').trim();
-        if (!pattern) {
-          errors.push(`Classification rule at index ${idx} missing non-empty pattern`);
+        if (typeof item.pattern !== 'string' || !item.pattern.trim()) {
+          errors.push(`Classification rule at index ${idx} pattern must be a non-empty string`);
         }
-        const provider = String(item.provider || '').trim();
-        if (!provider) {
-          errors.push(`Classification rule at index ${idx} missing non-empty provider`);
+        if (typeof item.provider !== 'string' || !item.provider.trim()) {
+          errors.push(`Classification rule at index ${idx} provider must be a non-empty string`);
         }
+        const pattern = typeof item.pattern === 'string' ? item.pattern.trim() : '';
+        const provider = typeof item.provider === 'string' ? item.provider.trim() : '';
         const tier = item.tier;
         if (tier !== 'pro' && tier !== 'non_pro') {
           errors.push(`Classification rule at index ${idx} tier must be 'pro' or 'non_pro', got '${String(tier)}'`);
@@ -397,6 +397,8 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
         }
 
         if (
+          typeof item.pattern === 'string' &&
+          typeof item.provider === 'string' &&
           pattern &&
           provider &&
           (tier === 'pro' || tier === 'non_pro') &&
@@ -568,13 +570,17 @@ export class CpaPolicyLoader {
       // M2: Cap file size at 256 KB
       const stat = fs.statSync(filePath);
       if (stat.size > MAX_POLICY_FILE_SIZE) {
-        const err = new Error(
-          `Policy file at ${filePath} exceeds maximum allowed size of 256 KB (${stat.size} bytes)`
-        );
-        this.emitError(err);
+        const oversizeSentinel = `oversize:${stat.size}:${stat.mtimeMs}`;
+        const isAlreadyOversize = this.lastFileHash === oversizeSentinel;
+        if (!isAlreadyOversize) {
+          const err = new Error(
+            `Policy file at ${filePath} exceeds maximum allowed size of 256 KB (${stat.size} bytes)`
+          );
+          this.emitError(err);
+        }
         this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
         this.currentPolicy.mode = 'shadow';
-        this.lastFileHash = null; // M3
+        this.lastFileHash = oversizeSentinel;
         return this.getPolicy();
       }
 
@@ -661,10 +667,13 @@ export class CpaPolicyLoader {
         }
 
         const stat = fs.statSync(this.resolvedPath);
+        const oversizeSentinel = `oversize:${stat.size}:${stat.mtimeMs}`;
         if (stat.size > MAX_POLICY_FILE_SIZE) {
-          const oldPolicy = structuredClone(this.currentPolicy);
-          this.loadPolicy();
-          this.notifyChange(this.getPolicy(), oldPolicy);
+          if (this.lastFileHash !== oversizeSentinel) {
+            const oldPolicy = structuredClone(this.currentPolicy);
+            this.loadPolicy();
+            this.notifyChange(this.getPolicy(), oldPolicy);
+          }
           return;
         }
 
@@ -685,6 +694,9 @@ export class CpaPolicyLoader {
   }
 
   private notifyChange(newPolicy: FullWatermarkPolicy, oldPolicy: FullWatermarkPolicy): void {
+    if (JSON.stringify(newPolicy) === JSON.stringify(oldPolicy)) {
+      return;
+    }
     if (this.onPolicyChange) {
       try {
         this.onPolicyChange(newPolicy, oldPolicy);
@@ -697,7 +709,7 @@ export class CpaPolicyLoader {
   /**
    * Checks policy file directly for changes (used by periodic polling fallback).
    */
-  private checkFileForChanges(): void {
+  public checkFileForChanges(): void {
     try {
       const targetPath = this.resolvedPath || this.resolvePolicyFile();
       if (!targetPath) {
@@ -709,6 +721,16 @@ export class CpaPolicyLoader {
 
       if (!fs.existsSync(targetPath)) {
         if (this.lastFileHash !== null) {
+          this.handleFileChange();
+        }
+        return;
+      }
+
+      // Check stat first before reading into memory (R2-B2)
+      const stat = fs.statSync(targetPath);
+      const oversizeSentinel = `oversize:${stat.size}:${stat.mtimeMs}`;
+      if (stat.size > MAX_POLICY_FILE_SIZE) {
+        if (this.lastFileHash !== oversizeSentinel) {
           this.handleFileChange();
         }
         return;
