@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="web/public/icon.svg" width="88" height="88" alt="FQD (Fleet Quota Deck)" />
+<img src="web/public/icon.svg" width="88" height="88" alt="FQD (Fleet Quota Display)" />
 
-# FQD — Fleet Quota Deck
+# FQD — Fleet Quota Display
 
 **The unified observability deck and routing intelligence for AI subscription fleets, CLIProxy pools, and LiteLLM gateways.**
 
@@ -294,4 +294,4 @@ MIT License © 2026 [Piyush Kumar](https://github.com/piyushkumarjiit)
 Based upon and substantially modernized from the original [AI Limits Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan:
 Copyright (c) 2026 Rauan
 
-<div align="center"><sub>Fleet Quota Deck — High capacity observability for modern AI stacks.</sub></div>
+<div align="center"><sub>Fleet Quota Display — High capacity observability for modern AI stacks.</sub></div>
