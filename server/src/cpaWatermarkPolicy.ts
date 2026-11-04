@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import yaml from 'yaml';
 import type { WatermarkPolicyConfig } from './cpaWatermarkEngine';
@@ -500,17 +501,58 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
   };
 }
 
+const MAX_POLICY_PATH_LENGTH = 4096;
+
+/** Default directories from which a policy file may be loaded. */
+export function defaultAllowedPolicyRoots(): string[] {
+  return [
+    '/app/config',
+    '/opt/agentic-services/tracker',
+    process.cwd(),
+    os.tmpdir(),
+    '/tmp',
+  ];
+}
+
+/**
+ * Validates and canonicalizes policy file paths to eliminate CodeQL js/path-injection.
+ * Enforces no null bytes, no traversal segments ('..'), and verifies the resolved path
+ * resides strictly within one of the authorized allowed roots.
+ */
+export function sanitizePolicyPath(raw: unknown, roots: readonly string[] = defaultAllowedPolicyRoots()): string | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_POLICY_PATH_LENGTH) {
+    return null;
+  }
+  if (raw.includes('\0') || raw.includes('..')) {
+    return null;
+  }
+  const resolved = path.resolve(raw);
+  if (resolved.includes('..')) {
+    return null;
+  }
+  for (const root of roots) {
+    const resolvedRoot = path.resolve(root);
+    if (resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep)) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
 export interface CpaPolicyLoaderOptions {
   customFilePath?: string;
   debounceMs?: number;
   pollIntervalMs?: number;
+  /** Directories from which policy files may be loaded. Defaults to defaultAllowedPolicyRoots(). */
+  allowedRoots?: string[];
   onPolicyChange?: (newPolicy: FullWatermarkPolicy, oldPolicy: FullWatermarkPolicy) => void;
   onError?: (error: Error) => void;
 }
 
 /**
  * Policy loader and hot-reload watcher with SHA-256 change detection,
- * directory-level watching for atomic renames, polling fallback, and safe shadow fallback.
+ * directory-level watching for atomic renames, polling fallback, safe shadow fallback,
+ * and CodeQL-hardened path injection and TOCTOU race protections.
  */
 export class CpaPolicyLoader {
   private currentPolicy: FullWatermarkPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
@@ -518,6 +560,7 @@ export class CpaPolicyLoader {
   private lastFileHash: string | null = null;
   private lastErrorSignature: string | null = null;
   private customFilePath?: string;
+  private allowedRoots: string[];
   private debounceMs: number;
   private pollIntervalMs: number;
   private onPolicyChange?: (newPolicy: FullWatermarkPolicy, oldPolicy: FullWatermarkPolicy) => void;
@@ -528,6 +571,7 @@ export class CpaPolicyLoader {
 
   constructor(options: CpaPolicyLoaderOptions = {}) {
     this.customFilePath = options.customFilePath;
+    this.allowedRoots = options.allowedRoots ?? defaultAllowedPolicyRoots();
     this.debounceMs = options.debounceMs ?? 150;
     this.pollIntervalMs = options.pollIntervalMs ?? 5000;
     this.onPolicyChange = options.onPolicyChange;
@@ -558,20 +602,20 @@ export class CpaPolicyLoader {
   }
 
   /**
-   * Resolves the first existing file path among candidates.
+   * Resolves the first existing file path among candidates, sanitized against allowed roots.
    */
   public resolvePolicyFile(): string | null {
     const candidates = this.resolveCandidatePaths();
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) {
-        try {
-          const stat = fs.statSync(candidate);
-          if (stat.isFile()) {
-            return candidate;
-          }
-        } catch {
-          // Ignore unreadable paths and continue search
+    for (const rawCandidate of candidates) {
+      const safe = sanitizePolicyPath(rawCandidate, this.allowedRoots);
+      if (!safe) continue;
+      try {
+        const stat = fs.statSync(safe);
+        if (stat.isFile()) {
+          return safe;
         }
+      } catch {
+        // Ignore unreadable paths and continue search
       }
     }
     return null;
@@ -609,36 +653,50 @@ export class CpaPolicyLoader {
     return this.lastFileHash;
   }
 
+  private fallbackToShadow(): void {
+    this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
+    this.currentPolicy.mode = 'shadow';
+  }
+
   /**
    * Loads the watermark policy from file or falls back to shadow defaults.
    * On validation failure or file cap excess, falls back safely to shadow mode without crashing.
+   * Direct read eliminates TOCTOU race conditions (CWE-367).
    */
   public loadPolicy(): FullWatermarkPolicy {
     const filePath = this.resolvePolicyFile();
     this.resolvedPath = filePath;
 
     if (!filePath) {
-      this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
+      this.fallbackToShadow();
+      this.lastFileHash = null;
+      return this.getPolicy();
+    }
+
+    const safePath = sanitizePolicyPath(filePath, this.allowedRoots);
+    if (!safePath) {
+      this.fallbackToShadow();
       this.lastFileHash = null;
       return this.getPolicy();
     }
 
     try {
+      // Direct atomic read with no prior statSync check avoids TOCTOU race condition (js/file-system-race)
+      const rawContent = fs.readFileSync(safePath, 'utf8');
+      const byteLength = Buffer.byteLength(rawContent, 'utf8');
+
       // M2: Cap file size at 256 KB
-      const stat = fs.statSync(filePath);
-      if (stat.size > MAX_POLICY_FILE_SIZE) {
-        const oversizeSentinel = `oversize:${stat.size}:${stat.mtimeMs}`;
+      if (byteLength > MAX_POLICY_FILE_SIZE) {
+        const oversizeSentinel = `oversize:${byteLength}`;
         const err = new Error(
-          `Policy file at ${filePath} exceeds maximum allowed size of 256 KB (${stat.size} bytes)`
+          `Policy file at ${safePath} exceeds maximum allowed size of 256 KB (${byteLength} bytes)`
         );
         this.emitError(err, oversizeSentinel);
-        this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
-        this.currentPolicy.mode = 'shadow';
+        this.fallbackToShadow();
         this.lastFileHash = oversizeSentinel;
         return this.getPolicy();
       }
 
-      const rawContent = fs.readFileSync(filePath, 'utf8');
       const hash = this.computeHash(rawContent);
 
       let parsed: unknown;
@@ -646,13 +704,12 @@ export class CpaPolicyLoader {
         parsed = yaml.parse(rawContent);
       } catch (parseErr) {
         const err = new Error(
-          `Failed to parse YAML policy at ${filePath}: ${
+          `Failed to parse YAML policy at ${safePath}: ${
             parseErr instanceof Error ? parseErr.message : String(parseErr)
           }`
         );
         this.emitError(err, `yaml_parse:${hash}`);
-        this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
-        this.currentPolicy.mode = 'shadow';
+        this.fallbackToShadow();
         this.lastFileHash = hash;
         return this.getPolicy();
       }
@@ -660,11 +717,10 @@ export class CpaPolicyLoader {
       const validation = validateWatermarkPolicy(parsed);
       if (!validation.ok) {
         const err = new Error(
-          `Policy validation failed at ${filePath}:\n${validation.errors.join('\n')}`
+          `Policy validation failed at ${safePath}:\n${validation.errors.join('\n')}`
         );
         this.emitError(err, `validation:${hash}`);
-        this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
-        this.currentPolicy.mode = 'shadow';
+        this.fallbackToShadow();
         this.lastFileHash = hash;
         return this.getPolicy();
       }
@@ -678,11 +734,10 @@ export class CpaPolicyLoader {
       this.lastFileHash = null;
       const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
       const err = new Error(
-        `Failed to read policy file at ${filePath}: ${errMsg}`
+        `Failed to read policy file at ${safePath}: ${errMsg}`
       );
       this.emitError(err, this.errorSignature(readErr));
-      this.currentPolicy = structuredClone(DEFAULT_WATERMARK_POLICY);
-      this.currentPolicy.mode = 'shadow';
+      this.fallbackToShadow();
       return this.getPolicy();
     }
   }
@@ -715,10 +770,14 @@ export class CpaPolicyLoader {
       this.debounceTimer = null;
       // B3: Wrap entire debounce execution in try/catch to protect Node process
       try {
-        if (!this.resolvedPath || !fs.existsSync(this.resolvedPath)) {
-          // File may have been deleted, replaced atomically, or moved
+        const target = this.resolvedPath || this.resolvePolicyFile();
+        if (!target) {
+          return;
+        }
+        const safePath = sanitizePolicyPath(target, this.allowedRoots);
+        if (!safePath) {
           const newlyResolved = this.resolvePolicyFile();
-          if (newlyResolved !== this.resolvedPath || (newlyResolved && fs.existsSync(newlyResolved))) {
+          if (newlyResolved !== this.resolvedPath) {
             const oldPolicy = structuredClone(this.currentPolicy);
             this.loadPolicy();
             this.notifyChange(this.getPolicy(), oldPolicy);
@@ -726,9 +785,25 @@ export class CpaPolicyLoader {
           return;
         }
 
-        const stat = fs.statSync(this.resolvedPath);
-        const oversizeSentinel = `oversize:${stat.size}:${stat.mtimeMs}`;
-        if (stat.size > MAX_POLICY_FILE_SIZE) {
+        let content: string;
+        try {
+          content = fs.readFileSync(safePath, 'utf8');
+        } catch (err: any) {
+          if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
+            const newlyResolved = this.resolvePolicyFile();
+            if (newlyResolved !== this.resolvedPath || (newlyResolved && sanitizePolicyPath(newlyResolved, this.allowedRoots))) {
+              const oldPolicy = structuredClone(this.currentPolicy);
+              this.loadPolicy();
+              this.notifyChange(this.getPolicy(), oldPolicy);
+            }
+            return;
+          }
+          throw err;
+        }
+
+        const byteLength = Buffer.byteLength(content, 'utf8');
+        if (byteLength > MAX_POLICY_FILE_SIZE) {
+          const oversizeSentinel = `oversize:${byteLength}`;
           if (this.lastFileHash !== oversizeSentinel) {
             const oldPolicy = structuredClone(this.currentPolicy);
             this.loadPolicy();
@@ -737,7 +812,6 @@ export class CpaPolicyLoader {
           return;
         }
 
-        const content = fs.readFileSync(this.resolvedPath, 'utf8');
         this.lastErrorSignature = null;
         const hash = this.computeHash(content);
         if (hash === this.lastFileHash) {
@@ -780,24 +854,37 @@ export class CpaPolicyLoader {
         return;
       }
 
-      if (!fs.existsSync(targetPath)) {
+      const safePath = sanitizePolicyPath(targetPath, this.allowedRoots);
+      if (!safePath) {
         if (this.lastFileHash !== null) {
           this.handleFileChange();
         }
         return;
       }
 
-      // Check stat first before reading into memory (R2-B2)
-      const stat = fs.statSync(targetPath);
-      const oversizeSentinel = `oversize:${stat.size}:${stat.mtimeMs}`;
-      if (stat.size > MAX_POLICY_FILE_SIZE) {
+      let content: string;
+      try {
+        content = fs.readFileSync(safePath, 'utf8');
+      } catch (err: any) {
+        if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
+          if (this.lastFileHash !== null) {
+            this.handleFileChange();
+          }
+          return;
+        }
+        throw err;
+      }
+
+      const byteLength = Buffer.byteLength(content, 'utf8');
+      if (byteLength > MAX_POLICY_FILE_SIZE) {
+        const oversizeSentinel = `oversize:${byteLength}`;
         if (this.lastFileHash !== oversizeSentinel) {
+          this.lastFileHash = oversizeSentinel;
           this.handleFileChange();
         }
         return;
       }
 
-      const content = fs.readFileSync(targetPath, 'utf8');
       this.lastErrorSignature = null;
       const hash = this.computeHash(content);
       if (hash !== this.lastFileHash) {
@@ -820,12 +907,21 @@ export class CpaPolicyLoader {
       return;
     }
 
-    const dir = path.dirname(filePath);
-    const targetFile = path.basename(filePath);
+    const safePath = sanitizePolicyPath(filePath, this.allowedRoots);
+    if (!safePath) {
+      return;
+    }
+
+    const dir = path.dirname(safePath);
+    const targetFile = path.basename(safePath);
+    const safeDir = sanitizePolicyPath(dir, this.allowedRoots);
+    if (!safeDir) {
+      return;
+    }
 
     try {
       // B2: Watch parent directory to survive inode rebinding on atomic mv
-      this.watcher = fs.watch(dir, (_eventType, filename) => {
+      this.watcher = fs.watch(safeDir, (_eventType, filename) => {
         if (!filename || filename === targetFile) {
           this.handleFileChange();
         }
@@ -845,9 +941,6 @@ export class CpaPolicyLoader {
     }
   }
 
-  /**
-   * Stops the hot-reload watcher and polling timer.
-   */
   public stopWatcher(): void {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
