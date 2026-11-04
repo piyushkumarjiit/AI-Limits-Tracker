@@ -516,24 +516,90 @@ export function defaultAllowedPolicyRoots(): string[] {
 
 /**
  * Validates and canonicalizes policy file paths to eliminate CodeQL js/path-injection.
- * Enforces no null bytes, no traversal segments ('..'), and verifies the resolved path
- * resides strictly within one of the authorized allowed roots.
+ * Enforces no null bytes and verifies the resolved path resides strictly within one of the authorized allowed roots.
  */
 export function sanitizePolicyPath(raw: unknown, roots: readonly string[] = defaultAllowedPolicyRoots()): string | null {
-  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_POLICY_PATH_LENGTH) {
-    return null;
-  }
-  if (raw.includes('\0') || raw.includes('..')) {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_POLICY_PATH_LENGTH || raw.includes('\0')) {
     return null;
   }
   const resolved = path.resolve(raw);
-  if (resolved.includes('..')) {
+  for (const root of roots) {
+    const rootResolved = path.resolve(root);
+    if (resolved === rootResolved) {
+      return rootResolved;
+    }
+    if (resolved.startsWith(rootResolved + path.sep)) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
+/**
+ * Guarded fs.statSync where CodeQL's barrier guard dominates the sink directly.
+ */
+export function safeStat(
+  raw: string,
+  allowedRoots: readonly string[],
+): { safe: string; stat: fs.Stats } | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_POLICY_PATH_LENGTH || raw.includes('\0')) {
     return null;
   }
-  for (const root of roots) {
-    const resolvedRoot = path.resolve(root);
-    if (resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep)) {
-      return resolved;
+  const resolved = path.resolve(raw);
+  for (const root of allowedRoots) {
+    const rootResolved = path.resolve(root);
+    if (resolved === rootResolved) {
+      return { safe: rootResolved, stat: fs.statSync(rootResolved) };
+    }
+    if (resolved.startsWith(rootResolved + path.sep)) {
+      return { safe: resolved, stat: fs.statSync(resolved) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Guarded fs.readFileSync where CodeQL's barrier guard dominates the sink directly.
+ */
+export function safeReadFile(
+  raw: string,
+  allowedRoots: readonly string[],
+): { safe: string; content: string } | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_POLICY_PATH_LENGTH || raw.includes('\0')) {
+    return null;
+  }
+  const resolved = path.resolve(raw);
+  for (const root of allowedRoots) {
+    const rootResolved = path.resolve(root);
+    if (resolved === rootResolved) {
+      return { safe: rootResolved, content: fs.readFileSync(rootResolved, 'utf8') };
+    }
+    if (resolved.startsWith(rootResolved + path.sep)) {
+      return { safe: resolved, content: fs.readFileSync(resolved, 'utf8') };
+    }
+  }
+  return null;
+}
+
+/**
+ * Guarded fs.watch where CodeQL's barrier guard dominates the sink directly.
+ */
+export function safeWatchDir(
+  rawDir: string,
+  allowedRoots: readonly string[],
+  listener: fs.WatchListener<string>,
+): fs.FSWatcher | null {
+  if (typeof rawDir !== 'string' || rawDir.length === 0 || rawDir.length > MAX_POLICY_PATH_LENGTH || rawDir.includes('\0')) {
+    return null;
+  }
+  const resolved = path.resolve(rawDir);
+  for (const root of allowedRoots) {
+    const rootResolved = path.resolve(root);
+    if (resolved === rootResolved) {
+      return fs.watch(rootResolved, listener);
+    }
+    if (resolved.startsWith(rootResolved + path.sep)) {
+      return fs.watch(resolved, listener);
     }
   }
   return null;
@@ -607,12 +673,10 @@ export class CpaPolicyLoader {
   public resolvePolicyFile(): string | null {
     const candidates = this.resolveCandidatePaths();
     for (const rawCandidate of candidates) {
-      const safe = sanitizePolicyPath(rawCandidate, this.allowedRoots);
-      if (!safe) continue;
       try {
-        const stat = fs.statSync(safe);
-        if (stat.isFile()) {
-          return safe;
+        const hit = safeStat(rawCandidate, this.allowedRoots);
+        if (hit && hit.stat.isFile()) {
+          return hit.safe;
         }
       } catch {
         // Ignore unreadable paths and continue search
@@ -673,16 +737,16 @@ export class CpaPolicyLoader {
       return this.getPolicy();
     }
 
-    const safePath = sanitizePolicyPath(filePath, this.allowedRoots);
-    if (!safePath) {
-      this.fallbackToShadow();
-      this.lastFileHash = null;
-      return this.getPolicy();
-    }
-
     try {
       // Direct atomic read with no prior statSync check avoids TOCTOU race condition (js/file-system-race)
-      const rawContent = fs.readFileSync(safePath, 'utf8');
+      const readResult = safeReadFile(filePath, this.allowedRoots);
+      if (!readResult) {
+        this.fallbackToShadow();
+        this.lastFileHash = null;
+        return this.getPolicy();
+      }
+
+      const { safe: safePath, content: rawContent } = readResult;
       const byteLength = Buffer.byteLength(rawContent, 'utf8');
 
       // M2: Cap file size at 256 KB
@@ -734,7 +798,7 @@ export class CpaPolicyLoader {
       this.lastFileHash = null;
       const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
       const err = new Error(
-        `Failed to read policy file at ${safePath}: ${errMsg}`
+        `Failed to read policy file at ${filePath}: ${errMsg}`
       );
       this.emitError(err, this.errorSignature(readErr));
       this.fallbackToShadow();
@@ -774,24 +838,14 @@ export class CpaPolicyLoader {
         if (!target) {
           return;
         }
-        const safePath = sanitizePolicyPath(target, this.allowedRoots);
-        if (!safePath) {
-          const newlyResolved = this.resolvePolicyFile();
-          if (newlyResolved !== this.resolvedPath) {
-            const oldPolicy = structuredClone(this.currentPolicy);
-            this.loadPolicy();
-            this.notifyChange(this.getPolicy(), oldPolicy);
-          }
-          return;
-        }
 
-        let content: string;
+        let readResult: { safe: string; content: string } | null;
         try {
-          content = fs.readFileSync(safePath, 'utf8');
+          readResult = safeReadFile(target, this.allowedRoots);
         } catch (err: any) {
           if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
             const newlyResolved = this.resolvePolicyFile();
-            if (newlyResolved !== this.resolvedPath || (newlyResolved && sanitizePolicyPath(newlyResolved, this.allowedRoots))) {
+            if (newlyResolved !== this.resolvedPath) {
               const oldPolicy = structuredClone(this.currentPolicy);
               this.loadPolicy();
               this.notifyChange(this.getPolicy(), oldPolicy);
@@ -801,6 +855,17 @@ export class CpaPolicyLoader {
           throw err;
         }
 
+        if (!readResult) {
+          const newlyResolved = this.resolvePolicyFile();
+          if (newlyResolved !== this.resolvedPath) {
+            const oldPolicy = structuredClone(this.currentPolicy);
+            this.loadPolicy();
+            this.notifyChange(this.getPolicy(), oldPolicy);
+          }
+          return;
+        }
+
+        const { content } = readResult;
         const byteLength = Buffer.byteLength(content, 'utf8');
         if (byteLength > MAX_POLICY_FILE_SIZE) {
           const oversizeSentinel = `oversize:${byteLength}`;
@@ -854,17 +919,9 @@ export class CpaPolicyLoader {
         return;
       }
 
-      const safePath = sanitizePolicyPath(targetPath, this.allowedRoots);
-      if (!safePath) {
-        if (this.lastFileHash !== null) {
-          this.handleFileChange();
-        }
-        return;
-      }
-
-      let content: string;
+      let readResult: { safe: string; content: string } | null;
       try {
-        content = fs.readFileSync(safePath, 'utf8');
+        readResult = safeReadFile(targetPath, this.allowedRoots);
       } catch (err: any) {
         if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
           if (this.lastFileHash !== null) {
@@ -875,6 +932,14 @@ export class CpaPolicyLoader {
         throw err;
       }
 
+      if (!readResult) {
+        if (this.lastFileHash !== null) {
+          this.handleFileChange();
+        }
+        return;
+      }
+
+      const { content } = readResult;
       const byteLength = Buffer.byteLength(content, 'utf8');
       if (byteLength > MAX_POLICY_FILE_SIZE) {
         const oversizeSentinel = `oversize:${byteLength}`;
@@ -907,25 +972,19 @@ export class CpaPolicyLoader {
       return;
     }
 
-    const safePath = sanitizePolicyPath(filePath, this.allowedRoots);
-    if (!safePath) {
-      return;
-    }
-
-    const dir = path.dirname(safePath);
-    const targetFile = path.basename(safePath);
-    const safeDir = sanitizePolicyPath(dir, this.allowedRoots);
-    if (!safeDir) {
-      return;
-    }
+    const dir = path.dirname(filePath);
+    const targetFile = path.basename(filePath);
 
     try {
       // B2: Watch parent directory to survive inode rebinding on atomic mv
-      this.watcher = fs.watch(safeDir, (_eventType, filename) => {
+      this.watcher = safeWatchDir(dir, this.allowedRoots, (_eventType, filename) => {
         if (!filename || filename === targetFile) {
           this.handleFileChange();
         }
       });
+      if (!this.watcher) {
+        return;
+      }
       this.watcher.on('error', (err) => {
         this.emitError(err instanceof Error ? err : new Error(String(err)));
       });
