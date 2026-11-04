@@ -19,6 +19,7 @@ import { Store } from './store';
 import { Tracker } from './tracker';
 import type { CpaSyncEngine } from './cpaSync';
 import type { CpaRoutingExecutor } from './cpaRouting';
+import type { CpaWatermarkService } from './cpaWatermarkService';
 import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
 import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
@@ -46,7 +47,7 @@ export interface AppDeps {
   store: Store;
   tracker: Tracker;
   cpaSync?: CpaSyncEngine;
-  cpaRouting?: CpaRoutingExecutor;
+  cpaRouting?: CpaRoutingExecutor | CpaWatermarkService;
   quotaCache?: QuotaCache;
   telemetryService?: TelemetryService;
 }
