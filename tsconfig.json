@@ -41,6 +41,8 @@
     "tests/cpa_sync_tests.ts",
     "tests/cpa_routing_exec_tests.ts",
     "tests/quota_endpoints_tests.ts",
-    "tests/cpa_architect_safety_tests.ts"
+    "tests/cpa_architect_safety_tests.ts",
+    "tests/cpaWatermarkEngine.test.ts",
+    "tests/cpaWatermarkPolicy.test.ts"
   ]
 }
