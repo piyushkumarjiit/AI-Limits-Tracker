@@ -8,6 +8,7 @@ import {
   DEFAULT_WATERMARK_POLICY,
   classifyAccount,
   matchGlob,
+  MAX_GLOB_STRING_LENGTH,
   validateWatermarkPolicy,
   type ClassificationRule,
   type FullWatermarkPolicy,
@@ -70,6 +71,33 @@ async function run() {
     assert(!matchGlob('claude-*-pro', 'claude-east-team'), 'Wildcard mismatch returns false');
     assert(matchGlob('codex-?.json', 'codex-1.json'), 'Question mark matches single char');
     assert(!matchGlob('codex-?.json', 'codex-10.json'), 'Question mark fails multi char');
+    // Unicode case expansion safety (Sonnet review condition)
+    assert(!matchGlob('i?a', 'İab'), 'Unicode case expansion does not cause false positive on trailing char');
+    assert(matchGlob('ABC*', 'abcdef'), 'Case-insensitive prefix match works');
+    // Complex backtracking and wildcard collapses
+    assert(matchGlob('a*b*c', 'aXbYbZc'), 'Multiple wildcards backtrack correctly');
+    assert(matchGlob('*a*a*a*b', 'aaaaaaaaab'), 'Pathological repeated wildcard tokens resolve correctly');
+    assert(matchGlob('**', 'anything'), 'Consecutive asterisks match arbitrary strings');
+    // Edge cases
+    assert(matchGlob('', ''), 'Empty pattern matches empty string');
+    assert(!matchGlob('', 'nonempty'), 'Empty pattern does not match non-empty string');
+    assert(matchGlob('*', ''), 'Single star matches empty string');
+    assert(matchGlob('***', ''), 'Multiple stars match empty string');
+    assert(!matchGlob('?', ''), 'Question mark does not match empty string');
+    // Wildcard * vs literal * in input (Sonnet review condition)
+    assert(matchGlob('*a', '*ba'), 'Wildcard * matches preceding literal * in input');
+    assert(matchGlob('a*', 'a*'), 'Wildcard * matches trailing literal *');
+    assert(matchGlob('*', '*'), 'Single wildcard matches single literal *');
+    assert(matchGlob('*-pro', '*x-pro'), 'Wildcard prefix matches literal * token prefix');
+    // Single-line identifier isolation (all ECMA-262 line terminators rejected)
+    assert(!matchGlob('foo*', 'foo\nbar'), 'Glob rejects newline in input to preserve single-line token semantics');
+    assert(!matchGlob('foo\n*', 'foo\nbar'), 'Glob rejects newline in pattern');
+    assert(!matchGlob('foo*', 'foo\rbar'), 'Glob rejects carriage return in input');
+    assert(!matchGlob('foo*', 'foo\u2028bar'), 'Glob rejects Unicode line separator U+2028');
+    assert(!matchGlob('foo*', 'foo\u2029bar'), 'Glob rejects Unicode paragraph separator U+2029');
+    // Length bounding guards
+    assert(!matchGlob('a'.repeat(MAX_GLOB_STRING_LENGTH + 1), 'a'), 'Pattern exceeding length cap is safely rejected');
+    assert(!matchGlob('a', 'a'.repeat(MAX_GLOB_STRING_LENGTH + 1)), 'Input exceeding length cap is safely rejected');
     pass('Glob pattern matcher supports * and ? correctly');
   } catch (err) {
     fail('Glob pattern matcher supports * and ? correctly', err);
@@ -253,6 +281,22 @@ async function run() {
       classification_rules: [{ pattern: 'ag-*', provider: { name: 'antigravity' }, tier: 'pro', modality: 'subscription_pool' }],
     });
     assert(!nonStringProvider.ok, 'Non-string provider rejected');
+
+    // Validation tests for pattern length cap and line terminators
+    const overlongPattern = validateWatermarkPolicy({
+      classification_rules: [{ pattern: 'a'.repeat(MAX_GLOB_STRING_LENGTH + 1), provider: 'test', tier: 'pro', modality: 'subscription_pool' }],
+    });
+    assert(!overlongPattern.ok, 'Pattern exceeding MAX_GLOB_STRING_LENGTH rejected in validation');
+
+    const newlinePattern = validateWatermarkPolicy({
+      classification_rules: [{ pattern: 'test\n*', provider: 'test', tier: 'pro', modality: 'subscription_pool' }],
+    });
+    assert(!newlinePattern.ok, 'Pattern containing newline rejected in validation');
+
+    const unicodeLineSepPattern = validateWatermarkPolicy({
+      classification_rules: [{ pattern: 'test\u2028*', provider: 'test', tier: 'pro', modality: 'subscription_pool' }],
+    });
+    assert(!unicodeLineSepPattern.ok, 'Pattern containing Unicode line separator U+2028 rejected in validation');
 
     pass('validateWatermarkPolicy enforces mode, ordering invariants, non-negative durations, and strict managed boolean');
   } catch (err) {

@@ -87,30 +87,66 @@ export const DEFAULT_ACCOUNT_CLASSIFICATION: AccountClassification = {
 };
 
 /**
- * Converts a simple glob pattern containing '*' and '?' into a regular expression.
+ * Maximum allowed pattern or input length for glob matching (1024 chars) to bound execution time.
  */
-function globToRegExp(pattern: string): RegExp {
-  let escaped = '';
-  for (let i = 0; i < pattern.length; i++) {
-    const char = pattern[i];
-    if (char === '*') {
-      escaped += '.*';
-    } else if (char === '?') {
-      escaped += '.';
-    } else if ('\\.+^$()|[]{}!'.includes(char)) {
-      escaped += `\\${char}`;
-    } else {
-      escaped += char;
-    }
-  }
-  return new RegExp(`^${escaped}$`, 'i');
-}
+export const MAX_GLOB_STRING_LENGTH = 1024;
 
 /**
- * Match a string against a glob pattern supporting `*` and `?`.
+ * Hardcoded literal regex matching all ECMA-262 line terminators (\n, \r, U+2028, U+2029).
+ * Hardcoded literal regexes are fully static and safe from ReDoS / Semgrep non-literal warnings.
+ */
+export const LINE_TERMINATOR_REGEX = /[\n\r\u2028\u2029]/;
+
+/**
+ * Match a string against a glob pattern supporting '*' and '?'.
+ * Implements an iterative wildcard matcher without dynamic RegExp construction
+ * to eliminate ReDoS vulnerabilities and non-literal RegExp alerts (CodeQL / Semgrep).
+ * Preserves single-line identifier semantics (rejects all ECMA-262 line terminators),
+ * handles Unicode case-folding expansions safely by computing lengths after lowercasing
+ * (matching single UTF-16 code units for '?'), and tests for wildcard '*' before literal
+ * equality so literal '*' characters in inputs do not prematurely consume pattern wildcards.
  */
 export function matchGlob(pattern: string, input: string): boolean {
-  return globToRegExp(pattern).test(input);
+  if (pattern.length > MAX_GLOB_STRING_LENGTH || input.length > MAX_GLOB_STRING_LENGTH) {
+    return false;
+  }
+  // Preserve single-line semantics (globs do not match any line terminators)
+  if (LINE_TERMINATOR_REGEX.test(pattern) || LINE_TERMINATOR_REGEX.test(input)) {
+    return false;
+  }
+
+  const pLower = pattern.toLowerCase();
+  const sLower = input.toLowerCase();
+  const pLen = pLower.length;
+  const sLen = sLower.length;
+
+  let pIdx = 0;
+  let sIdx = 0;
+  let starIdx = -1;
+  let matchIdx = 0;
+
+  while (sIdx < sLen) {
+    if (pIdx < pLen && pLower[pIdx] === '*') {
+      starIdx = pIdx;
+      matchIdx = sIdx;
+      pIdx++;
+    } else if (pIdx < pLen && (pLower[pIdx] === '?' || pLower[pIdx] === sLower[sIdx])) {
+      pIdx++;
+      sIdx++;
+    } else if (starIdx !== -1) {
+      pIdx = starIdx + 1;
+      matchIdx++;
+      sIdx = matchIdx;
+    } else {
+      return false;
+    }
+  }
+
+  while (pIdx < pLen && pLower[pIdx] === '*') {
+    pIdx++;
+  }
+
+  return pIdx === pLen;
 }
 
 /**
@@ -363,6 +399,14 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
         }
         if (typeof item.pattern !== 'string' || !item.pattern.trim()) {
           errors.push(`Classification rule at index ${idx} pattern must be a non-empty string`);
+        } else if (item.pattern.length > MAX_GLOB_STRING_LENGTH) {
+          errors.push(
+            `Classification rule at index ${idx} pattern exceeds maximum allowed length of ${MAX_GLOB_STRING_LENGTH} characters`
+          );
+        } else if (LINE_TERMINATOR_REGEX.test(item.pattern)) {
+          errors.push(
+            `Classification rule at index ${idx} pattern must not contain line terminators`
+          );
         }
         if (typeof item.provider !== 'string' || !item.provider.trim()) {
           errors.push(`Classification rule at index ${idx} provider must be a non-empty string`);
