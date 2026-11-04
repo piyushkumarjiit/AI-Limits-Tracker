@@ -1,33 +1,31 @@
-# AI Limits Tracker
+# Fleet Quota Display (FQD)
 
-> Open-source tool to track the usage limits of all your AI accounts in one place — Claude, ChatGPT, Gemini, Cursor, GitHub Copilot, Perplexity, Grok, Mistral, DeepSeek, Poe, or any other service via a pasted cURL — including several accounts of the same service. Available as a mobile app, a self-hosted web panel (PWA) and a Chrome extension.
+> Open-source observability cockpit for multi-agent AI subscription fleets, proxy pools (CLIProxy), and API key budgets (LiteLLM). Unified quota tracking, dual-horizon radar, fleet headroom simulation, and real-time reset timers. Available as a self-hosted Docker container, PWA web panel, Chrome extension, and mobile app.
 
-AI Limits Tracker solves a gap that other usage trackers miss: people who own more than one account per AI service (for example two Claude accounts and two ChatGPT accounts). Each account is tracked in full isolation — its own credentials, token refresh and history — so their limits can be compared side by side on one screen.
+Fleet Quota Deck (FQD) solves a critical bottleneck for multi-agent systems (Firstmate, Claude Code, Cursor, OpenCode): teams and developers who pool multiple subscription accounts alongside pay-as-you-go API keys. Each account is tracked in full isolation—its own credentials, token rotation, and telemetry history—allowing operators to monitor fleet burn velocity and capacity on a single screen.
 
-## What it tracks
-- Claude: 5-hour session window, weekly window, Opus/Sonnet weekly, extra spend, plan (Pro / Max / Max 20x).
-- ChatGPT: Codex 5-hour and weekly limits, credit balance, plan (Plus / Pro / Team).
-- Gemini: session and weekly quota windows.
-- Cursor: premium (fast) request usage.
-- GitHub Copilot: monthly premium-request usage.
-- Perplexity: Pro search quota.
-- Grok: request-window limits.
-- Mistral (Le Chat), DeepSeek, Poe (compute points).
-- Any other service: the user pastes a cURL of the request that returns usage, and the app auto-detects the percentage used and the reset time (a declarative "recipe" engine).
+## Core Capabilities
+- **Dual-Horizon Quota Radar**: Real-time visualization of 7-day rolling allowances alongside 5-hour session burst windows with second-by-second reset countdowns.
+- **Fleet Headroom Simulator**: Interactive capacity modeling (10, 50, 100, All agents) to model burst resilience and prevent rate-limit blackouts before launching agent workloads.
+- **CLIProxy & LiteLLM Integration**: Out-of-the-box discovery and synchronization of Antigravity, Claude Code, ChatGPT Codex, and paid API key budgets (`/key/info`).
+- **Strict Account Isolation**: Run 10+ accounts of the same provider with zero session cross-contamination, automated token rotation, and AES-256-GCM encryption.
+- **DevOps & Production Security**: Prometheus `/metrics` export, Caddy automated TLS reverse-proxy profiles, strict SSRF guards, and unprivileged read-only Alpine Docker containers.
 
-## Key properties
-- Multiple accounts per service, fully isolated.
-- Live reset countdown timers for every window.
-- Usage statistics derived only from real measurements: day streaks, limit hits, time in the red zone, burn-rate forecast, busiest hours and weekdays, per-account comparison. It never invents message or token counts, because no AI subscription exposes them.
-- Alerts at 20% / 10% / 0% remaining, on restore, and when re-login is required; optional Telegram push on the server.
-- Privacy: credentials stay in the device Keychain/Keystore or on a self-hosted server (AES-256-GCM). Requests go directly to Anthropic, OpenAI and Google with no third-party backend. The tool only reads usage and never generates anything.
+## Supported Providers
+- **Antigravity (Google AI Pro)**: Session burst & weekly token caps.
+- **Claude**: 5-hour session window, weekly window, Opus/Sonnet tier limits.
+- **ChatGPT**: Codex 5-hour and weekly limits, credit balance, plan tiers.
+- **Cursor & GitHub Copilot**: Premium request tracking.
+- **DeepSeek, Grok, Mistral, Perplexity, Poe**.
+- **LiteLLM & CLIProxyAPI**: Gateway telemetry and custom cURL recipes.
 
 ## Links
-- Source code and documentation: https://github.com/piyushkumarjiit/FQD
+- Source Code & Documentation: https://github.com/piyushkumarjiit/FQD
+- Docker Image: `ghcr.io/piyushkumarjiit/fqd:latest`
 - License: MIT
 
-## Common questions it answers
-- How do I track multiple Claude accounts at once?
-- How do I see my Claude and ChatGPT usage limits in one place?
-- Is there an open-source alternative for monitoring AI subscription rate limits?
-- How can I get alerted before I hit my Claude 5-hour limit?
+## Common Questions Answered
+- How do I monitor multiple pooled Claude or Antigravity accounts at once?
+- How do I track rate limits for multi-agent swarms before hitting 429 errors?
+- How can I unify CLIProxy subscription pools and LiteLLM gateway budgets?
+- Is there an open-source self-hosted alternative for monitoring AI subscription fleets?
