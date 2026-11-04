@@ -15,6 +15,8 @@ import { CpaTransport } from '../../src/services/cpa/CpaTransport';
 import { CpaUsageProvider } from '../../src/services/cpa/CpaUsageProvider';
 import { CpaSyncEngine } from './cpaSync';
 import { CpaRoutingExecutor } from './cpaRouting';
+import { CpaWatermarkService } from './cpaWatermarkService';
+import { CpaPolicyLoader } from './cpaWatermarkPolicy';
 import { resolveCpaConfig } from './config';
 import { QuotaCache } from './quotaCache';
 import { renderMetrics } from './metrics';
@@ -82,7 +84,9 @@ const tracker = new Tracker(store);
 
 const cpaConfig = resolveCpaConfig(process.env);
 let cpaSync: CpaSyncEngine | undefined;
-let cpaRouting: CpaRoutingExecutor | undefined;
+let cpaRouting: CpaWatermarkService | CpaRoutingExecutor | undefined;
+let cpaWatermarkService: CpaWatermarkService | undefined;
+let cpaPolicyLoader: CpaPolicyLoader | undefined;
 
 if (cpaConfig) {
   const cpaTransport = new CpaTransport({
@@ -92,7 +96,16 @@ if (cpaConfig) {
   });
   const cpaUsageProvider = new CpaUsageProvider(cpaTransport);
   tracker.setCpaProvider(cpaUsageProvider);
-  cpaRouting = new CpaRoutingExecutor(store, cpaTransport);
+
+  cpaPolicyLoader = new CpaPolicyLoader();
+  cpaWatermarkService = new CpaWatermarkService({
+    store,
+    transport: cpaTransport,
+    policyLoader: cpaPolicyLoader,
+    watermarkStore: store.watermarkStore,
+  });
+  cpaRouting = cpaWatermarkService;
+
   cpaSync = new CpaSyncEngine(
     store,
     tracker,
@@ -100,7 +113,7 @@ if (cpaConfig) {
     {
       syncIntervalSec: cpaConfig.pollIntervalSec,
     },
-    cpaRouting
+    cpaWatermarkService
   );
 }
 
@@ -110,10 +123,12 @@ const quotaCache = new QuotaCache(
     intervalSec: tracker.intervalMin() * 60,
     cpaStatus: cpaSync ? cpaSync.status() : null,
     cpaLinks: store.listCpaLinks(),
-    cpaRouting: {
-      config: store.getCpaRoutingConfig(),
-      plans: cpaRouting ? cpaRouting.lastPlans() : [],
-    },
+    cpaRouting: cpaWatermarkService
+      ? cpaWatermarkService.getRoutingContext()
+      : {
+          config: store.getCpaRoutingConfig(),
+          plans: cpaRouting ? cpaRouting.lastPlans() : [],
+        },
     getHistory: (accountId: string) => store.history(Date.now() - 24 * 3600 * 1000, accountId),
   }),
   renderMetrics

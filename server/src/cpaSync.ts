@@ -5,6 +5,7 @@ import { CpaCredential, CpaListResponse } from '../../src/services/cpa/types';
 import { CpaLink, ReconcileAction, reconcile } from '../../src/services/cpa/reconcile';
 import type { AccountCredentials } from '../../src/models/types';
 import type { CpaRoutingExecutor } from './cpaRouting';
+import type { CpaWatermarkService } from './cpaWatermarkService';
 
 export interface CpaSyncEngineConfig {
   syncIntervalSec?: number;
@@ -19,13 +20,15 @@ export interface CpaSyncStatus {
   routingMode?: string;
 }
 
+export type RoutingRunner = CpaRoutingExecutor | CpaWatermarkService;
+
 export class CpaSyncEngine {
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<ReconcileAction[]> | null = null;
   private lastDiscoveryAt: string | null = null;
   private lastDiscoveryOk: boolean = false;
   private emptyStreak: number = 0;
-  private routingExecutor?: CpaRoutingExecutor;
+  private routingExecutor?: RoutingRunner;
   private trackerHookRegistered: boolean = false;
 
   readonly syncIntervalSec: number;
@@ -39,7 +42,7 @@ export class CpaSyncEngine {
     private tracker: Tracker,
     private t: CpaTransport,
     cfg?: CpaSyncEngineConfig,
-    routingExecutor?: CpaRoutingExecutor
+    routingExecutor?: RoutingRunner
   ) {
     this.syncIntervalSec = cfg?.syncIntervalSec ?? 60;
     this.purgeDays = cfg?.purgeDays ?? 30;
@@ -66,12 +69,12 @@ export class CpaSyncEngine {
     }
   }
 
-  setRoutingExecutor(executor: CpaRoutingExecutor): void {
+  setRoutingExecutor(executor: RoutingRunner): void {
     this.routingExecutor = executor;
     this.hookTrackerSync();
   }
 
-  getRoutingExecutor(): CpaRoutingExecutor | undefined {
+  getRoutingExecutor(): RoutingRunner | undefined {
     return this.routingExecutor;
   }
 
