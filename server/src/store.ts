@@ -64,6 +64,9 @@ class Vault {
 export class Store {
   private db: DatabaseSync;
   private vault: Vault;
+  /**
+   * Persistent store for CPA watermark engine state and audit history.
+   */
   public readonly watermarkStore: CpaWatermarkStore;
 
   constructor(baseDir: string, fileName: string, secret: string) {
