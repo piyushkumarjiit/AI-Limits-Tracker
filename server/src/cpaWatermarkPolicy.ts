@@ -14,6 +14,10 @@ export const MAX_POLICY_FILE_SIZE = 256 * 1024;
  * assigning provider, tier, modality, and managed status.
  */
 export interface ClassificationRule {
+  /**
+   * Glob pattern supporting '*' (multi-character) and '?' (single-character) wildcards.
+   * Must not contain ECMA-262 line terminators and must not exceed MAX_GLOB_STRING_LENGTH (1024 chars).
+   */
   pattern: string;
   provider: string;
   tier: 'pro' | 'non_pro';
@@ -105,6 +109,10 @@ export const LINE_TERMINATOR_REGEX = /[\n\r\u2028\u2029]/;
  * handles Unicode case-folding expansions safely by computing lengths after lowercasing
  * (matching single UTF-16 code units for '?'), and tests for wildcard '*' before literal
  * equality so literal '*' characters in inputs do not prematurely consume pattern wildcards.
+ *
+ * @param pattern - Glob pattern containing '*' or '?' wildcards, length <= MAX_GLOB_STRING_LENGTH
+ * @param input - Candidate string to match, length <= MAX_GLOB_STRING_LENGTH
+ * @returns true if input matches pattern; false otherwise or if bounds/terminator guards fail
  */
 export function matchGlob(pattern: string, input: string): boolean {
   if (pattern.length > MAX_GLOB_STRING_LENGTH || input.length > MAX_GLOB_STRING_LENGTH) {
