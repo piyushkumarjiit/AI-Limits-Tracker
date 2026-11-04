@@ -2,7 +2,7 @@
 
 > Open-source observability cockpit for multi-agent AI subscription fleets, proxy pools (CLIProxy), and API key budgets (LiteLLM). Unified quota tracking, dual-horizon radar, fleet headroom simulation, and real-time reset timers. Available as a self-hosted Docker container, PWA web panel, Chrome extension, and mobile app.
 
-Fleet Quota Deck (FQD) solves a critical bottleneck for multi-agent systems (Firstmate, Claude Code, Cursor, OpenCode): teams and developers who pool multiple subscription accounts alongside pay-as-you-go API keys. Each account is tracked in full isolation—its own credentials, token rotation, and telemetry history—allowing operators to monitor fleet burn velocity and capacity on a single screen.
+Fleet Quota Display (FQD) solves a critical bottleneck for multi-agent systems (Firstmate, Claude Code, Cursor, OpenCode): teams and developers who pool multiple subscription accounts alongside pay-as-you-go API keys. Each account is tracked in full isolation—its own credentials, token rotation, and telemetry history—allowing operators to monitor fleet burn velocity and capacity on a single screen.
 
 ## Core Capabilities
 - **Dual-Horizon Quota Radar**: Real-time visualization of 7-day rolling allowances alongside 5-hour session burst windows with second-by-second reset countdowns.
