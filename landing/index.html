@@ -3,26 +3,25 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AI Limits Tracker — track Claude, ChatGPT, Cursor, Copilot &amp; 10+ AI usage limits (multiple accounts)</title>
-<meta name="description" content="Open-source tracker for the usage limits of all your AI accounts in one place — Claude, ChatGPT, Gemini, Cursor, GitHub Copilot, Perplexity, Grok, Mistral, DeepSeek, Poe, or any service via cURL — including several accounts of the same service. Live reset timers, low-limit alerts and usage stats. Mobile app, self-hosted web panel and Chrome extension. Private: tokens never leave your device." />
-<meta name="keywords" content="AI usage limit tracker, Claude usage limit tracker, track Claude limits, multiple Claude accounts, ChatGPT limit tracker, Cursor usage tracker, GitHub Copilot premium requests tracker, Perplexity Pro limit, Grok rate limit, Mistral usage, DeepSeek limit, Poe compute points, Claude Max 5 hour limit, ChatGPT Codex usage, Gemini usage limits, monitor AI subscription limits" />
-<!-- nosemgrep: html.security.audit.missing-integrity.missing-integrity -- canonical link is not a subresource and loads no code -->
+<title>Fleet Quota Display (FQD) — Unified Observability for AI Subscription Fleets, Proxy Pools &amp; API Keys</title>
+<meta name="description" content="Open-source observability cockpit for multi-agent AI subscription fleets, CLIProxy pools, and LiteLLM API budgets. Dual-horizon quota radar, fleet headroom simulation, and real-time reset timers for Claude, Antigravity, ChatGPT, Cursor, and 10+ providers." />
+<meta name="keywords" content="Fleet Quota Display, FQD, AI subscription tracker, CLIProxy monitor, LiteLLM budget tracker, Claude rate limit tracker, Antigravity quota pool, multi-agent observability, Firstmate, AI rate limits, ChatGPT Codex limits, fleet headroom simulator" />
 <link rel="canonical" href="https://piyushkumarjiit.github.io/FQD/" />
 <meta name="robots" content="index, follow" />
 <meta name="author" content="Piyush Kumar" />
-<meta name="theme-color" content="#1f9d74" />
+<meta name="theme-color" content="#2563eb" />
 
 <meta property="og:type" content="website" />
-<meta property="og:site_name" content="AI Limits Tracker" />
-<meta property="og:title" content="AI Limits Tracker — all your AI usage limits in one place" />
-<meta property="og:description" content="Track the usage limits of Claude, ChatGPT, Gemini, Cursor, Copilot, Perplexity, Grok and more — several accounts per service at once. Live reset timers, alerts and stats. Mobile app, self-hosted web panel and Chrome extension. Open source." />
+<meta property="og:site_name" content="Fleet Quota Display (FQD)" />
+<meta property="og:title" content="Fleet Quota Display (FQD) — Unified AI Fleet &amp; Quota Observability" />
+<meta property="og:description" content="The cockpit that unifies subscription quota pools (CLIProxy) and API key budgets (LiteLLM) in a single pane of glass. Dual-horizon radar, headroom simulation, and live reset countdowns." />
 <meta property="og:url" content="https://piyushkumarjiit.github.io/FQD/" />
 <meta property="og:image" content="https://piyushkumarjiit.github.io/FQD/og-image.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="AI Limits Tracker — Claude, ChatGPT, Cursor, Copilot & more, multiple accounts" />
-<meta name="twitter:description" content="Open-source tracker for the limits of all your AI accounts in one place — 10+ services and any other via cURL. Mobile app, web panel and Chrome extension." />
+<meta name="twitter:title" content="Fleet Quota Display (FQD) — AI Fleet &amp; Quota Observability" />
+<meta name="twitter:description" content="Unified observability cockpit for multi-agent AI subscription fleets, CLIProxy pools, and LiteLLM API budgets." />
 <meta name="twitter:image" content="https://piyushkumarjiit.github.io/FQD/og-image.png" />
 
 <link rel="icon" href="favicon.png" type="image/png" />
@@ -32,10 +31,10 @@
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "name": "AI Limits Tracker",
-  "operatingSystem": "iOS, Android, Web, Chrome",
+  "name": "Fleet Quota Display (FQD)",
+  "operatingSystem": "Web, Docker, iOS, Android, Chrome",
   "applicationCategory": "DeveloperApplication",
-  "description": "Open-source tracker for the usage limits of all your AI accounts in one place — Claude, ChatGPT, Gemini, Cursor, GitHub Copilot, Perplexity, Grok, Mistral, DeepSeek, Poe, or any service via cURL — including several accounts of the same service. Live reset timers, low-limit alerts and usage statistics.",
+  "description": "Unified observability cockpit for AI subscription fleets, proxy pools, and API keys. Dual-horizon quota radar, fleet headroom simulation, and real-time reset timers for Claude, Antigravity, ChatGPT, Cursor, and 10+ providers.",
   "url": "https://piyushkumarjiit.github.io/FQD/",
   "downloadUrl": "https://github.com/piyushkumarjiit/FQD",
   "softwareVersion": "1.0.0",
@@ -43,13 +42,13 @@
   "author": { "@type": "Person", "name": "Piyush Kumar", "url": "https://github.com/piyushkumarjiit" },
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "featureList": [
-    "Track Claude, ChatGPT, Gemini, Cursor, GitHub Copilot, Perplexity, Grok, Mistral, DeepSeek and Poe",
-    "Add any other service via a pasted cURL (fields auto-detected)",
-    "Several accounts of the same service, fully isolated",
-    "Live limit reset countdown timers",
-    "Low-limit, exhausted and re-login alerts",
-    "Usage statistics: streaks, burn-rate forecast, busiest hours",
-    "Private: credentials stay on your own device or server"
+    "Unified observability for CLIProxy subscription pools and LiteLLM gateway budgets",
+    "Dual-horizon quota radar: 7-day weekly caps & 5-hour session burst windows",
+    "Interactive Fleet Headroom Simulator (10, 50, 100, All agents)",
+    "Support for Claude, Antigravity, ChatGPT Codex, Cursor, DeepSeek, Grok, and custom cURL recipes",
+    "Multi-account isolation with zero cross-contamination",
+    "Live reset countdown timers and cooldown tracking",
+    "Prometheus /metrics export & Caddy reverse-proxy TLS integration"
   ]
 }
 </script>
@@ -58,194 +57,286 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    { "@type": "Question", "name": "Which AI services does it support?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Claude, ChatGPT, Gemini, Cursor, GitHub Copilot, Perplexity, Grok, Mistral, DeepSeek and Poe out of the box, plus a Custom option that adds any other service: you paste a cURL of the request that returns your usage and the app auto-detects the percentage used and the reset time." } },
-    { "@type": "Question", "name": "Can I track multiple Claude accounts at once?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes. AI Limits Tracker is built for the multi-account case. You can add any number of Claude accounts (and ChatGPT, Cursor, Copilot and the rest) and each one is fully isolated with its own credentials, token refresh and history, so two Claude accounts show two different numbers side by side." } },
-    { "@type": "Question", "name": "How do I track my ChatGPT and Claude usage limits in one place?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Install AI Limits Tracker as a mobile app, a self-hosted web panel you can add to your phone's home screen, or a Chrome extension. It shows Claude's 5-hour and weekly windows, ChatGPT's Codex limits and Gemini's quotas on a single screen with live reset timers." } },
-    { "@type": "Question", "name": "Is it safe? Where are my credentials stored?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Credentials never leave your own device or server. On mobile they are kept in the iOS Keychain / Android Keystore; on the self-hosted server they are AES-256-GCM encrypted. Requests go straight to Anthropic, OpenAI and Google with no third-party backend. The tool only reads your usage, it never generates anything." } },
-    { "@type": "Question", "name": "Is AI Limits Tracker free and open source?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes, it is MIT-licensed and free. The source is on GitHub and you self-host the web panel yourself." } }
+    { "@type": "Question", "name": "What is Fleet Quota Display (FQD)?",
+      "acceptedAnswer": { "@type": "Answer", "text": "FQD is an open-source observability cockpit for developers and teams operating multi-agent AI systems (Firstmate, Claude Code, Cursor, OpenCode). It unifies subscription quota pools (CLIProxy) and API key budgets (LiteLLM) into a single dashboard." } },
+    { "@type": "Question", "name": "How does FQD differ from standard rate limit checkers?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Traditional tools only monitor single personal browser sessions or isolated credit cards. FQD monitors multi-account subscription pools alongside gateway balances, models burst headroom, and tracks dual-horizon rolling windows with live countdown timers." } },
+    { "@type": "Question", "name": "Is my credential data secure?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. FQD uses an encrypted store with zero credential leakage in API responses, strict SSRF outbound guards, and runs in unprivileged Docker containers." } }
   ]
 }
 </script>
+
 <style>
-  *{box-sizing:border-box;margin:0}
-  :root{--bg:#f2f1ed;--card:#fbfaf8;--border:#e8e6e0;--text:#18181b;--muted:#52525b;--ring:#1f9d74;--ink:#18181b}
-  html{scroll-behavior:smooth}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.55;-webkit-font-smoothing:antialiased}
-  a{color:inherit}
-  .wrap{max-width:1040px;margin:0 auto;padding:0 20px}
-  header.nav{display:flex;align-items:center;justify-content:space-between;padding:20px;max-width:1040px;margin:0 auto}
-  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;letter-spacing:-.4px}
-  .brand img{width:30px;height:30px}
-  .nav-links{display:flex;gap:22px;align-items:center;font-size:14px;font-weight:500}
-  .nav-links a{text-decoration:none;color:var(--muted)}
-  .nav-links a:hover{color:var(--text)}
-  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--ink);color:#fff;text-decoration:none;font-weight:700;padding:11px 18px;border-radius:12px;font-size:14px;border:0;cursor:pointer}
-  .btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--border)}
-  .btn:hover{opacity:.92}
-  .hero{text-align:center;padding:60px 0 50px}
-  .pill{display:inline-flex;align-items:center;gap:8px;background:#e7f6ec;color:#166534;font-weight:600;font-size:13px;padding:6px 14px;border-radius:999px;margin-bottom:22px}
-  .pill i{width:7px;height:7px;border-radius:50%;background:var(--ring);display:inline-block}
-  h1{font-size:clamp(34px,6vw,58px);font-weight:800;letter-spacing:-1.8px;line-height:1.05;margin-bottom:20px}
-  h1 .accent{background:linear-gradient(90deg,#e2683c,#1f9d74);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  .lead{font-size:clamp(16px,2.4vw,20px);color:var(--muted);max-width:680px;margin:0 auto 32px}
-  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-  .providers{display:flex;gap:10px;justify-content:center;margin-top:34px;flex-wrap:wrap}
-  .prov{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:999px;padding:8px 16px;font-weight:600;font-size:14px}
-  .prov b{width:10px;height:10px;border-radius:50%}
-  section{padding:56px 0}
-  .sec-title{text-align:center;font-size:clamp(26px,4vw,38px);font-weight:800;letter-spacing:-1px;margin-bottom:14px}
-  .sec-sub{text-align:center;color:var(--muted);max-width:620px;margin:0 auto 44px;font-size:16px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:26px}
-  .card .ic{width:44px;height:44px;border-radius:12px;background:#e7f6ec;display:grid;place-items:center;margin-bottom:16px;font-size:22px}
-  .card h3{font-size:18px;font-weight:700;margin-bottom:8px;letter-spacing:-.3px}
-  .card p{color:var(--muted);font-size:14.5px}
-  .ways{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
-  .way{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:26px;text-align:center}
-  .way .emoji{font-size:34px}
-  .way h3{margin:12px 0 6px;font-size:19px}
-  .way p{color:var(--muted);font-size:14px;min-height:40px}
-  .way small{display:block;margin-top:12px;color:var(--ring);font-weight:700;font-size:13px}
-  pre{background:var(--ink);color:#e4e4e7;border-radius:16px;padding:22px;overflow-x:auto;font-size:13.5px;line-height:1.7;max-width:720px;margin:0 auto;font-family:ui-monospace,Menlo,Consolas,monospace}
-  pre .c{color:#8a8a94}
-  pre .g{color:#5fd0a0}
-  .faq{max-width:760px;margin:0 auto}
-  details{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:4px 20px;margin-bottom:12px}
-  summary{font-weight:700;font-size:16px;padding:16px 0;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center}
-  summary::-webkit-details-marker{display:none}
-  summary::after{content:'+';font-size:22px;color:var(--muted);font-weight:400}
-  details[open] summary::after{content:'−'}
-  details p{color:var(--muted);padding-bottom:18px;font-size:15px}
-  footer{border-top:1px solid var(--border);padding:34px 20px;text-align:center;color:var(--muted);font-size:14px}
-  footer a{color:var(--ring);font-weight:600;text-decoration:none}
-  .final{text-align:center;background:var(--ink);color:#fff;border-radius:28px;padding:54px 24px;margin:20px}
-  .final h2{font-size:clamp(26px,4vw,38px);letter-spacing:-1px;margin-bottom:14px}
-  .final p{color:#a1a1aa;margin-bottom:26px;max-width:520px;margin-left:auto;margin-right:auto}
-  .final .btn{background:#fff;color:var(--ink)}
-  .svc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
-  .svc{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}
-  .svc-custom{border-style:dashed}
-  .svc-dot{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;color:#fff;font-weight:800;font-size:17px}
-  .svc b{display:block;font-size:15px}
-  .svc small{color:var(--muted);font-size:12.5px}
+:root {
+  --bg: #090d16;
+  --bg-card: #111827;
+  --bg-card-hover: #162032;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(59, 130, 246, 0.4);
+  --text: #f9fafb;
+  --text-muted: #9ca3af;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.25);
+  --green: #10b981;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+header {
+  border-bottom: 1px solid var(--border);
+  padding: 18px 0;
+  position: sticky;
+  top: 0;
+  background: rgba(9, 13, 22, 0.85);
+  backdrop-filter: blur(12px);
+  z-index: 100;
+}
+.nav { display: flex; justify-content: space-between; align-items: center; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff; font-weight: 800; font-size: 18px; }
+.brand-pill { background: #2563eb; color: #fff; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; }
+.nav-links { display: flex; gap: 20px; align-items: center; }
+.nav-links a { color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.15s; }
+.nav-links a:hover { color: #fff; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 15px var(--accent-glow);
+}
+.btn:hover { background: #2563eb; transform: translateY(-1px); }
+.btn-sec {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+.btn-sec:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* Hero */
+.hero { text-align: center; padding: 80px 0 60px; }
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #60a5fa;
+  margin-bottom: 24px;
+}
+.hero h1 { font-size: clamp(32px, 5vw, 56px); font-weight: 800; line-height: 1.15; margin-bottom: 20px; letter-spacing: -0.02em; }
+.accent { background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 50%, #2563eb 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.lead { font-size: 18px; color: var(--text-muted); max-width: 720px; margin: 0 auto 32px; line-height: 1.6; }
+.hero-cta { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; margin-bottom: 48px; }
+
+/* Feature Grid */
+.sec-title { font-size: 28px; font-weight: 800; text-align: center; margin-bottom: 12px; letter-spacing: -0.01em; }
+.sec-sub { text-align: center; color: var(--text-muted); margin-bottom: 48px; font-size: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; margin-bottom: 80px; }
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  transition: all 0.2s ease;
+}
+.card:hover { border-color: var(--border-focus); transform: translateY(-2px); }
+.card-icon { font-size: 28px; margin-bottom: 16px; display: inline-block; }
+.card h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+.card p { color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+
+/* Providers */
+.providers-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 auto 80px;
+  max-width: 900px;
+}
+.pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* Code Snippet */
+pre {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  overflow-x: auto;
+  color: #e5e7eb;
+  line-height: 1.7;
+}
+.c { color: #6b7280; }
+.g { color: #10b981; }
+
+/* FAQ */
+.faq { max-width: 800px; margin: 0 auto 80px; }
+details {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 16px 20px;
+}
+details[open] { border-color: var(--border-focus); }
+summary { font-weight: 700; font-size: 15px; cursor: pointer; user-select: none; }
+details p { margin-top: 12px; color: var(--text-muted); font-size: 14px; line-height: 1.6; }
+
+/* Footer */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 36px 0;
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+}
+footer a { color: var(--text-muted); text-decoration: none; }
+footer a:hover { color: #fff; }
 </style>
 </head>
 <body>
-<header class="nav">
-  <a class="brand" href="/FQD/"><img src="favicon.png" alt="AI Limits Tracker logo" /> AI Limits</a>
-  <nav class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#services">Services</a>
-    <a href="#how">How it works</a>
-    <a href="#faq">FAQ</a>
-    <a class="btn" href="https://github.com/piyushkumarjiit/FQD">★ GitHub</a>
-  </nav>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="/FQD/">
+      <span>FQD</span>
+      <span class="brand-pill">Cockpit</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#deploy">Deploy</a>
+      <a href="#faq">FAQ</a>
+      <a class="btn btn-sec" href="https://github.com/piyushkumarjiit/FQD">GitHub ★</a>
+    </div>
+  </div>
 </header>
 
 <main>
-<section class="hero wrap">
-  <span class="pill"><i></i> Open source · MIT · self-hosted</span>
-  <h1>All your <span class="accent">AI usage limits</span><br />in one place</h1>
-  <p class="lead">Track the limits of every AI account you own — Claude, ChatGPT, Cursor, Copilot and more, <strong>including several accounts of the same service</strong> — with live reset timers, low-limit alerts and real usage stats. Your tokens never leave your own device.</p>
-  <div class="cta">
-    <a class="btn" href="https://github.com/piyushkumarjiit/FQD">★ Star on GitHub</a>
-    <a class="btn ghost" href="#how">Self-host in 2 minutes</a>
+<section class="wrap hero">
+  <div class="hero-badge">⚡ Unified Multi-Agent Observability</div>
+  <h1>All your <span class="accent">AI subscription fleets</span><br />in a single pane of glass</h1>
+  <p class="lead">The unified cockpit for CLIProxy pools and LiteLLM gateway budgets. Dual-horizon quota radar, fleet headroom simulation, and real-time cooldown countdowns across Claude, Antigravity, ChatGPT, and custom models.</p>
+  <div class="hero-cta">
+    <a class="btn" href="https://github.com/piyushkumarjiit/FQD#quickstart">Deploy with Docker →</a>
+    <a class="btn btn-sec" href="https://github.com/piyushkumarjiit/FQD">View Source on GitHub</a>
   </div>
-  <div class="providers">
-    <span class="prov"><b style="background:#e2683c"></b> Claude</span>
-    <span class="prov"><b style="background:#18181b"></b> ChatGPT</span>
-    <span class="prov"><b style="background:#4f46e5"></b> Gemini</span>
-    <span class="prov"><b style="background:#3f3f46"></b> Cursor</span>
-    <span class="prov"><b style="background:#1f6feb"></b> Copilot</span>
-    <span class="prov"><b style="background:#20808d"></b> Perplexity</span>
-    <span class="prov"><b style="background:#fa520f"></b> Mistral</span>
-    <span class="prov"><b style="background:#8b5cf6"></b> + any via cURL</span>
+
+  <div class="providers-bar">
+    <div class="pill"><span class="dot" style="background:#4285f4"></span> Antigravity (Google AI)</div>
+    <div class="pill"><span class="dot" style="background:#d97757"></span> Claude Code &amp; Pro</div>
+    <div class="pill"><span class="dot" style="background:#10a37f"></span> OpenAI / ChatGPT Codex</div>
+    <div class="pill"><span class="dot" style="background:#000000"></span> Cursor &amp; Copilot</div>
+    <div class="pill"><span class="dot" style="background:#0066ff"></span> DeepSeek</div>
+    <div class="pill"><span class="dot" style="background:#f55036"></span> Grok &amp; Mistral</div>
+    <div class="pill"><span class="dot" style="background:#8b5cf6"></span> LiteLLM &amp; CLIProxyAPI</div>
   </div>
 </section>
 
 <section id="features" class="wrap">
-  <h2 class="sec-title">Built for people with more than one AI account</h2>
-  <p class="sec-sub">Every other tracker assumes one account per service. This one doesn't — two Claude accounts, two ChatGPT accounts, all on one screen.</p>
+  <h2 class="sec-title">Engineered for Agent Fleets</h2>
+  <p class="sec-sub">Eliminate rate-limit surprises and uncoordinated token burn.</p>
+
   <div class="grid">
-    <div class="card"><div class="ic">👥</div><h3>Multiple accounts, isolated</h3><p>Add any number of accounts across any service. Each keeps its own credentials, token refresh and history — no mixing, no logging in and out.</p></div>
-    <div class="card"><div class="ic">⏱️</div><h3>Live reset timers</h3><p>See exactly when each 5-hour and weekly window resets, counting down in real time. Never get surprised by a wall mid-task again.</p></div>
-    <div class="card"><div class="ic">📊</div><h3>Honest usage stats</h3><p>Day streaks, limit hits, time in the red zone, burn-rate forecast and busiest hours — all from real measurements. No invented message counts.</p></div>
-    <div class="card"><div class="ic">🔔</div><h3>Low-limit alerts</h3><p>Get notified at 20%, 10% and 0% remaining, on restore, and when a session needs re-login. Optional Telegram push from the server.</p></div>
-    <div class="card"><div class="ic">🔒</div><h3>Private by design</h3><p>Tokens live only in your device's Keychain/Keystore or your own encrypted server. Requests go straight to the AI providers — no third-party backend.</p></div>
-    <div class="card"><div class="ic">📱</div><h3>Install anywhere</h3><p>A mobile app, a self-hosted web panel you add to your home screen like a native app, and a Chrome extension for a glance from the toolbar.</p></div>
+    <div class="card">
+      <div class="card-icon">🎯</div>
+      <h3>Dual-Horizon Quota Radar</h3>
+      <p>Simultaneously visualizes rolling 7-day weekly token allowances alongside 5-hour session burst limits. Displays live second-by-second countdowns to quota resets.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">⚡</div>
+      <h3>Fleet Headroom Simulator</h3>
+      <p>Interactive capacity modeling for 10, 50, 100, or all pooled agents. Predicts burst resilience and flags potential pool exhaustion before dispatching heavy swarm tasks.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">🔄</div>
+      <h3>CLIProxy &amp; LiteLLM Gateway Sync</h3>
+      <p>Automated discovery and live health monitoring across proxy pools. Ingests token velocity and paid API key budgets without manual token re-entry.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">🛡️</div>
+      <h3>Strict Account Isolation</h3>
+      <p>Run 10+ accounts of the same service (e.g. 10 Antigravity slots or multiple Claude seats) with completely isolated credentials, token rotation, and zero cross-leakage.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">📊</div>
+      <h3>Prometheus &amp; DevOps Ready</h3>
+      <p>Native Prometheus <code>/metrics</code> export, debounced store reads, Caddy reverse-proxy automated TLS, and lightweight, unprivileged Alpine container builds.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">🔒</div>
+      <h3>Production Security Guardrails</h3>
+      <p>Zero credential leakage in API payloads, constant-time secret comparison, and strict outbound SSRF protection blocking AWS/GCP metadata endpoints.</p>
+    </div>
   </div>
 </section>
 
-<section id="services" class="wrap">
-  <h2 class="sec-title">Supported services</h2>
-  <p class="sec-sub">Ten services out of the box — and a Custom option that adds any other by pasting a cURL, with the usage fields detected automatically.</p>
-  <div class="svc-grid">
-    <div class="svc"><span class="svc-dot" style="background:#e2683c">C</span><div><b>Claude</b><small>5h · weekly · Opus/Sonnet · spend</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#18181b">C</span><div><b>ChatGPT</b><small>Codex 5h &amp; weekly · credits</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#4f46e5">G</span><div><b>Gemini</b><small>session &amp; weekly</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#3f3f46">C</span><div><b>Cursor</b><small>premium (fast) requests</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#1f6feb">C</span><div><b>GitHub Copilot</b><small>premium requests / month</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#20808d">P</span><div><b>Perplexity</b><small>Pro searches</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#27272a">G</span><div><b>Grok</b><small>request window</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#fa520f">M</span><div><b>Mistral</b><small>Le Chat</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#4d6bfe">D</span><div><b>DeepSeek</b><small>account limits</small></div></div>
-    <div class="svc"><span class="svc-dot" style="background:#5d3fd3">P</span><div><b>Poe</b><small>compute points</small></div></div>
-    <div class="svc svc-custom"><span class="svc-dot" style="background:#8b5cf6">+</span><div><b>Any other service</b><small>paste a cURL — fields auto-detected</small></div></div>
-  </div>
+<section id="deploy" class="wrap">
+  <h2 class="sec-title">Deploy in Seconds</h2>
+  <p class="sec-sub">Turnkey container ready for your homelab, LXC, or VPS.</p>
+<pre><span class="c"># 1. Pull the official FQD container image</span>
+docker pull ghcr.io/piyushkumarjiit/fqd:latest
+
+<span class="c"># 2. Run standalone on port 1455</span>
+docker run -d \
+  --name fqd \
+  -p 1455:8795 \
+  -v fqd_data:/app/data \
+  ghcr.io/piyushkumarjiit/fqd:latest
+
+<span class="g"># → Open http://localhost:1455 in your browser</span></pre>
+  <p style="text-align:center;margin-top:24px"><a class="btn" href="https://github.com/piyushkumarjiit/FQD#docker-deployment">View Full Production &amp; Caddy Guide →</a></p>
 </section>
 
-<section id="ways" class="wrap">
-  <h2 class="sec-title">Three ways to use it</h2>
-  <p class="sec-sub">Same engine, your choice of surface.</p>
-  <div class="ways">
-    <div class="way"><div class="emoji">📱</div><h3>Mobile app</h3><p>Your daily driver. Expo / React Native, unlimited isolated accounts.</p><small>iOS &amp; Android</small></div>
-    <div class="way"><div class="emoji">🖥️</div><h3>Web panel</h3><p>Self-hosted PWA with 24/7 background polling. Install to your phone's home screen.</p><small>Node 22, zero deps</small></div>
-    <div class="way"><div class="emoji">🧩</div><h3>Chrome extension</h3><p>A glance from the toolbar using your browser's own session.</p><small>One account per profile</small></div>
-  </div>
-</section>
-
-<section id="how" class="wrap">
-  <h2 class="sec-title">Self-host in two minutes</h2>
-  <p class="sec-sub">One Node file, no runtime dependencies. Runs on any small VPS.</p>
-<pre><span class="c"># clone &amp; build</span>
-git clone https://github.com/piyushkumarjiit/FQD.git
-cd FQD && npm install
-npm run build:server && npm run build:web
-
-<span class="c"># configure &amp; run</span>
-cp server/.env.example server/.env   <span class="c"># set a password</span>
-WEB_DIR=web/dist DATA_DIR=./data node server/dist/server.mjs
-<span class="g"># → open http://localhost:8795 on any device</span></pre>
-  <p style="text-align:center;margin-top:24px"><a class="btn" href="https://github.com/piyushkumarjiit/FQD#web-panel">Full deploy guide →</a></p>
-</section>
-
-<section id="faq" class="wrap">
-  <h2 class="sec-title">Frequently asked questions</h2>
+<section id="faq" class="wrap" style="margin-top:60px;">
+  <h2 class="sec-title">Frequently Asked Questions</h2>
   <div class="faq">
-    <details open><summary>Which AI services does it support?</summary><p>Claude, ChatGPT, Gemini, Cursor, GitHub Copilot, Perplexity, Grok, Mistral, DeepSeek and Poe out of the box — plus a Custom option that adds any other service: paste a cURL of the request that returns your usage and the app auto-detects the percentage used and the reset time.</p></details>
-    <details><summary>Can I track multiple Claude (or Cursor, or ChatGPT) accounts at once?</summary><p>Yes — that's the whole point. Add any number of accounts across any service. Each is fully isolated with its own credentials, token refresh and history, so two accounts of the same service show two different numbers side by side.</p></details>
-    <details><summary>How do I see all my AI limits in one place?</summary><p>Install the mobile app, the self-hosted web panel (which you can add to your phone's home screen), or the Chrome extension. It shows each service's windows — Claude's 5-hour and weekly, ChatGPT's Codex limits, Cursor's premium requests, and so on — on a single screen with live reset timers.</p></details>
-    <details><summary>Is it safe? Where are my credentials stored?</summary><p>They never leave your own device or server. On mobile they're in the iOS Keychain / Android Keystore; on the server they're AES-256-GCM encrypted. Requests go straight to Anthropic, OpenAI and Google — there's no third-party backend. The tool only reads your usage, it never generates anything, so it adds no load to your quota.</p></details>
-    <details><summary>Is it really free and open source?</summary><p>Yes. MIT-licensed, free, and the full source is on GitHub. You self-host it yourself and own all your data.</p></details>
-    <details><summary>Does it show how many messages or tokens I've used?</summary><p>No AI subscription exposes a message or token counter, so the app never invents one. It reads the percentage of each rate-limit window the service itself reports, and derives streaks, forecasts and charts from how that percentage changes over time.</p></details>
+    <details open><summary>What is Fleet Quota Display (FQD)?</summary><p>FQD is an observability cockpit designed for developers running multi-agent swarms or teams with pooled AI subscriptions. It brings subscription quotas (CLIProxy) and API key spend (LiteLLM) into one cohesive dashboard.</p></details>
+    <details><summary>Can I monitor multiple accounts of the same provider?</summary><p>Yes! FQD was specifically built to handle pools of accounts (e.g. 14 Antigravity slots, multiple Claude Pro seats) side-by-side without session collision.</p></details>
+    <details><summary>Where are credentials stored?</summary><p>Credentials never leave your own server or container. They are AES-256-GCM encrypted on disk. FQD connects strictly to official provider endpoints and never sends telemetry to any third party.</p></details>
+    <details><summary>Is FQD free and open source?</summary><p>Yes, FQD is 100% free and released under the permissive MIT License on GitHub.</p></details>
   </div>
 </section>
-
-<div class="final">
-  <h2>Stop logging in and out just to check</h2>
-  <p>Put every AI limit you care about on one screen. Free, open source, yours to self-host.</p>
-  <a class="btn" href="https://github.com/piyushkumarjiit/FQD">★ Get it on GitHub</a>
-</div>
 </main>
 
 <footer>
-  <p>AI Limits Tracker — open-source usage-limit tracker for Claude, ChatGPT, Gemini, Cursor, Copilot, Perplexity, Grok and more.<br />
-  MIT © <a href="https://github.com/piyushkumarjiit">Piyush Kumar</a> · based on the original AI Limits Tracker by <a href="https://github.com/Rauan228">Rauan</a> · <a href="https://github.com/piyushkumarjiit/FQD">Source on GitHub</a></p>
+  <p>Fleet Quota Display (FQD) — Unified observability for AI subscription fleets, proxy pools, and API keys.<br />
+  MIT © <a href="https://github.com/piyushkumarjiit">Piyush Kumar</a> · originally originated from AI Limits Tracker under the MIT License · <a href="https://github.com/piyushkumarjiit/FQD">Source on GitHub</a></p>
 </footer>
+
 </body>
 </html>
