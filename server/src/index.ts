@@ -103,6 +103,7 @@ if (cpaConfig) {
     transport: cpaTransport,
     policyLoader: cpaPolicyLoader,
     watermarkStore: store.watermarkStore,
+    tracker,
   });
   cpaRouting = cpaWatermarkService;
 
@@ -163,7 +164,7 @@ const server = createApp(
     allowedHosts: ALLOWED_HOSTS,
     maxHeaderSize: 8192,
   },
-  { store, tracker, cpaSync, cpaRouting, quotaCache }
+  { store, tracker, cpaSync, cpaRouting, cpaWatermarkService, quotaCache }
 );
 
 // Explicit resource bounds: slow/malicious clients cannot hold sockets or headers forever.

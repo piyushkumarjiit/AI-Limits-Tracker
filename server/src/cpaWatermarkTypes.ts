@@ -120,9 +120,11 @@ export interface WatermarkFleetOverview {
 }
 
 export interface ManualHoldRequest {
+  accountId?: string;
   hold: ManualHoldType;
   reason?: string;
   actor?: string;
+  ttlSeconds?: number;
 }
 
 export interface PolicyOverrideRequest {

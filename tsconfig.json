@@ -45,6 +45,7 @@
     "tests/cpaWatermarkEngine.test.ts",
     "tests/cpaWatermarkPolicy.test.ts",
     "tests/cpaWatermarkService.test.ts",
-    "tests/cpaWatermarkTypes.test.ts"
+    "tests/cpaWatermarkTypes.test.ts",
+    "tests/cpaBackendTripwires.test.ts"
   ]
 }

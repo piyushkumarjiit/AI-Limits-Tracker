@@ -20,6 +20,7 @@ import { Tracker } from './tracker';
 import type { CpaSyncEngine } from './cpaSync';
 import type { CpaRoutingExecutor } from './cpaRouting';
 import type { CpaWatermarkService } from './cpaWatermarkService';
+import { effectiveAccountState } from './cpaWatermarkTypes';
 import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
 import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
@@ -48,6 +49,7 @@ export interface AppDeps {
   tracker: Tracker;
   cpaSync?: CpaSyncEngine;
   cpaRouting?: CpaRoutingExecutor | CpaWatermarkService;
+  cpaWatermarkService?: CpaWatermarkService;
   quotaCache?: QuotaCache;
   telemetryService?: TelemetryService;
 }
@@ -208,6 +210,11 @@ async function handleApi(
   bearerLimiter: ReturnType<typeof createLoginLimiter>
 ) {
   const { store, tracker, cpaSync, cpaRouting, quotaCache } = deps;
+  const cpaWatermarkService: CpaWatermarkService | undefined =
+    deps.cpaWatermarkService ??
+    (cpaRouting && typeof (cpaRouting as any).getFleetOverview === 'function'
+      ? (cpaRouting as CpaWatermarkService)
+      : undefined);
   const path = url.pathname;
   const method = req.method || 'GET';
 
@@ -333,6 +340,68 @@ async function handleApi(
       return send(res, 200, { enabled: false, lastDiscoveryAt: null, lastDiscoveryOk: false });
     }
     return send(res, 200, cpaSync.status());
+  }
+
+  if (path === '/api/cpa/watermarks' && method === 'GET') {
+    if (cpaWatermarkService) {
+      const overview = await cpaWatermarkService.getFleetOverview();
+      return send(res, 200, overview);
+    }
+    return send(res, 200, {
+      mode: 'off',
+      routingStrategy: 'none',
+      writesBlockedReason: 'not_configured',
+      tierState: 'OPEN',
+      poolRunwayMinutes: null,
+      healthyCount: 0,
+      tightCount: 0,
+      exhaustedCount: 0,
+      quarantinedCount: 0,
+      accounts: [],
+      recentShadowDecisions: [],
+      activeDangerAlerts: [],
+    });
+  }
+
+  if (path === '/api/cpa/hold' && method === 'POST') {
+    const body = await readBody(req);
+    const accountId = body.accountId;
+    if (!accountId || typeof accountId !== 'string') {
+      return send(res, 400, { error: 'accountId is required' });
+    }
+
+    const account = store.getAccount(accountId);
+    if (!account) {
+      return send(res, 404, { error: 'Account not found' });
+    }
+
+    const hold = body.hold;
+    if (hold !== 'none' && hold !== 'quarantine' && hold !== 'airgap') {
+      return send(res, 400, { error: 'Invalid hold type. Must be one of: none, quarantine, airgap' });
+    }
+
+    const reason = typeof body.reason === 'string' ? body.reason : undefined;
+    const ttlSeconds = typeof body.ttlSeconds === 'number' && body.ttlSeconds > 0 ? body.ttlSeconds : undefined;
+
+    let result: { hold: any; effectiveState: string };
+    if (cpaWatermarkService) {
+      result = await cpaWatermarkService.setManualHold(accountId, hold, reason, ttlSeconds);
+    } else {
+      const now = Date.now();
+      const expiresAt = hold === 'none' ? null : (ttlSeconds ? now + ttlSeconds * 1000 : now + 24 * 3600 * 1000);
+      store.setManualHold(accountId, hold, reason, expiresAt, now);
+      const effective = effectiveAccountState(hold, 'healthy');
+      result = {
+        hold: { accountId, holdType: hold, reason, createdAt: now, expiresAt },
+        effectiveState: effective,
+      };
+    }
+
+    return send(res, 200, {
+      ok: true,
+      hold: result.hold,
+      effectiveState: result.effectiveState,
+    });
   }
 
   if (path === '/api/telemetry' && method === 'GET') {

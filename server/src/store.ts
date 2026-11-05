@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { CpaWatermarkStore } from './cpaWatermarkStore';
+import type { ManualHoldType } from './cpaWatermarkTypes';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
@@ -15,6 +16,14 @@ import {
 
 export interface ServerAccount extends AccountEntity {
   latestSnapshot?: UsageSnapshot;
+}
+
+export interface CpaManualHoldRecord {
+  accountId: string;
+  holdType: ManualHoldType;
+  reason?: string;
+  createdAt: number;
+  expiresAt?: number | null;
 }
 
 /**
@@ -133,6 +142,13 @@ export class Store {
         unlinked_at INTEGER,
         routing_json TEXT
       );
+      CREATE TABLE IF NOT EXISTS cpa_manual_holds (
+        account_id TEXT PRIMARY KEY,
+        hold_type TEXT NOT NULL,
+        reason TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER
+      );
     `);
     // SQLite creates these with the process umask; the WAL/SHM siblings appear
     // once the journal is enabled. Tighten whichever exist now.
@@ -202,6 +218,7 @@ export class Store {
     this.db.prepare('DELETE FROM alerts WHERE account_id = ?').run(id);
     this.db.prepare('DELETE FROM alert_state WHERE account_id = ?').run(id);
     this.db.prepare('DELETE FROM cpa_links WHERE account_id = ?').run(id);
+    this.db.prepare('DELETE FROM cpa_manual_holds WHERE account_id = ?').run(id);
   }
 
   private rowToCpaLink(r: any): CpaLink {
@@ -379,6 +396,74 @@ export class Store {
     const routing = this.getCpaLinkRouting(accountId) || {};
     routing.managed = managed;
     this.updateCpaLinkRouting(accountId, routing);
+  }
+
+  getManualHold(accountId: string, now: number = Date.now()): CpaManualHoldRecord | null {
+    const row = this.db
+      .prepare('SELECT account_id, hold_type, reason, created_at, expires_at FROM cpa_manual_holds WHERE account_id = ?')
+      .get(accountId) as { account_id: string; hold_type: string; reason: string | null; created_at: number; expires_at: number | null } | undefined;
+    if (!row) return null;
+    if (row.expires_at != null && row.expires_at <= now) {
+      this.db.prepare('DELETE FROM cpa_manual_holds WHERE account_id = ?').run(accountId);
+      return null;
+    }
+    return {
+      accountId: row.account_id,
+      holdType: row.hold_type as ManualHoldType,
+      reason: row.reason || undefined,
+      createdAt: Number(row.created_at),
+      expiresAt: row.expires_at != null ? Number(row.expires_at) : null,
+    };
+  }
+
+  setManualHold(
+    accountId: string,
+    holdType: ManualHoldType,
+    reason?: string,
+    expiresAt?: number | null,
+    now: number = Date.now()
+  ): void {
+    if (holdType === 'none') {
+      this.db.prepare('DELETE FROM cpa_manual_holds WHERE account_id = ?').run(accountId);
+      return;
+    }
+    const effectiveExpiresAt = expiresAt === undefined ? now + 24 * 3600 * 1000 : expiresAt;
+    this.db
+      .prepare(
+        `INSERT INTO cpa_manual_holds (account_id, hold_type, reason, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(account_id) DO UPDATE SET
+           hold_type = excluded.hold_type,
+           reason = excluded.reason,
+           created_at = excluded.created_at,
+           expires_at = excluded.expires_at`
+      )
+      .run(accountId, holdType, reason || null, now, effectiveExpiresAt ?? null);
+  }
+
+  deleteManualHold(accountId: string): void {
+    this.db.prepare('DELETE FROM cpa_manual_holds WHERE account_id = ?').run(accountId);
+  }
+
+  listManualHolds(now: number = Date.now()): CpaManualHoldRecord[] {
+    const rows = this.db
+      .prepare('SELECT account_id, hold_type, reason, created_at, expires_at FROM cpa_manual_holds')
+      .all() as Array<{ account_id: string; hold_type: string; reason: string | null; created_at: number; expires_at: number | null }>;
+    const active: CpaManualHoldRecord[] = [];
+    for (const r of rows) {
+      if (r.expires_at != null && r.expires_at <= now) {
+        this.db.prepare('DELETE FROM cpa_manual_holds WHERE account_id = ?').run(r.account_id);
+      } else {
+        active.push({
+          accountId: r.account_id,
+          holdType: r.hold_type as ManualHoldType,
+          reason: r.reason || undefined,
+          createdAt: Number(r.created_at),
+          expiresAt: r.expires_at != null ? Number(r.expires_at) : null,
+        });
+      }
+    }
+    return active;
   }
 
   /** Flushes the write-ahead log into the database file (used on shutdown). */
