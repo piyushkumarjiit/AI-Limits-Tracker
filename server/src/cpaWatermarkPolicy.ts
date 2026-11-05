@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import yaml from 'yaml';
 import type { WatermarkPolicyConfig } from './cpaWatermarkEngine';
+import { DEFAULT_STATUS_LEVELS, type TieredStatusLevels } from '../../src/constants/statusLevels';
 
 /**
  * Maximum allowed YAML policy file size in bytes (256 KB) to prevent DoS.
@@ -53,7 +54,17 @@ export interface FullWatermarkPolicy extends WatermarkPolicyConfig {
 }
 
 /**
- * Safe default watermark policy defaulting to 'shadow' mode.
+ * Catch-all rule used when a policy file does not list its own classification rules:
+ * every CLIProxy account is a managed Pro account, so enforce mode covers the whole
+ * pool out of the box. A policy file with its own rules replaces this list entirely.
+ */
+export const DEFAULT_CLASSIFICATION_RULES: ClassificationRule[] = [
+  { pattern: '*', provider: 'auto', tier: 'pro', modality: 'subscription_pool', managed: true },
+];
+
+/**
+ * Safe default watermark policy defaulting to 'shadow' mode. The tight and exhausted
+ * levels come from constants/statusLevels so the UI and alerts use the same numbers.
  */
 export const DEFAULT_WATERMARK_POLICY: FullWatermarkPolicy = {
   mode: 'shadow',
@@ -61,21 +72,41 @@ export const DEFAULT_WATERMARK_POLICY: FullWatermarkPolicy = {
   applyLatencySec: 5,
   burnRateMax: 15,
   pro: {
-    drainPct: 20,
+    drainPct: DEFAULT_STATUS_LEVELS.pro.tightPct,
     drainRecoveryPct: 24,
-    hardStopPct: 5,
-    hardStopRecoveryPct: 8,
+    hardStopPct: DEFAULT_STATUS_LEVELS.pro.exhaustedPct,
+    hardStopRecoveryPct: 5,
     fallbackMinDwellSec: 600,
     recoveryDwellSec: 600,
   },
   nonPro: {
-    drainPct: 40,
+    drainPct: DEFAULT_STATUS_LEVELS.nonPro.tightPct,
     drainRecoveryPct: 44,
-    hardStopPct: 2,
-    hardStopRecoveryPct: 5,
+    hardStopPct: DEFAULT_STATUS_LEVELS.nonPro.exhaustedPct,
+    hardStopRecoveryPct: 8,
   },
-  classificationRules: [],
+  classificationRules: DEFAULT_CLASSIFICATION_RULES,
 };
+
+/** The tight / exhausted levels a policy implies, per tier. */
+export function statusLevelsOf(policy: FullWatermarkPolicy): TieredStatusLevels {
+  return {
+    pro: { tightPct: policy.pro.drainPct, exhaustedPct: policy.pro.hardStopPct },
+    nonPro: { tightPct: policy.nonPro.drainPct, exhaustedPct: policy.nonPro.hardStopPct },
+  };
+}
+
+/**
+ * Routing mode in effect: CPA_ROUTING_MODE from the environment wins when set to a
+ * valid value, otherwise the policy file's mode.
+ */
+export function effectiveRoutingMode(
+  policyMode: 'off' | 'shadow' | 'enforce',
+  env: Record<string, string | undefined> = process.env
+): 'off' | 'shadow' | 'enforce' {
+  const raw = env.CPA_ROUTING_MODE?.trim();
+  return raw === 'off' || raw === 'shadow' || raw === 'enforce' ? raw : policyMode;
+}
 
 export interface AccountClassification {
   provider: string;
@@ -395,7 +426,8 @@ export function validateWatermarkPolicy(raw: unknown): PolicyValidationResult {
 
   // 5. Classification rules validation (B4: strict boolean check and default false)
   const rawRules = getProp(raw, 'classificationRules', 'classification_rules');
-  const classificationRules: ClassificationRule[] = [];
+  // A file without classification rules keeps the default catch-all rule.
+  const classificationRules: ClassificationRule[] = rawRules === undefined ? structuredClone(DEFAULT_CLASSIFICATION_RULES) : [];
   if (rawRules !== undefined) {
     if (!Array.isArray(rawRules)) {
       errors.push(`classificationRules must be an array, got ${typeof rawRules}`);
@@ -700,7 +732,11 @@ export class CpaPolicyLoader {
    * Current active policy (deep clone to prevent mutation of internal state).
    */
   public getPolicy(): FullWatermarkPolicy {
-    return structuredClone(this.currentPolicy);
+    const policy = structuredClone(this.currentPolicy);
+    // CPA_ROUTING_MODE overrides the file's mode, except while a broken policy file
+    // has forced the safe shadow fallback.
+    if (this.lastErrorSignature === null) policy.mode = effectiveRoutingMode(policy.mode);
+    return policy;
   }
 
   /**
@@ -732,8 +768,10 @@ export class CpaPolicyLoader {
     this.resolvedPath = filePath;
 
     if (!filePath) {
+      // No file is not an error: run on the built-in defaults.
       this.fallbackToShadow();
       this.lastFileHash = null;
+      this.lastErrorSignature = null;
       return this.getPolicy();
     }
 

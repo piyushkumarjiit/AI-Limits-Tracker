@@ -1,4 +1,5 @@
 import type { AccountEntity, ProviderType, QuotaBucket, UsageSnapshot } from '../models/types';
+import { DEFAULT_STATUS_LEVELS, type StatusLevels } from '../constants/statusLevels';
 
 export type Severity = 'healthy' | 'warning' | 'critical' | 'exhausted' | 'unknown';
 
@@ -23,14 +24,14 @@ export function severityRank(s: Severity): number {
 }
 
 /**
- * One scale for rings, pills and alerts (alerts fire at 20 / 10).
- * >35 healthy, 20-35 warning, 10-20 critical, <=10 or 0 exhausted, null unknown.
+ * Severity of a remaining percentage against the policy levels (see constants/statusLevels):
+ * at or below exhaustedPct -> exhausted, at or below tightPct -> warning, otherwise healthy.
+ * Defaults to the Pro tier's levels when none are passed.
  */
-export function severityOf(remaining: number | null): Severity {
+export function severityOf(remaining: number | null, levels: StatusLevels = DEFAULT_STATUS_LEVELS.pro): Severity {
   if (remaining === null || remaining === undefined || isNaN(remaining)) return 'unknown';
-  if (remaining <= 10) return 'exhausted';
-  if (remaining <= 20) return 'critical';
-  if (remaining <= 35) return 'warning';
+  if (remaining <= levels.exhaustedPct) return 'exhausted';
+  if (remaining <= levels.tightPct) return 'warning';
   return 'healthy';
 }
 

@@ -19,6 +19,14 @@ import { Store } from './store';
 import { Tracker } from './tracker';
 import type { CpaSyncEngine } from './cpaSync';
 import type { CpaWatermarkService } from './cpaWatermarkService';
+import {
+  CpaPolicyLoader,
+  classifyAccount,
+  DEFAULT_WATERMARK_POLICY,
+  effectiveRoutingMode,
+  statusLevelsOf,
+  type FullWatermarkPolicy,
+} from './cpaWatermarkPolicy';
 import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
 import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
@@ -64,6 +72,25 @@ export interface AppDeps {
   cpaWatermarkService?: CpaWatermarkService;
   quotaCache?: QuotaCache;
   telemetryService?: TelemetryService;
+  /** Active watermark policy (thresholds, tiers, routing mode). Built-in defaults when absent. */
+  policyLoader?: CpaPolicyLoader;
+  /** Gateway base URLs shown in Settings (credentials and query strings are stripped). */
+  gatewayUrls?: { cliproxy?: string; litellm?: string };
+}
+
+/** A URL safe to show in the panel: no user info, query or fragment. */
+export function displayUrl(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    u.username = '';
+    u.password = '';
+    u.search = '';
+    u.hash = '';
+    return u.toString().replace(/\/$/, '');
+  } catch {
+    return null;
+  }
 }
 
 /* ---------------- HTTP helpers ---------------- */
@@ -229,6 +256,16 @@ async function handleApi(
       : undefined);
   const path = url.pathname;
   const method = req.method || 'GET';
+  const activePolicy = (): FullWatermarkPolicy =>
+    deps.policyLoader?.getPolicy() ??
+    cpaWatermarkService?.getPolicyLoader().getPolicy() ??
+    { ...structuredClone(DEFAULT_WATERMARK_POLICY), mode: effectiveRoutingMode(DEFAULT_WATERMARK_POLICY.mode) };
+  /** Tight / exhausted levels for one account, by its policy tier. */
+  const levelsFor = (accountId: string, fallbackName: string) => {
+    const policy = activePolicy();
+    const cls = classifyAccount(store.getCpaLink(accountId)?.cpaName ?? fallbackName, policy.classificationRules);
+    return { cls, levels: cls.tier === 'non_pro' ? policy.nonPro : policy.pro };
+  };
 
   if (path === '/api/health') return send(res, 200, { ok: true });
 
@@ -293,11 +330,18 @@ async function handleApi(
 
   if (path === '/api/state' && method === 'GET') {
     return send(res, 200, {
-      accounts: store.listAccounts(), // credentials are never part of the account object
+      // Credentials are never part of the account object. cpaLinked tells the panel which
+      // accounts come from CLIProxy (cooldown applies) and which were added directly
+      // (reconnect and delete apply).
+      accounts: store.listAccounts().map((a) => ({ ...a, cpaLinked: store.getCpaLink(a.id)?.state === 'linked' })),
       lastSyncAllAt: tracker.lastSyncAllAt,
       intervalMin: tracker.intervalMin(),
       telegram: Boolean(config.telegram),
       cpaRouting: store.getCpaRoutingConfig(),
+      gateways: {
+        cliproxyUrl: displayUrl(deps.gatewayUrls?.cliproxy),
+        litellmUrl: displayUrl(deps.gatewayUrls?.litellm),
+      },
     });
   }
 
@@ -351,7 +395,8 @@ async function handleApi(
     if (!cpaSync) {
       return send(res, 200, { enabled: false, lastDiscoveryAt: null, lastDiscoveryOk: false });
     }
-    return send(res, 200, cpaSync.status());
+    // Report the routing mode the policy engine actually runs with.
+    return send(res, 200, { ...cpaSync.status(), routingMode: activePolicy().mode });
   }
 
   if (path === '/api/cpa/watermarks' && method === 'GET') {
@@ -428,9 +473,10 @@ async function handleApi(
       const lowestRem = buckets.length > 0
         ? Math.min(...buckets.map((b) => b.remainingPercent ?? 100))
         : 100;
-      if (account.latestSnapshot?.status === 'rate_limited' || lowestRem <= 10) {
+      const { levels: holdLevels } = levelsFor(account.id, account.name);
+      if (account.latestSnapshot?.status === 'rate_limited' || lowestRem <= holdLevels.hardStopPct) {
         autoState = 'exhausted';
-      } else if (lowestRem <= 35) {
+      } else if (lowestRem <= holdLevels.drainPct) {
         autoState = 'tight';
       }
       const effective = effectiveAccountState(hold, autoState);
@@ -473,10 +519,9 @@ async function handleApi(
     let tierState: WatermarkTierState = 'OPEN';
     const recentShadowDecisions: WatermarkFleetOverview['recentShadowDecisions'] = [];
 
+    mode = activePolicy().mode;
     if (cpaRouting && typeof (cpaRouting as any).getPolicyLoader === 'function') {
       const wmService = cpaRouting as CpaWatermarkService;
-      const policy = wmService.getPolicyLoader().getPolicy();
-      mode = policy.mode;
       const rContext = wmService.getRoutingContext();
       routingStrategy = rContext.config.mode;
     }
@@ -552,9 +597,10 @@ async function handleApi(
       totalAccountsCount++;
 
       let autoState: WatermarkAccountState = 'healthy';
-      if (acc.latestSnapshot?.status === 'rate_limited' || lowestRem <= 10) {
+      const { cls: accCls, levels: accLevels } = levelsFor(acc.id, acc.name);
+      if (acc.latestSnapshot?.status === 'rate_limited' || lowestRem <= accLevels.hardStopPct) {
         autoState = 'exhausted';
-      } else if (lowestRem <= 35) {
+      } else if (lowestRem <= accLevels.drainPct) {
         autoState = 'tight';
       }
 
@@ -579,9 +625,10 @@ async function handleApi(
           `INVARIANT VIOLATION: Account '${acc.name}' is ${effective} upstream but has active routing weight ${currentWeight} > 0!`
         );
       }
-      if (recent429 > 0 && effective !== 'airgapped') {
+      // Quarantine and airgap both take the account out of CLIProxy (weight 0, disabled).
+      if (recent429 > 0 && effective !== 'airgapped' && effective !== 'quarantined') {
         activeDangerAlerts.push(
-          `INVARIANT VIOLATION: 429 rate limit strike logged on account '${acc.name}' which is currently ${effective} instead of airgapped!`
+          `INVARIANT VIOLATION: 429 rate limit strike logged on account '${acc.name}' which is currently ${effective} and still in the pool!`
         );
       }
 
@@ -606,6 +653,8 @@ async function handleApi(
           http429: recent429,
           http5xx: 0,
         },
+        tier: accCls.tier,
+        managed: accCls.managed,
       });
     }
 
@@ -631,6 +680,7 @@ async function handleApi(
       accounts: accountViews,
       recentShadowDecisions,
       activeDangerAlerts,
+      statusLevels: statusLevelsOf(activePolicy()),
     };
 
     return send(res, 200, overview);

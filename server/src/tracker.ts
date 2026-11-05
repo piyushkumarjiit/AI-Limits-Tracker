@@ -12,6 +12,7 @@ import { PROVIDER_NAMES } from '../../src/constants/theme';
 import { notify } from './notify';
 import { ServerAccount, Store } from './store';
 import { circuitBreakers } from './cpaTripwireEngine';
+import { DEFAULT_STATUS_LEVELS, type StatusLevels } from '../../src/constants/statusLevels';
 
 const b64url = (buf: Buffer) => buf.toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 
@@ -38,6 +39,13 @@ export class Tracker {
   cpaJitterMaxMs?: number;
 
   constructor(private store: Store, private cpaProvider?: UsageProvider) {}
+
+  /** Tight / exhausted levels for an account; wired to the active policy at startup. */
+  private statusLevelsFor: (accountId: string) => StatusLevels = () => DEFAULT_STATUS_LEVELS.pro;
+
+  setStatusLevels(fn: (accountId: string) => StatusLevels): void {
+    this.statusLevelsFor = fn;
+  }
 
   onSyncAll(cb: () => void | Promise<void>): void {
     this.onSyncAllCallbacks.push(cb);
@@ -345,12 +353,17 @@ export class Tracker {
       next.armed0 = true;
       await this.alert(account, 'restored', `Limit restored: ${account.name}`, `${b.label}: ${left}% available.`);
     }
-    if (used >= 90) {
-      if (used < 100 && st.armed10) await this.alert(account, 'low10', `Low limit: ${account.name}`, `${b.label}: ${left}% remaining.`);
+    // Alert levels come from the policy (exhausted = hardStopPct, tight = drainPct), the same
+    // numbers that drive routing and the panel's statuses. The low10 / low20 keys are kept
+    // so existing alert state survives the change.
+    const levels = this.statusLevelsFor(account.id);
+    const remaining = 100 - used;
+    if (remaining <= levels.exhaustedPct) {
+      if (used < 100 && st.armed10) await this.alert(account, 'low10', `Exhausted: ${account.name}`, `${b.label}: ${left}% remaining (policy hard stop ${levels.exhaustedPct}%).`);
       next.armed10 = false;
     } else next.armed10 = true;
-    if (used >= 80) {
-      if (used < 90 && st.armed20) await this.alert(account, 'low20', `Low limit: ${account.name}`, `${b.label}: ${left}% remaining.`);
+    if (remaining <= levels.tightPct) {
+      if (remaining > levels.exhaustedPct && st.armed20) await this.alert(account, 'low20', `Low limit: ${account.name}`, `${b.label}: ${left}% remaining (policy drain level ${levels.tightPct}%).`);
       next.armed20 = false;
     } else next.armed20 = true;
 

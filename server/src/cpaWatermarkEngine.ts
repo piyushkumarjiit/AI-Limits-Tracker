@@ -1,21 +1,22 @@
+import { DEFAULT_WATERMARK_POLICY } from './cpaWatermarkPolicy';
 export interface WatermarkPolicyConfig {
   mode?: 'off' | 'shadow' | 'enforce';
   intervalSec?: number;
   applyLatencySec?: number;
   burnRateMax?: number; // default 15
   pro?: {
-    drainPct?: number; // default 20
-    drainRecoveryPct?: number; // default 24
-    hardStopPct?: number; // default 5
-    hardStopRecoveryPct?: number; // default 8
+    drainPct?: number; // default: DEFAULT_WATERMARK_POLICY.pro
+    drainRecoveryPct?: number;
+    hardStopPct?: number;
+    hardStopRecoveryPct?: number;
     fallbackMinDwellSec?: number; // default 600 (10 mins)
     recoveryDwellSec?: number; // default 600 (10 mins)
   };
   nonPro?: {
-    drainPct?: number; // default 40
-    drainRecoveryPct?: number; // default 44
-    hardStopPct?: number; // default 2
-    hardStopRecoveryPct?: number; // default 5
+    drainPct?: number; // default: DEFAULT_WATERMARK_POLICY.nonPro
+    drainRecoveryPct?: number;
+    hardStopPct?: number;
+    hardStopRecoveryPct?: number;
   };
 }
 
@@ -87,21 +88,9 @@ const DEFAULT_INTERVAL_SEC = 60;
 const DEFAULT_APPLY_LATENCY_SEC = 5;
 const DEFAULT_HORIZON_SEC = 65; // 60 + 5
 
-const PRO_DEFAULTS = {
-  drainPct: 20,
-  drainRecoveryPct: 24,
-  hardStopPct: 5,
-  hardStopRecoveryPct: 8,
-  fallbackMinDwellSec: 600,
-  recoveryDwellSec: 600,
-};
-
-const NON_PRO_DEFAULTS = {
-  drainPct: 40,
-  drainRecoveryPct: 44,
-  hardStopPct: 2,
-  hardStopRecoveryPct: 5,
-};
+// Single source for threshold defaults: the policy module's built-in policy.
+const PRO_DEFAULTS = DEFAULT_WATERMARK_POLICY.pro;
+const NON_PRO_DEFAULTS = DEFAULT_WATERMARK_POLICY.nonPro;
 
 function clamp(val: number, min: number, max: number): number {
   if (Number.isNaN(val)) return min;
@@ -722,7 +711,7 @@ export function computeWatermarkTargets(
             state = 'unknown';
             delete nextRampStep[snap.cpaName];
           } else {
-            // Check drain threshold <= 40% (recovery >= 44%)
+            // Non-Pro drain hand-off at the policy nonPro.drainPct (recovery at drainRecoveryPct)
             const wasDrain = prev?.state === 'drain';
             const inDrain = evalDrain(
               quotaEff,

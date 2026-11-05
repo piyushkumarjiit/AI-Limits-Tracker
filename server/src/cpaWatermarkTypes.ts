@@ -3,6 +3,7 @@
  * Anchors the shared state model, overview API shape, and manual hold schemas across
  * server backend (WP-4A) and web panel frontend (WP-4B).
  */
+import type { TieredStatusLevels } from '../../src/constants/statusLevels';
 
 export type WatermarkAccountState =
   | 'healthy'
@@ -89,6 +90,10 @@ export interface WatermarkAccountView {
     http429: number;
     http5xx: number;
   };
+  /** Policy tier from classification rules (decides which levels apply). */
+  tier?: 'pro' | 'non_pro';
+  /** Whether the routing policy manages this account's weight. */
+  managed?: boolean;
 }
 
 export interface WatermarkShadowDecision {
@@ -127,6 +132,8 @@ export interface WatermarkFleetOverview {
     reason: string;
   }>;
   activeDangerAlerts: string[];
+  /** Tight / exhausted levels from the active policy (drainPct / hardStopPct per tier). */
+  statusLevels?: TieredStatusLevels;
 }
 
 export interface ManualHoldRequest {

@@ -20,7 +20,7 @@ FQD is a single Node.js (22 or 24) process that polls quota data, stores it in S
 | :--- | :--- |
 | `src/` | Code shared by the server and the web panel: provider adapters (`services/providers`), OAuth flows, capacity math, CLIProxy transport and routing planner (`services/cpa`), formatters. No Node-only APIs. |
 | `server/src/` | The server: HTTP app, auth, config validation, SQLite store, pollers, routing engines, metrics. Built to `server/dist/server.mjs`. |
-| `web/src/` | React panel. `App.tsx` holds the shell and pages; `components/` holds the overview, drawer, radar, telemetry and settings components. Built to `web/dist`. |
+| `web/src/` | React panel with four pages (Overview, Accounts, Usage, Settings) and one account panel. `App.tsx` holds the shell and data loading, `route.ts` the hash routes (every drill-down filter lives in the URL), and `components/` one folder per page. Built to `web/dist`. |
 | `tests/` | Plain `tsx` test scripts; `npm test` runs them all. `tests/vrt` holds visual-regression baselines for `npm run test:ui:vrt`. |
 | `deploy/` | Caddy configs used by `docker-compose.yml`, plus a systemd unit and nginx example for bare-metal installs. |
 
@@ -43,19 +43,18 @@ FQD is a single Node.js (22 or 24) process that polls quota data, stores it in S
 
 ## Account states
 
-The panel derives one of four states per account in `web/src/components/common/cpaUiUtils.ts` (`accountStatus`):
+The levels come from the routing policy (`policy.yaml`, or the built-in defaults in `src/constants/statusLevels.ts`): tight is the policy's `drainPct`, exhausted its `hardStopPct`, per account tier. The server reports each CLIProxy account's state from the routing engine, and the panel derives the shown state in `web/src/components/common/cpaUiUtils.ts` (`accountStatus`):
 
 1. **Cooldown** when the routing service or an operator has taken the account out of the CLIProxy pool.
-2. **Exhausted** when the tightest window is at 0% or the provider reports rate limiting while the account is still in the pool.
-3. **Tight** at 35% or below.
+2. **Exhausted** at or below the hard stop (Pro 2%, Non-Pro 5% by default), or when the provider reports rate limiting, while the account is still in the pool.
+3. **Tight** at or below the drain level (Pro 20%, Non-Pro 40% by default).
 4. **Healthy** otherwise.
 
-Every page uses this function so counts and labels agree.
+Every page uses this function so counts and labels agree. Telegram alerts and bar colours use the same levels.
 
 ## Known limitations
 
 - The overview builds one row per provider family from FQD accounts and LiteLLM usage. Families that only appear in LiteLLM (API keys) have no quota window, so they show usage and spend instead of headroom.
 - Alias-to-account shares use CLIProxy's last 24 hours; aliases that share a model share those numbers.
 - `app.ts` routes requests with a long `if` chain and also contains a fallback overview builder used when the watermark service is not configured; both are candidates for splitting into route modules.
-- `App.tsx` and `ui.tsx` are large single files; new UI should go into `web/src/components/`.
 - Metric names keep the `alt_` prefix inherited from AI Limits Tracker for dashboard compatibility.
