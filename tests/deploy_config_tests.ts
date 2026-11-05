@@ -80,7 +80,7 @@ if (!hasDocker) {
 
   for (const [mode, file] of [['public', 'Caddyfile.public'], ['internal', 'Caddyfile.internal']] as const) {
     const a = adapted[file];
-    const appService = Object.keys(configs[mode].services ?? {}).find((n) => n.startsWith('ai-limits-tracker'));
+    const appService = Object.keys(configs[mode].services ?? {}).find((n) => n.startsWith('fqd'));
     const rp = reverseProxy(a);
     assert(!!rp, `${mode}: adapted config has a reverse_proxy`);
     if (!rp) continue;
@@ -147,11 +147,11 @@ if (!hasDocker) {
   // Each profile's service set: one app service, sharing one data directory.
   for (const p of ['public', 'internal']) {
     const j = configs[p];
-    const app = j.services?.['ai-limits-tracker-web'];
+    const app = j.services?.['fqd-web'];
     const caddy = j.services?.[`caddy-${p}`];
     assert(!!app && !!caddy, `${p}: compose config parses`, j.error);
     if (!app || !caddy) continue;
-    assert(!j.services?.['ai-limits-tracker'], `${p}: only one app service runs (direct mode's name not selected)`);
+    assert(!j.services?.['fqd'], `${p}: only one app service runs (direct mode's name not selected)`);
     assert(!app.ports, `${p}: app port not published`);
     assert(app.environment?.TRUST_PROXY === '1' && app.environment?.PORT === '1455', `${p}: TRUST_PROXY=1, fixed container port`);
     const caddyfile = (caddy.volumes ?? []).filter((v: any) => v.target === '/etc/caddy/Caddyfile');
@@ -167,7 +167,7 @@ if (!hasDocker) {
     assert(!!j.volumes?.caddy_data && !!j.volumes?.caddy_config, `${p}: named caddy volumes`);
   }
   const d = configs.direct;
-  const dapp = d.services?.['ai-limits-tracker'];
+  const dapp = d.services?.['fqd'];
   assert(!!dapp && !d.services?.['caddy-public'] && !d.services?.['caddy-internal'], 'direct: caddy off, original service name kept', d.error);
   assert(dapp?.environment?.TRUST_PROXY === '0' && dapp?.environment?.PORT === '1455' && dapp?.ports?.length === 1, 'direct: TRUST_PROXY=0, fixed container port, host port published');
 

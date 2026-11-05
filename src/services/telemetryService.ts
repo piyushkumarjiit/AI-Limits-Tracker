@@ -12,6 +12,15 @@ export interface AccountTelemetry {
   completionTokens: number;
   requestCount: number;
   lastRoutedAt: string | null;
+  /** Successful requests CLIProxy has routed through this credential since it started. */
+  successCount?: number;
+  failedCount?: number;
+  /** Requests in the last hour (CLIProxy's recent 10-minute buckets). */
+  requestsLastHour?: number;
+  failedLastHour?: number;
+  /** CLIProxy has this credential disabled (out of the routing pool). */
+  disabled?: boolean;
+  proxyStatus?: string | null;
   proxySource?: 'litellm' | 'cliproxy' | 'local_estimate';
   slotId?: string;
   proxyPort?: number;
@@ -26,11 +35,24 @@ export interface GlobalTelemetryStatus {
     cliproxy: boolean;
   };
   lastCheckedAt: string;
+  /** Why a source is not contributing data, in plain words. */
+  notes?: string[];
 }
+
+/** Per-model usage over the last 24 hours, from LiteLLM spend logs. */
+export interface ModelUsage {
+  model: string;
+  requests: number;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
 
 export interface TelemetryResponse {
   global: GlobalTelemetryStatus;
   accounts: Record<string, AccountTelemetry>;
+  models?: ModelUsage[];
 }
 
 /** Formats token numbers cleanly with SI suffixes (e.g. 780k, 1.24M). */

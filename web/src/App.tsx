@@ -7,6 +7,10 @@ import {
   GatewaysSettings,
   AccountDrawer,
   CpaDangerAlert,
+  accountStatus,
+  quotaWindows,
+  ACCOUNT_STATUS_LABEL,
+  type AccountStatus,
 } from './components';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
@@ -69,44 +73,26 @@ function clock(t: number | string): string {
   return d.toLocaleString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-function getSlotLabel(acc: Account, fallbackIdx: number): string {
-  if (acc.providerType === 'claude') return '01';
+function getSlotLabel(_acc: Account, fallbackIdx: number): string {
   return String(fallbackIdx + 1).padStart(2, '0');
 }
+
+function pct(w: { remaining: number } | null): string {
+  return w ? `${Math.round(w.remaining)}%` : '-';
+}
+
+const STATUS_BADGE: Record<AccountStatus, string> = {
+  cooldown: 'badge-cool',
+  exhausted: 'badge-bad',
+  healthy: 'badge-ok',
+  tight: 'badge-warn',
+};
 
 interface AppState {
   accounts: Account[];
   lastSyncAllAt?: number;
   intervalMin?: number;
   telegram?: boolean;
-}
-
-function getMockAgyAccounts(): Account[] {
-  return Array.from({ length: 14 }).map((_, idx) => ({
-    id: `mock-agy-${idx + 1}`,
-    name: `Antigravity Slot ${idx + 1}`,
-    email: idx === 13 ? 'vishakhagemini0@gmail.com' : (idx === 10 ? 'piyushkumar.jiit@gmail.com' : `slot_${String(idx + 1).padStart(2, '0')}@gmail.com`),
-    providerType: 'antigravity' as const,
-    plan: 'AI Pro',
-    orderIndex: idx,
-    isActive: true,
-    lastStatus: 'ok' as const,
-    createdAt: new Date().toISOString(),
-  }));
-}
-
-function getMockClaudeAccount(): Account {
-  return {
-    id: 'mock-claude-1',
-    name: 'Claude Pro',
-    email: 'claude-2f8e2ab5-piyush...',
-    providerType: 'claude' as const,
-    plan: 'Pro Tier',
-    orderIndex: 0,
-    isActive: true,
-    lastStatus: 'ok' as const,
-    createdAt: new Date().toISOString(),
-  };
 }
 
 /* ---------------- Root App ---------------- */
@@ -117,12 +103,16 @@ export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [cpaOverview, setCpaOverview] = useState<WatermarkFleetOverview | null>(null);
+  const [telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
   useTick(60000);
 
   const loadCpa = useCallback(async () => {
     try {
       const ov = await api.cpaOverview();
       setCpaOverview(ov);
+    } catch {}
+    try {
+      setTelemetry(await api.telemetry());
     } catch {}
   }, []);
 
@@ -181,7 +171,7 @@ export function App() {
       break;
     }
     case 'stats':
-      page = <TelemetryVelocity accounts={accounts} />;
+      page = <TelemetryVelocity accounts={accounts} telemetry={telemetry} />;
       break;
     case 'accounts':
       page = (
@@ -192,6 +182,7 @@ export function App() {
           syncing={syncing}
           onRefresh={refreshAll}
           overview={cpaOverview}
+          telemetry={telemetry}
           onApplyHold={handleApplyHold}
         />
       );
@@ -200,7 +191,7 @@ export function App() {
       page = <AddPage accounts={accounts} go={go} reload={load} reconnectId={param} />;
       break;
     case 'alerts':
-      page = <QuotaRadar accounts={accounts} />;
+      page = <QuotaRadar accounts={accounts} overview={cpaOverview} />;
       break;
     case 'settings':
       page = <GatewaysSettings state={state} reload={load} />;
@@ -213,6 +204,7 @@ export function App() {
           syncing={syncing}
           onRefresh={refreshAll}
           overview={cpaOverview}
+          telemetry={telemetry}
           onApplyHold={handleApplyHold}
         />
       );
@@ -234,7 +226,7 @@ export function App() {
                 Fleet Quota Display
               </span>
             </div>
-            <p className="tagline">Enterprise multi-gateway quota monitor, burst routing intelligence &amp; token telemetry.</p>
+            <p className="tagline">Quota monitoring and routing control for CLIProxy and LiteLLM account fleets.</p>
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className={`filter-btn ${syncing ? 'spin' : ''}`} style={{ padding: '4px 10px', fontSize: 11 }} onClick={refreshAll} aria-label="Refresh">{syncing ? 'Refreshing…' : 'Refresh'}</button>
@@ -263,15 +255,13 @@ export function App() {
 
         {page}
 
-        {/* Enterprise Footer */}
+        {/* Footer */}
         <footer className="enterprise-footer">
-          <span>FQD v2.5.0</span>
-          <span>•</span>
-          <span>Fleet Quota Display</span>
+          <span>FQD · Fleet Quota Display</span>
           <span>•</span>
           <a href="https://github.com/piyushkumarjiit/FQD" target="_blank" rel="noreferrer">GitHub</a>
           <span>•</span>
-          <a href="#/settings">Documentation</a>
+          <a href="https://github.com/piyushkumarjiit/FQD#readme" target="_blank" rel="noreferrer">Documentation</a>
           <span>•</span>
           <span>MIT License</span>
         </footer>
@@ -419,27 +409,24 @@ const HomePage: React.FC<{
   syncing: boolean;
   onRefresh: () => void;
   overview: WatermarkFleetOverview | null;
+  telemetry: TelemetryResponse | null;
   onApplyHold: (req: HoldRequest) => Promise<void>;
 }> = ({
   state,
   go,
   overview,
+  telemetry,
   onApplyHold,
 }) => {
   const { accounts } = state;
-  const [_telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
   const [drawerAccount, setDrawerAccount] = useState<Account | null>(null);
 
-  const effectiveAccounts = accounts.length > 0 ? accounts : [...getMockAgyAccounts(), getMockClaudeAccount()];
+  const effectiveAccounts = accounts;
   const agyAccounts = effectiveAccounts.filter((a) => a.providerType === 'antigravity');
   const claudeAccounts = effectiveAccounts.filter((a) => a.providerType === 'claude');
 
-  const defaultHoverAccount = effectiveAccounts.find((_a, i) => i === 13) || effectiveAccounts[effectiveAccounts.length - 1] || effectiveAccounts[0];
+  const defaultHoverAccount = effectiveAccounts[0];
   const [hoverAccount, setHoverAccount] = useState<Account | null>(defaultHoverAccount || null);
-
-  useEffect(() => {
-    api.telemetry().then(setTelemetry).catch(() => {});
-  }, [state.lastSyncAllAt]);
 
   useEffect(() => {
     if (!hoverAccount && effectiveAccounts.length > 0) {
@@ -447,30 +434,18 @@ const HomePage: React.FC<{
     }
   }, [effectiveAccounts, hoverAccount, defaultHoverAccount]);
 
-  let totalHeadroom = 0;
-  let headroomCount = 0;
-
-  for (const a of effectiveAccounts) {
-    const ring = dualRingData(a.latestSnapshot);
-    const rem = ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : (a.latestSnapshot?.buckets?.[0]?.remainingPercent ?? 100);
-    totalHeadroom += rem;
-    headroomCount++;
-  }
-
-  const agyHeadroom = agyAccounts.length > 0
-    ? String(Math.round(agyAccounts.reduce((acc, a) => {
-        const ring = dualRingData(a.latestSnapshot);
-        return acc + (ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : 100);
-      }, 0) / agyAccounts.length))
-    : '92';
-  const claudeHeadroom = claudeAccounts.length > 0
-    ? String(Math.round(claudeAccounts.reduce((acc, a) => {
-        const ring = dualRingData(a.latestSnapshot);
-        return acc + (ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : 100);
-      }, 0) / claudeAccounts.length))
-    : '84';
-
-  const aggregateHeadroom = headroomCount > 0 ? (totalHeadroom / headroomCount).toFixed(1) : '88.4';
+  const avg = (vals: number[]) => (vals.length ? String(Math.round(vals.reduce((x, y) => x + y, 0) / vals.length)) : '-');
+  const avgWindow = (list: Account[], key: 'fiveHour' | 'weekly') =>
+    avg(list.map((a) => quotaWindows(a)[key]?.remaining).filter((v): v is number => typeof v === 'number'));
+  const bindingAvg = (list: Account[]) =>
+    avg(list.map((a) => quotaWindows(a).binding?.remaining).filter((v): v is number => typeof v === 'number'));
+  const agyHeadroom = bindingAvg(agyAccounts);
+  const claudeHeadroom = bindingAvg(claudeAccounts);
+  const fiveHourHeadroom = avgWindow(effectiveAccounts, 'fiveHour');
+  const weeklyHeadroom = avgWindow(effectiveAccounts, 'weekly');
+  const viewOf = (a: Account) => overview?.accounts.find((av) => av.accountId === a.id) || null;
+  const countOf = (st: AccountStatus) => effectiveAccounts.filter((a) => accountStatus(a, viewOf(a)) === st).length;
+  const headroomColor = (v: string) => (v === '-' ? 'var(--muted)' : Number(v) < 20 ? 'var(--bad)' : Number(v) <= 35 ? 'var(--warn)' : 'var(--ok)');
 
   return (
     <div id="tab-home" className="view-panel active">
@@ -484,23 +459,21 @@ const HomePage: React.FC<{
           <span className="stat-sub" style={{ color: 'var(--ok)' }}>{agyAccounts.length} AGY + {claudeAccounts.length} Claude</span>
         </div>
         <div className="card stat-box">
-          <span className="stat-sub">Aggregate Headroom</span>
-          <span className="stat-val" style={{ color: Number(aggregateHeadroom) < 30 ? 'var(--bad)' : Number(aggregateHeadroom) < 50 ? 'var(--warn)' : 'var(--ok)' }}>
-            {aggregateHeadroom}%
-          </span>
-          <span className="stat-sub" style={{ color: Number(aggregateHeadroom) < 30 ? 'var(--bad)' : Number(aggregateHeadroom) < 50 ? 'var(--warn)' : 'var(--ok)' }}>
-            {Number(aggregateHeadroom) >= 50 ? 'Optimal capacity' : Number(aggregateHeadroom) >= 30 ? 'Elevated load / Tight' : 'Critical exhaustion risk'}
-          </span>
+          <span className="stat-sub">5-Hour Headroom</span>
+          <span className="stat-val" style={{ color: headroomColor(fiveHourHeadroom) }}>{fiveHourHeadroom === '-' ? '-' : `${fiveHourHeadroom}%`}</span>
+          <span className="stat-sub">Fleet average</span>
         </div>
         <div className="card stat-box">
-          <span className="stat-sub">Routing Latency</span>
-          <span className="stat-val" style={{ color: 'var(--ok)' }}>18ms</span>
-          <span className="stat-sub">CLIProxy + LiteLLM</span>
+          <span className="stat-sub">Weekly Headroom</span>
+          <span className="stat-val" style={{ color: headroomColor(weeklyHeadroom) }}>{weeklyHeadroom === '-' ? '-' : `${weeklyHeadroom}%`}</span>
+          <span className="stat-sub">Fleet average</span>
         </div>
         <div className="card stat-box">
-          <span className="stat-sub">Active Gateways</span>
-          <span className="stat-val" style={{ color: 'var(--purple)' }}>2 Live</span>
-          <span className="stat-sub">CLIProxy &amp; LiteLLM</span>
+          <span className="stat-sub">Needs Attention</span>
+          <span className="stat-val" style={{ color: countOf('exhausted') ? 'var(--bad)' : 'var(--ok)' }}>
+            {countOf('exhausted')} {ACCOUNT_STATUS_LABEL.exhausted}
+          </span>
+          <span className="stat-sub">{countOf('cooldown')} in {ACCOUNT_STATUS_LABEL.cooldown} · {countOf('tight')} {ACCOUNT_STATUS_LABEL.tight}</span>
         </div>
       </div>
 
@@ -525,14 +498,8 @@ const HomePage: React.FC<{
           account={drawerAccount}
           accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
           onApplyHold={onApplyHold}
-          telemetry={{
-            slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
-            proxyPort: 8317,
-            totalTokens: 1450000,
-            promptTokens: 1100000,
-            completionTokens: 350000,
-            requestCount: 45,
-          }}
+          telemetry={telemetry?.accounts[drawerAccount.id] ?? null}
+          telemetryNotes={telemetry?.global.notes}
           onClose={() => setDrawerAccount(null)}
           onViewFleet={() => {
             setDrawerAccount(null);
@@ -553,6 +520,7 @@ const AccountsPage: React.FC<{
   syncing: boolean;
   onRefresh: () => void;
   overview: WatermarkFleetOverview | null;
+  telemetry: TelemetryResponse | null;
   onApplyHold: (req: HoldRequest) => Promise<void>;
 }> = ({
   accounts,
@@ -561,9 +529,10 @@ const AccountsPage: React.FC<{
   syncing: _syncing,
   onRefresh: _onRefresh,
   overview,
+  telemetry,
   onApplyHold,
 }) => {
-  const [filterHealth, setFilterHealth] = useState<'all' | 'healthy' | 'tight'>('all');
+  const [filterHealth, setFilterHealth] = useState<'all' | AccountStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [providerFilter, setProviderFilter] = useState<'all' | 'antigravity' | 'claude'>('all');
   const [drawerAccount, setDrawerAccount] = useState<Account | null>(null);
@@ -579,26 +548,13 @@ const AccountsPage: React.FC<{
     status: true,
   });
 
-  const effectiveAccounts = accounts.length > 0 ? accounts : [...getMockAgyAccounts(), getMockClaudeAccount()];
+  const effectiveAccounts = accounts;
 
-  const getAccountRem = (a: Account, idx: number) => {
-    const isClaude = a.providerType === 'claude';
-    if (a.email?.includes('vishakha') || (!isClaude && idx === 13)) return 34;
-    const ring = dualRingData(a.latestSnapshot);
-    // 5H column: inner is the 5-hour window when both exist; outer is the weekly (or only) window.
-    const win = ring.inner ?? ring.outer;
-    if (win) return Math.round(win.remaining);
-    return isClaude ? 84 : 78;
-  };
+  const viewOf = (a: Account) => overview?.accounts.find((av) => av.accountId === a.id) || null;
+  const statusOf = (a: Account) => accountStatus(a, viewOf(a));
+  const countOf = (st: AccountStatus) => effectiveAccounts.filter((a) => statusOf(a) === st).length;
 
-  const healthyAccounts = effectiveAccounts.filter((a, idx) => getAccountRem(a, idx) > 35);
-  const tightAccounts = effectiveAccounts.filter((a, idx) => getAccountRem(a, idx) <= 35);
-
-  let filtered = filterHealth === 'all'
-    ? effectiveAccounts
-    : filterHealth === 'healthy'
-    ? healthyAccounts
-    : tightAccounts;
+  let filtered = filterHealth === 'all' ? effectiveAccounts : effectiveAccounts.filter((a) => statusOf(a) === filterHealth);
 
   if (providerFilter !== 'all') {
     filtered = filtered.filter(a => a.providerType === providerFilter);
@@ -640,16 +596,16 @@ const AccountsPage: React.FC<{
           res = a.providerType.localeCompare(b.providerType);
           break;
         case 'burst':
-          res = getAccountRem(a, aIdx) - getAccountRem(b, bIdx);
+          res = (quotaWindows(a).fiveHour?.remaining ?? 101) - (quotaWindows(b).fiveHour?.remaining ?? 101);
           break;
         case 'cycle':
-          res = (a.providerType === 'claude' ? 100 : 68) - (b.providerType === 'claude' ? 100 : 68);
+          res = (quotaWindows(a).weekly?.remaining ?? 101) - (quotaWindows(b).weekly?.remaining ?? 101);
           break;
         case 'reset':
-          res = (a.email?.includes('vishakha') ? 1 : 0) - (b.email?.includes('vishakha') ? 1 : 0);
+          res = String(quotaWindows(a).fiveHour?.bucket.resetsAt ?? '~').localeCompare(String(quotaWindows(b).fiveHour?.bucket.resetsAt ?? '~'));
           break;
         case 'status':
-          res = (getAccountRem(a, aIdx) <= 35 ? 1 : 0) - (getAccountRem(b, bIdx) <= 35 ? 1 : 0);
+          res = statusOf(a).localeCompare(statusOf(b));
           break;
         default:
           res = 0;
@@ -657,7 +613,7 @@ const AccountsPage: React.FC<{
       return sortDir === 'asc' ? res : -res;
     });
     return list;
-  }, [filtered, sortKey, sortDir, effectiveAccounts]);
+  }, [filtered, sortKey, sortDir, effectiveAccounts, overview]);
 
   const renderSortIndicator = (key: string) => {
     if (sortKey !== key) return <span className="sort-icon">↕</span>;
@@ -670,27 +626,33 @@ const AccountsPage: React.FC<{
 
       {/* Filter Toolbar */}
       <div className="filter-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          className={`filter-btn ${filterHealth === 'all' ? 'active' : ''}`}
-          onClick={() => setFilterHealth('all')}
-        >
+        <button className={`filter-btn ${filterHealth === 'all' ? 'active' : ''}`} onClick={() => setFilterHealth('all')}>
           All ({effectiveAccounts.length})
         </button>
-        <button
-          className={`filter-btn ${filterHealth === 'healthy' ? 'active' : ''}`}
-          onClick={() => setFilterHealth('healthy')}
-        >
-          Healthy ({healthyAccounts.length})
-        </button>
-        <button
-          className={`filter-btn ${filterHealth === 'tight' ? 'active' : ''}`}
-          style={{ borderColor: '#f59e0b', color: '#f59e0b' }}
-          onClick={() => setFilterHealth('tight')}
-        >
-          Tight ({tightAccounts.length})
-        </button>
+        {(['cooldown', 'exhausted', 'healthy', 'tight'] as AccountStatus[]).map((st) => (
+          <button key={st} className={`filter-btn ${filterHealth === st ? 'active' : ''}`} onClick={() => setFilterHealth(st)}>
+            {ACCOUNT_STATUS_LABEL[st]} ({countOf(st)})
+          </button>
+        ))}
 
-        {/* Clean Search Input (No Search Emoji Icon) */}
+        {/* Provider Filter Dropdown */}
+        <select
+          value={providerFilter}
+          onChange={(e) => setProviderFilter(e.target.value as any)}
+          style={{
+            background: 'var(--card-hi)',
+            color: '#fff',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            padding: '5px 10px',
+            fontSize: 12,
+          }}
+        >
+          <option value="all">All Providers</option>
+          <option value="antigravity">Google Antigravity</option>
+          <option value="claude">Claude Code</option>
+        </select>
+
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <input
             type="text"
@@ -724,24 +686,6 @@ const AccountsPage: React.FC<{
             </button>
           )}
         </div>
-
-        {/* Provider Filter Dropdown */}
-        <select
-          value={providerFilter}
-          onChange={(e) => setProviderFilter(e.target.value as any)}
-          style={{
-            background: 'var(--card-hi)',
-            color: '#fff',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            padding: '5px 10px',
-            fontSize: 12,
-          }}
-        >
-          <option value="all">All Providers</option>
-          <option value="antigravity">Google Antigravity</option>
-          <option value="claude">Claude Code</option>
-        </select>
 
         <ColumnPicker
           columns={[
@@ -810,14 +754,12 @@ const AccountsPage: React.FC<{
           <tbody>
             {sortedAccounts.map((a) => {
               const idx = effectiveAccounts.indexOf(a);
-              const isClaude = a.providerType === 'claude';
-              const burstRem = getAccountRem(a, idx);
-              const isTight = burstRem <= 35;
-              const ring = dualRingData(a.latestSnapshot);
-              const cycleRem = Math.round(ring.inner ? ring.inner.remaining : (isTight ? 68 : 88));
-              const slotStr = isClaude ? 'slot_01' : `slot_${String(idx + 1).padStart(2, '0')}`;
+              const { fiveHour, weekly } = quotaWindows(a);
+              const status = statusOf(a);
+              const isTight = status !== 'healthy';
+              const slotStr = `slot_${getSlotLabel(a, idx)}`;
               const provStr = a.providerType === 'antigravity' ? 'Google' : a.providerType === 'claude' ? 'Anthropic' : a.providerType;
-              const resetStr = isTight ? 'in 1h 14m' : (isClaude ? 'in 3h 10m' : 'Rolling clear');
+              const resetStr = fiveHour?.bucket.resetsAt ? formatResetCountdown(fiveHour.bucket.resetsAt) : '-';
 
               return (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setDrawerAccount(a)}>
@@ -826,12 +768,12 @@ const AccountsPage: React.FC<{
                   {visibleCols.provider && <td>{provStr}</td>}
                   {visibleCols.burst && (
                     <td>
-                      <span style={{ color: isTight ? '#fbbf24' : '#4ade80', fontWeight: 700 }}>
-                        {burstRem}% ({isTight ? '45 reqs' : '156 reqs'})
+                      <span style={{ color: (fiveHour?.remaining ?? 100) <= 35 ? '#fbbf24' : '#4ade80', fontWeight: 700 }}>
+                        {pct(fiveHour)}
                       </span>
                     </td>
                   )}
-                  {visibleCols.cycle && <td>{a.providerType === 'claude' ? 'Pro Tier' : `${cycleRem}% Balance`}</td>}
+                  {visibleCols.cycle && <td>{pct(weekly)}</td>}
                   {visibleCols.reset && (
                     <td>
                       <span style={{ color: isTight ? '#f59e0b' : 'var(--muted)', fontSize: 11 }}>
@@ -841,8 +783,8 @@ const AccountsPage: React.FC<{
                   )}
                   {visibleCols.status && (
                     <td>
-                      <span className={`badge ${isTight ? 'badge-warn' : 'badge-ok'}`}>
-                        {isTight ? 'Tight' : 'Healthy'}
+                      <span className={`badge ${STATUS_BADGE[status]}`}>
+                        {ACCOUNT_STATUS_LABEL[status]}
                       </span>
                     </td>
                   )}
@@ -859,17 +801,8 @@ const AccountsPage: React.FC<{
           account={drawerAccount}
           accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
           onApplyHold={onApplyHold}
-          telemetry={{
-            accountId: drawerAccount.id,
-            slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
-            proxyPort: 8317,
-            totalTokens: 1450000,
-            promptTokens: 1100000,
-            completionTokens: 350000,
-            requestCount: 45,
-            lastRoutedAt: new Date().toISOString(),
-            proxySource: drawerAccount.providerType === 'claude' ? 'litellm' : 'cliproxy',
-          }}
+          telemetry={telemetry?.accounts[drawerAccount.id] ?? null}
+          telemetryNotes={telemetry?.global.notes}
           onClose={() => setDrawerAccount(null)}
           onViewFleet={() => setDrawerAccount(null)}
         />

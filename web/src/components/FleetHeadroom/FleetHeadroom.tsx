@@ -26,10 +26,9 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
   claudeHeadroom,
 }) => {
   const [capView, setCapView] = useState<'auto' | 'cell' | 'matrix' | 'aggregate'>('auto');
-  const [simSize, setSimSize] = useState<number>(15);
 
   const activeView = capView === 'auto'
-    ? (simSize <= 20 ? 'cell' : simSize <= 40 ? 'matrix' : 'aggregate')
+    ? (effectiveAccounts.length <= 20 ? 'cell' : effectiveAccounts.length <= 40 ? 'matrix' : 'aggregate')
     : capView;
 
   return (
@@ -38,13 +37,6 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
         <div>
           <div className="fqd-fleet-headroom__title-wrap" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="card-title">Fleet Headroom Capacity</span>
-            <span
-              className="fqd-fleet-headroom__info-icon"
-              style={{ cursor: 'pointer', fontSize: 13, color: 'var(--muted)', display: 'inline-flex', alignItems: 'center' }}
-              title="Auto-scales across Cell (?20) ? Matrix (?2 rows) ? Aggregate (>2 rows)"
-            >
-              ?
-            </span>
           </div>
         </div>
         <div className="fqd-fleet-headroom__controls" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -59,16 +51,7 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
             <option value="matrix">Matrix View</option>
             <option value="aggregate">Aggregate View</option>
           </select>
-          <div style={{ display: 'flex', gap: 3 }}>
-            <button className={`filter-btn ${simSize === 15 ? 'active' : ''}`} style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => { setSimSize(15); setCapView('auto'); }}>15</button>
-            <button className={`filter-btn ${simSize === 32 ? 'active' : ''}`} style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => { setSimSize(32); setCapView('auto'); }}>32</button>
-            <button className={`filter-btn ${simSize === 120 ? 'active' : ''}`} style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => { setSimSize(120); setCapView('auto'); }}>120</button>
-          </div>
         </div>
-      </div>
-
-      <div id="cap-mode-indicator" className="fqd-fleet-headroom__indicator" style={{ fontSize: 10, color: '#60a5fa', marginBottom: 10, background: 'rgba(59,130,246,0.1)', padding: '4px 10px', borderRadius: 6, display: 'inline-block' }}>
-        Mode: <strong>{capView.toUpperCase()}</strong> ? <strong>{simSize} Accounts ({simSize <= 20 ? '?20' : simSize <= 40 ? '?2 rows' : '>2 rows'})</strong> ? Rendering <strong>{activeView.toUpperCase()} View</strong>
       </div>
 
       {/* 1. Cell View */}
@@ -76,7 +59,7 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
         <div id="view-cap-cell" className="scale-box" style={{ borderLeft: '3px solid var(--blue)' }}>
           <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
             <span><strong>Google Antigravity</strong> ({agyAccounts.length} Accounts)</span>
-            <span style={{ color: 'var(--ok)' }}><strong>{agyHeadroom}% Headroom</strong></span>
+            <span style={{ color: 'var(--ok)' }}><strong>{agyHeadroom === '-' ? 'No data' : `${agyHeadroom}% Headroom`}</strong></span>
           </div>
           <div className="gradient-bar-track">
             {agyAccounts.map((acc, idx) => {
@@ -121,7 +104,7 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
 
           <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 12, marginBottom: 6 }}>
             <span><strong>Claude Code</strong> ({claudeAccounts.length} Account)</span>
-            <span style={{ color: 'var(--ok)' }}><strong>{claudeHeadroom}% Headroom</strong></span>
+            <span style={{ color: 'var(--ok)' }}><strong>{claudeHeadroom === '-' ? 'No data' : `${claudeHeadroom}% Headroom`}</strong></span>
           </div>
           <div className="gradient-bar-track fqd-fleet-headroom__claude-track" style={{ height: 48, display: 'flex', gap: 4, justifyContent: 'flex-start' }}>
             {claudeAccounts.map((acc) => {
@@ -154,7 +137,7 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
                   </div>
                   <div className="grad-segment-tooltip" style={{ borderColor: '#ea580c' }}>
                     <strong>{acc.email || acc.name}</strong><br />
-                    {Math.round(rem)}% Available ? Anthropic Rolling
+                    {Math.round(rem)}% available · Anthropic rolling
                   </div>
                 </div>
               );
@@ -174,7 +157,7 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
                   <strong style={{ color: '#fff' }}>{hoverAccount.email || hoverAccount.name}</strong>
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <span style={{ color: h.color, fontWeight: 700 }}>{h.rem}% ({h.reqs} reqs)</span>
+                  <span style={{ color: h.color, fontWeight: 700 }}>{h.rem}%</span>
                   <span className={`badge ${h.badge}`}>{h.label}</span>
                 </div>
               </div>

@@ -30,7 +30,7 @@ export const ColumnPicker: React.FC<ColumnPickerProps> = ({
         aria-expanded={open}
         aria-label="Toggle visible columns"
       >
-        Columns ?
+        Columns
       </button>
 
       {open && (

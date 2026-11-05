@@ -6,6 +6,7 @@ import type {
 } from '../../../../server/src/cpaWatermarkTypes';
 import { effectiveAccountState } from '../../../../server/src/cpaWatermarkTypes';
 import type { Account } from '../../api';
+import { dualRingData, type RingWindow } from '../../../../src/services/capacity';
 
 /* ---------------- 2. Invariant Violation Detection ---------------- */
 
@@ -174,4 +175,48 @@ export function deriveRoutingEnforcement(
     weight,
     badgeClass,
   };
+}
+
+/* ---------------- 4. Account Status ---------------- */
+
+export type AccountStatus = 'cooldown' | 'exhausted' | 'healthy' | 'tight';
+
+export const TIGHT_THRESHOLD = 35;
+
+export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
+  cooldown: 'Cooldown',
+  exhausted: 'Exhausted',
+  healthy: 'Healthy',
+  tight: 'Tight',
+};
+
+/** The 5-hour and weekly windows of an account, each null when the provider does not report it. */
+export function quotaWindows(account: Account): { fiveHour: RingWindow | null; weekly: RingWindow | null; binding: RingWindow | null } {
+  const ring = dualRingData(account.latestSnapshot);
+  const all = [ring.outer, ring.inner].filter((w): w is RingWindow => Boolean(w));
+  return {
+    fiveHour: all.find((w) => w.short === '5h') ?? null,
+    weekly: all.find((w) => w.short === '7d') ?? null,
+    binding: ring.binding,
+  };
+}
+
+/**
+ * Cooldown: FQD or an admin took the account out of the CLIProxy pool.
+ * Exhausted: quota hit 0% (or upstream rate-limited) while still in the pool, so callers get 429s.
+ */
+export function accountStatus(account: Account, accountView?: WatermarkAccountView | null): AccountStatus {
+  if (
+    accountView &&
+    (accountView.manualHold !== 'none' ||
+      accountView.isDisabled ||
+      accountView.state === 'quarantined' ||
+      accountView.state === 'airgapped')
+  ) {
+    return 'cooldown';
+  }
+  const binding = dualRingData(account.latestSnapshot).binding;
+  if (account.latestSnapshot?.status === 'rate_limited' || (binding && binding.remaining <= 0)) return 'exhausted';
+  if (binding && binding.remaining <= TIGHT_THRESHOLD) return 'tight';
+  return 'healthy';
 }

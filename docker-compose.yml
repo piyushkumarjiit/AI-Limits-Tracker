@@ -9,8 +9,8 @@
 # mixed with --profile: both would start, and both modes bind host 80/443 and ./data.
 
 x-app-base: &app-base
-  image: ghcr.io/piyushkumarjiit/ai-limits-tracker:latest
-  build: .
+  image: ghcr.io/piyushkumarjiit/fqd:latest
+  # Uses the published image; to run local changes instead: docker build -t ghcr.io/piyushkumarjiit/fqd:latest .
   # The container runs as UID 1000; ./data must be writable by it:
   #   mkdir -p data && sudo chown 1000:1000 data
   volumes:
@@ -35,9 +35,7 @@ x-app-base: &app-base
 
 services:
   # Caddy modes: reachable only through Caddy, never published to the host.
-  # New name: direct mode keeps `ai-limits-tracker` so existing deployments are
-  # not orphaned by a rename.
-  ai-limits-tracker-web:
+  fqd-web:
     <<: *app-base
     profiles: ["public", "internal"]
     environment:
@@ -47,7 +45,7 @@ services:
       PORT: "1455"
 
   # Caddy off: original behaviour, app port published on the host.
-  ai-limits-tracker:
+  fqd:
     <<: *app-base
     profiles: ["direct"]
     ports:
@@ -62,7 +60,7 @@ services:
     image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     profiles: ["public"]
     depends_on:
-      - ai-limits-tracker-web
+      - fqd-web
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"

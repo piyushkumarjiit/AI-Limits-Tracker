@@ -24,6 +24,10 @@ import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cp
 import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
 import { TelemetryService } from './telemetry';
+import { sendTelegram } from './notify';
+
+/** Shared so the telemetry TTL cache survives across requests. */
+let defaultTelemetry: TelemetryService | undefined;
 import {
   type WatermarkFleetOverview,
   type WatermarkAccountView,
@@ -634,8 +638,8 @@ async function handleApi(
   }
 
   if (path === '/api/telemetry' && method === 'GET') {
-  const service = deps.telemetryService ?? new TelemetryService();
-  const accounts = store.listAccounts().map((a) => a.id);
+  const service = deps.telemetryService ?? (defaultTelemetry ??= new TelemetryService());
+  const accounts = store.listAccounts().map((a) => ({ id: a.id, email: a.email }));
   const telemetry = await service.getTelemetry(accounts);
   return send(res, 200, telemetry);
 }
@@ -743,6 +747,10 @@ async function handleApi(
   }
 
   if (path === '/api/alerts' && method === 'GET') return send(res, 200, { alerts: store.alerts(100) });
+  if (path === '/api/telegram/test' && method === 'POST') {
+    const result = await sendTelegram('FQD test message', 'Telegram alerts are configured correctly.');
+    return send(res, result.ok ? 200 : 400, result.ok ? { ok: true } : { error: result.error });
+  }
   if (path === '/api/alerts' && method === 'DELETE') {
     store.clearAlerts();
     return send(res, 200, { ok: true });
