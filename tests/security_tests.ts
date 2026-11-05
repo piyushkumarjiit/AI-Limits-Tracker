@@ -110,7 +110,7 @@ function sessionCookieFrom(res: Response): string | null {
 
 async function runAllTests() {
   console.log('\n========================================');
-  console.log('  AI LIMITS TRACKER - SECURITY TESTS    ');
+  console.log('  FQD - SECURITY TESTS    ');
   console.log('========================================\n');
 
   console.log('Suite 1: Login');

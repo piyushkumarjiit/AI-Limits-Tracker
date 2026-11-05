@@ -1,0 +1,19 @@
+[Unit]
+Description=FQD server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/fqd
+EnvironmentFile=/opt/fqd/server/.env
+ExecStart=/usr/bin/node /opt/fqd/server/dist/server.mjs
+Restart=always
+RestartSec=3
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/fqd/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
