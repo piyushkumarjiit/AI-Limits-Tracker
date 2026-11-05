@@ -11,9 +11,9 @@
 <img src="https://img.shields.io/badge/Gateways-CLIProxy%20·%20LiteLLM-38bdf8" alt="Supported gateways" />
 
 <br/><br/>
-<img src="docs/screenshot-overview.png" width="92%" alt="FQD overview page showing fleet headroom, account states and attention list" />
+<img src="docs/screenshots/overview.png" width="92%" alt="FQD Overview: exhausted-account warning, four headroom tiles, headroom by provider and the Needs attention list" />
 
-<sub>Overview of a real 15-account fleet (email addresses anonymised).</sub>
+<sub>The Overview page, shown with sample accounts.</sub>
 
 </div>
 
@@ -21,27 +21,26 @@
 
 ## What FQD does
 
-If you route coding agents through a pool of subscription accounts (Google Antigravity, Claude, ChatGPT/Codex, Gemini CLI) with [CLIProxy](https://github.com/router-for-me/CLIProxyAPI) or [LiteLLM](https://github.com/BerriAI/litellm), FQD tells you how much quota each account has left and can keep exhausted accounts out of the pool.
+If you route coding agents through a pool of subscription accounts (Google Antigravity, Claude, ChatGPT/Codex, Gemini CLI) with [CLIProxy](https://github.com/router-for-me/CLIProxyAPI) or [LiteLLM](https://github.com/BerriAI/litellm), FQD shows how much quota each account has left and can take accounts out of the pool before they run dry.
 
-- **Per-account quota windows.** Reads the 5-hour and weekly limits each provider reports, with reset countdowns, burn rate and projected exhaustion time.
-- **Four account states**, used the same way across every page. The levels come from the routing policy ([`deploy/policy.example.yaml`](deploy/policy.example.yaml)); the defaults below are for Pro accounts (Non-Pro: tight at 40%, exhausted at 5%).
+- **Every quota window a provider reports**, with reset countdowns: 5-hour and weekly limits, per-model windows (Claude Opus / Sonnet, Antigravity Gemini and Claude/GPT), monthly or daily limits for other services.
+- **One status per account, the same on every page**, decided by your routing policy:
 
-  | State | Meaning |
+  | Status | Meaning |
   | :--- | :--- |
-  | Healthy | Tightest window above the drain level (20%) |
-  | Tight | Tightest window at or below the drain level (20%) |
-  | Exhausted | At or below the hard stop (2%), or rate-limited, while still receiving traffic |
-  | Cooldown | Taken out of the CLIProxy pool by FQD or an operator |
+  | Healthy | Tightest window above the policy's drain level |
+  | Tight | At or below the drain level: running low |
+  | Exhausted | At or below the hard stop, or rate-limited, while still in the pool: callers may get 429 errors |
+  | Cooldown | Out of the CLIProxy pool, taken out by FQD's policy or by an operator |
 
-- **CLIProxy pool control.** Discovers the credentials CLIProxy is serving, then plans routing weights from headroom. In `shadow` mode (the default) it only logs what it would do; in `enforce` mode it sets weight 0 and disables exhausted accounts, and restores them after they recover. Operators can also take an account out of rotation by hand with Cooldown in the account panel.
-- **Proxy telemetry.** Requests and tokens per account and model from CLIProxy.
-- **Usage by alias.** Requests, failures, tokens and spend for each LiteLLM alias over today, 7 or 30 days, expandable to the models behind the alias and the CLIProxy accounts that served them. Providers seen only in LiteLLM (for example a DeepSeek API key) get their own overview row automatically.
-- **Machine-readable output.** `GET /api/quota` (JSON) and `GET /metrics` (Prometheus) for dashboards and alerting.
-- **Alerts.** Low-quota, reset and re-login alerts in the app, and optionally in Telegram.
+- **Routing control for CLIProxy.** In `enforce` mode FQD drains accounts that are running low and disables exhausted ones, then brings them back after their quota resets. See [Routing policy and enforce mode](#routing-policy-and-enforce-mode).
+- **Usage and spend.** Requests, failures, tokens and spend per LiteLLM alias, broken down to the models and CLIProxy accounts that served them, plus live request counts per account from CLIProxy.
+- **Alerts** in Telegram when an account gets tight or exhausted, recovers, or needs signing in again.
+- **Machine-readable output.** `GET /api/quota` (JSON) and `GET /metrics` (Prometheus).
 
 ### Data honesty
 
-FQD never invents numbers. Percentages come from the providers' own usage endpoints; burn rates and exhaustion times are derived from how those percentages change between polls. When a provider does not report a window or a reset time, FQD shows "not reported" or "No data" rather than a placeholder. Quota polling only reads usage endpoints and never sends prompts.
+FQD never invents numbers. Percentages come from the providers' own usage endpoints; burn rates and exhaustion times are derived from how those percentages change between polls. When a provider does not report a window or a reset time, FQD says "not reported" rather than showing a placeholder. Quota polling only reads usage endpoints and never sends prompts.
 
 ---
 
@@ -84,20 +83,123 @@ All integrations are configured through environment variables; see [`.env.exampl
 | :--- | :--- | :--- |
 | CLIProxy | `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY` | Account discovery, quota and routing. Plain `http://` is accepted only for loopback and private-network addresses. |
 | CLIProxy request counts | `CPA_USAGE_POLL_SEC` | Needs `usage-statistics-enabled` in the CLIProxy config (v8+). |
-| Routing mode | `CPA_ROUTING_MODE` | `off`, `shadow` (default) or `enforce`. Enforce requires CLIProxy's weighted round-robin strategy. Overrides the policy file's mode. |
-| Routing policy | `CPA_WATERMARK_POLICY_FILE` | Optional YAML with the tight / exhausted levels and account tiers; see [`deploy/policy.example.yaml`](deploy/policy.example.yaml). |
-| LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Usage by alias, model and provider. Use a read-only `proxy_admin_viewer` user key and not your master key. |
+| Routing policy | `CPA_WATERMARK_POLICY_FILE` | YAML with the status levels, account tiers and routing mode; see [`deploy/policy.example.yaml`](deploy/policy.example.yaml). Without a file FQD uses the defaults shown there. |
+| Routing mode | `CPA_ROUTING_MODE` | `off`, `shadow` or `enforce`. Overrides the mode in the policy file. |
+| LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Usage by alias, model and provider. Use a read-only key (see below), never your master key. |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional alert channel. |
 
-Accounts that CLIProxy does not serve can be added directly from the Accounts page.
+Accounts that CLIProxy does not serve can be added directly from the Accounts page; FQD then signs in and polls them itself.
 
-For LiteLLM key, only use a read-only key and never your master key. You can create a user with the proxy_admin_viewer role and generate a key for it. FQD only reads LiteLLM's daily usage summary and model list; it never creates keys, changes settings or sends requests through your models, and the key is sent only to the LITELLM_URL you configure.
+FQD only reads LiteLLM's daily usage summary and model list; it never creates keys, changes settings or sends requests through your models, and the key is sent only to `LITELLM_URL`. Create a read-only user for it:
 
 ```bash
 curl -X POST http://<litellm>:4000/user/new \
   -H "Authorization: Bearer MASTER_KEY" -H "Content-Type: application/json" \
   -d '{"user_role": "proxy_admin_viewer", "user_alias": "fqd-telemetry"}'
 ```
+
+---
+
+## How to use FQD
+
+FQD has four pages. Start on **Overview**: it answers whether anything needs you, and every number on it opens the page that explains it, already filtered to what you clicked. One account opens in a side panel without leaving the page. Filters live in the URL, so the browser's Back button works and a filtered view can be bookmarked or shared.
+
+### Overview
+
+- **Exhausted warning.** The only banner FQD shows: accounts out of quota that are still in the pool, and when the next one comes back. Click it to see those accounts, or dismiss it until another account runs out.
+- **Four tiles.** Number of accounts, average 5-hour and weekly headroom (with the lowest account), and LiteLLM usage for the last 7 days. Each opens Accounts or Usage, sorted or filtered to match.
+- **Headroom by provider.** One row per provider family, built from your accounts and LiteLLM usage. Each bar is one account (its tightest window, coloured by status); click a bar to open that account, click the row to list its accounts in place, or click the request count to see that provider's usage. Providers that only exist in LiteLLM (for example a DeepSeek API key) open Usage directly.
+- **Needs attention.** Exhausted accounts first, then tight ones, each with the reason and reset time in plain words.
+
+### Accounts
+
+<img src="docs/screenshots/accounts.png" width="92%" alt="Accounts page filtered to accounts that need attention, opened from the Overview" />
+
+Every account in one list. Filter by status or provider, search by name, email or slot, sort by any column, and switch between the table and a card per account. When you arrive from the Overview, a bar at the top shows what you clicked; remove a filter there or go back.
+
+### Account panel
+
+<img src="docs/screenshots/account-panel.png" width="92%" alt="Account panel with one bar per quota window, proxy traffic and the Cooldown action" />
+
+Click any account to open it. The panel shows:
+
+- **Why it has its status**, in one sentence.
+- **One bar per quota window the provider reports**, in the provider's order and with its own labels.
+- **Proxy traffic** from CLIProxy: requests in the last hour and since the proxy started, tokens in the last 24 hours, and requests per model.
+- **Display name.** Click the pencil next to the name to rename the account in FQD.
+- **Actions that apply to this account.** For CLIProxy accounts, **Cooldown** takes the account out of the pool immediately (weight 0 and disabled, in any routing mode) for 24 hours, and **Return to rotation** brings it back early. For accounts added directly in FQD, **Reconnect** signs in again and **Delete** removes the account and its stored credentials. CLIProxy accounts are managed in CLIProxy, so FQD does not offer Delete for them.
+
+### Usage
+
+<img src="docs/screenshots/usage.png" width="92%" alt="Usage page with tiles, usage by alias expanded to the accounts that served it, and account traffic" />
+
+Requests, spend, failures and tokens per LiteLLM alias for today, 7 or 30 days. Click an alias to see the models behind it and how its requests were shared across CLIProxy accounts (CLIProxy keeps the last 24 hours). Below, **Account traffic** lists live CLIProxy request counts per account.
+
+### Settings
+
+<img src="docs/screenshots/settings.png" width="92%" alt="Settings page with CLIProxy, LiteLLM and Telegram status, the refresh interval and the status levels from the policy" />
+
+Connection status and address of CLIProxy and LiteLLM, the routing mode and CLIProxy's routing strategy, Telegram alerts (with a test message), how often FQD polls providers, **Refresh now**, and the status levels your policy uses. Connections are configured through environment variables, not here. The green or red dots next to CLIProxy and LiteLLM at the top of every page link to this page.
+
+---
+
+## Routing policy and enforce mode
+
+FQD always computes a status for every account. Whether it also changes routing in CLIProxy depends on the routing mode:
+
+| Mode | What FQD does |
+| :--- | :--- |
+| `off` | Leaves routing alone. |
+| `shadow` (default) | Works out what it would change and records it, without touching CLIProxy. |
+| `enforce` | Changes CLIProxy weights: drains accounts that are running low (weight 1, so sessions in progress finish while new sessions go elsewhere), disables exhausted ones (weight 0 and disabled), and ramps them back (25, 50, 100) after they recover. |
+
+### Turning on enforce mode
+
+1. **Switch CLIProxy to weighted round-robin.** FQD steers traffic by changing each credential's weight, and CLIProxy only honours weights with this strategy. In CLIProxy's `config.yaml`:
+
+   ```yaml
+   routing:
+     strategy: "weighted-round-robin"   # not "round-robin" or "fill-first"
+   ```
+
+   Restart CLIProxy. Every credential starts with weight 1, so traffic is shared exactly as before until FQD changes a weight. Session affinity settings keep working.
+
+2. **Write a policy file** (optional). Copy [`deploy/policy.example.yaml`](deploy/policy.example.yaml), set `CPA_WATERMARK_POLICY_FILE` to its path, and adjust the levels and tiers. FQD reloads the file when it changes.
+
+3. **Watch it in `shadow` first.** Leave the mode at `shadow` for a while and check that the statuses on Accounts match what you expect.
+
+4. **Set the mode to `enforce`**, in the policy file (`mode: enforce`) or with `CPA_ROUTING_MODE=enforce`.
+
+If the mode is `enforce` but CLIProxy's strategy is not `weighted-round-robin`, FQD does not change any weights. Settings shows **enforce (paused)** with a notice, and the server log says so:
+
+<img src="docs/screenshots/settings-enforce-paused.png" width="70%" alt="Settings showing enforce mode paused because CLIProxy uses round-robin" />
+
+**Cooldown** in the account panel does not depend on the strategy: it disables the credential in CLIProxy directly, in any mode.
+
+### Status levels and tiers
+
+The policy sets two levels per tier, as percent of quota left in an account's tightest window:
+
+| Level | Policy key | Status | In enforce mode | Default: Pro | Default: Non-Pro |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Drain | `drainPct` | Tight | Weight 1 | 20% | 40% |
+| Hard stop | `hardStopPct` | Exhausted | Weight 0, disabled | 2% | 5% |
+
+Each level has a recovery point a little higher (`drainRecoveryPct`, `hardStopRecoveryPct`) so accounts do not flap in and out. FQD also stops an account early when its current burn rate would cross the hard stop before the next check. The same levels drive the status badges, bar colours and Telegram alerts, so what you see is what FQD does.
+
+**Tiers** are FQD's own, not the provider's plans. Pro accounts serve traffic first. Non-Pro accounts are a fallback pool: they take traffic only when no Pro account of the same provider can, and they are allowed to run lower. Classification rules in the policy assign the tier by matching CLIProxy's credential file name, for any provider:
+
+```yaml
+classificationRules:
+  - pattern: "*claude*"         # glob on the CLIProxy auth file name; first match wins
+    provider: anthropic
+    tier: non_pro
+    modality: subscription_pool
+    managed: true               # false = FQD never changes this account's weight
+```
+
+Without classification rules, every CLIProxy account is a managed Pro account. Once you write your own list, accounts that match none of your rules are left unmanaged.
+
 ---
 
 ## Supported providers
