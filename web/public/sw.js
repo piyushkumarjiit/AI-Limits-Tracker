@@ -1,5 +1,5 @@
 // Minimal offline shell: the app UI loads instantly, data always comes from the network.
-const CACHE = 'ai-limits-v1';
+const CACHE = 'fqd-v1';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icon.svg'])));

@@ -93,23 +93,6 @@ export function detectInvariantViolations(
     }
   }
 
-  if (overview?.activeDangerAlerts && overview.activeDangerAlerts.length > 0 && violations.length === 0) {
-    for (let i = 0; i < overview.activeDangerAlerts.length; i++) {
-      const alertMsg = overview.activeDangerAlerts[i];
-      violations.push({
-        id: `inv-alert-${i}`,
-        accountId: '',
-        accountName: 'Fleet Pool Invariant',
-        provider: 'fleet',
-        type: 'leaked_weight',
-        message: alertMsg,
-        currentWeight: 1,
-        upstreamState: 'violation',
-        recent429Count: 0,
-      });
-    }
-  }
-
   return violations;
 }
 
@@ -188,6 +171,13 @@ export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
   exhausted: 'Exhausted',
   healthy: 'Healthy',
   tight: 'Tight',
+};
+
+export const ACCOUNT_STATUS_BADGE: Record<AccountStatus, string> = {
+  cooldown: 'badge-cool',
+  exhausted: 'badge-bad',
+  healthy: 'badge-ok',
+  tight: 'badge-warn',
 };
 
 /** The 5-hour and weekly windows of an account, each null when the provider does not report it. */

@@ -1,10 +1,11 @@
 export function formatResetCountdown(resetsAt: string | null | undefined): string {
-  if (!resetsAt) return 'Rolling window clear';
+  // Providers omit the reset time for windows that have not started; say so rather than guess.
+  if (!resetsAt) return 'time not reported';
   const target = new Date(resetsAt).getTime();
-  if (isNaN(target)) return 'Rolling window clear';
+  if (isNaN(target)) return 'time not reported';
   const diffSec = Math.floor((target - Date.now()) / 1000);
 
-  if (diffSec <= 0) return 'Rolling window clear';
+  if (diffSec <= 0) return 'now';
 
   const d = new Date(resetsAt);
   const hh = String(d.getUTCHours()).padStart(2, '0');
@@ -83,4 +84,9 @@ export function useNow(intervalMs = 30000): number {
     return () => clearInterval(t);
   }, [intervalMs]);
   return now;
+}
+
+/** Upper-cases the first letter so upstream lowercase statuses match FQD's own labels. */
+export function capitalize(text: string): string {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }

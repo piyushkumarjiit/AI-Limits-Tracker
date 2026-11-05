@@ -10,6 +10,7 @@ import {
   accountStatus,
   quotaWindows,
   ACCOUNT_STATUS_LABEL,
+  ACCOUNT_STATUS_BADGE,
   type AccountStatus,
 } from './components';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -81,12 +82,7 @@ function pct(w: { remaining: number } | null): string {
   return w ? `${Math.round(w.remaining)}%` : '-';
 }
 
-const STATUS_BADGE: Record<AccountStatus, string> = {
-  cooldown: 'badge-cool',
-  exhausted: 'badge-bad',
-  healthy: 'badge-ok',
-  tight: 'badge-warn',
-};
+const STATUS_BADGE = ACCOUNT_STATUS_BADGE;
 
 interface AppState {
   accounts: Account[];
@@ -96,6 +92,17 @@ interface AppState {
 }
 
 /* ---------------- Root App ---------------- */
+
+/** Header badge summarising the fleet with the same four states the Accounts page uses. */
+function fleetStatusBadge(accounts: Account[], overview: WatermarkFleetOverview | null): { className: string; text: string } {
+  if (accounts.length === 0) return { className: 'badge-warn', text: 'No accounts yet' };
+  const statuses = accounts.map((a) => accountStatus(a, overview?.accounts.find((v) => v.accountId === a.id) || null));
+  const exhausted = statuses.filter((st) => st === 'exhausted').length;
+  const attention = statuses.filter((st) => st === 'cooldown' || st === 'tight').length;
+  if (exhausted > 0) return { className: 'badge-bad', text: `${exhausted} ${ACCOUNT_STATUS_LABEL.exhausted}` };
+  if (attention > 0) return { className: 'badge-warn', text: `${attention} Need Attention` };
+  return { className: 'badge-ok', text: 'All Accounts Healthy' };
+}
 
 export function App() {
   const [route, go] = useRoute();
@@ -163,6 +170,7 @@ export function App() {
 
   const [path, param] = route.split('/').filter(Boolean);
   const accounts = state.accounts;
+  const fleetBadge = fleetStatusBadge(accounts, cpaOverview);
   let page: React.ReactNode;
   switch (path) {
     case 'account': {
@@ -230,7 +238,7 @@ export function App() {
           </div>
           <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 10 }}>
             <button className={`filter-btn ${syncing ? 'spin' : ''}`} style={{ padding: '4px 10px', fontSize: 11 }} onClick={refreshAll} aria-label="Refresh">{syncing ? 'Refreshing…' : 'Refresh'}</button>
-            <span className="badge badge-ok">All Systems Healthy</span>
+            <span className={`badge ${fleetBadge.className}`}>{fleetBadge.text}</span>
           </div>
         </header>
 
@@ -256,7 +264,7 @@ export function App() {
         {page}
 
         {/* Footer */}
-        <footer className="enterprise-footer">
+        <footer className="app-footer">
           <span>FQD · Fleet Quota Display</span>
           <span>•</span>
           <a href="https://github.com/piyushkumarjiit/FQD" target="_blank" rel="noreferrer">GitHub</a>
@@ -455,8 +463,8 @@ const HomePage: React.FC<{
       <div className="grid-4">
         <div className="card stat-box">
           <span className="stat-sub">Fleet Accounts</span>
-          <span className="stat-val" style={{ color: 'var(--blue)' }}>{effectiveAccounts.length} Active</span>
-          <span className="stat-sub" style={{ color: 'var(--ok)' }}>{agyAccounts.length} AGY + {claudeAccounts.length} Claude</span>
+          <span className="stat-val" style={{ color: 'var(--blue)' }}>{effectiveAccounts.length} {effectiveAccounts.length === 1 ? 'Account' : 'Accounts'}</span>
+          <span className="stat-sub">{agyAccounts.length} Antigravity · {claudeAccounts.length} Claude Code</span>
         </div>
         <div className="card stat-box">
           <span className="stat-sub">5-Hour Headroom</span>
@@ -481,6 +489,7 @@ const HomePage: React.FC<{
         agyAccounts={agyAccounts}
         claudeAccounts={claudeAccounts}
         effectiveAccounts={effectiveAccounts}
+        overview={overview}
         hoverAccount={hoverAccount}
         setHoverAccount={setHoverAccount}
         onSelectAccount={(acc) => setDrawerAccount(acc)}
@@ -490,6 +499,7 @@ const HomePage: React.FC<{
 
       <ActiveAttention
         accounts={effectiveAccounts}
+        overview={overview}
         onSelectAccount={(acc) => setDrawerAccount(acc)}
       />
 

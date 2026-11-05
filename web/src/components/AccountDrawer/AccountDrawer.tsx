@@ -3,7 +3,7 @@ import type { Account } from '../../api';
 import type { ProviderType, QuotaBucket } from '../../../../src/models/types';
 import type { ManualHoldType, WatermarkAccountView } from '../../../../server/src/cpaWatermarkTypes';
 import { LAB_BRAND_PALETTES, PROVIDER_NAMES } from '../../../../src/constants/theme';
-import { formatTimeRemaining, formatResetCountdown } from '../../../../src/utils/formatters';
+import { capitalize, formatTimeRemaining, formatResetCountdown } from '../../../../src/utils/formatters';
 import { formatTokenCount, type AccountTelemetry } from '../../../../src/services/telemetryService';
 import { accountStatus, deriveRoutingEnforcement, ACCOUNT_STATUS_LABEL } from '../common/cpaUiUtils';
 import './AccountDrawer.css';
@@ -73,7 +73,12 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
   const weeklyRem = Math.round(weekly?.remainingPercent ?? 100);
   const rollingRem = Math.round(rolling?.remainingPercent ?? 100);
   const status = accountStatus(account, accountView);
-  const isExhausted = status !== 'healthy' && status !== 'tight';
+  const tone = {
+    healthy: { fg: 'var(--ok)', bg: 'var(--ok-soft)' },
+    tight: { fg: 'var(--warn)', bg: 'var(--warn-soft)' },
+    exhausted: { fg: 'var(--bad)', bg: 'var(--bad-soft)' },
+    cooldown: { fg: '#93c5fd', bg: 'rgba(96, 165, 250, 0.12)' },
+  }[status];
   const nearestReset = weekly?.resetsAt || rolling?.resetsAt;
 
   const handleCopy = () => {
@@ -178,7 +183,7 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
           style={{
             padding: 12,
             borderRadius: 12,
-            background: isExhausted ? 'var(--bad-soft)' : 'var(--ok-soft)',
+            background: tone.bg,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -190,11 +195,11 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: isExhausted ? 'var(--bad)' : 'var(--ok)',
+                background: tone.fg,
                 display: 'inline-block',
               }}
             />
-            <b style={{ color: isExhausted ? 'var(--bad)' : 'var(--ok)', fontSize: 13 }}>
+            <b style={{ color: tone.fg, fontSize: 13 }}>
               {ACCOUNT_STATUS_LABEL[status]}
             </b>
           </div>
@@ -265,12 +270,12 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
               placeholder="Reason (optional)"
               value={holdReason}
               onChange={(e) => setHoldReason(e.target.value)}
-              style={{ width: '100%', marginBottom: 8, boxSizing: 'border-box' }}
+              style={{ width: '100%', marginBottom: 8, padding: '6px 10px', fontSize: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6 }}
             />
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="btn small" disabled={holdBusy} onClick={() => applyHold('quarantine')} title="Take out of rotation (standby cooldown)">Quarantine</button>
-              <button type="button" className="btn small" disabled={holdBusy} onClick={() => applyHold('airgap')} title="Remove from the CLIProxy pool immediately">Airgap</button>
-              <button type="button" className="btn small" disabled={holdBusy || routing.origin !== 'manual'} onClick={() => applyHold('none')} title="Return to automatic routing">Clear hold</button>
+              <button type="button" className="filter-btn" disabled={holdBusy} onClick={() => applyHold('quarantine')} title="Take out of rotation (standby cooldown)">Quarantine</button>
+              <button type="button" className="filter-btn" disabled={holdBusy} onClick={() => applyHold('airgap')} title="Remove from the CLIProxy pool immediately">Airgap</button>
+              <button type="button" className="filter-btn" disabled={holdBusy || routing.origin !== 'manual'} onClick={() => applyHold('none')} title="Return to automatic routing">Clear hold</button>
             </div>
             {holdError && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--bad)' }}>{holdError}</div>}
           </div>
@@ -283,7 +288,7 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
             <>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
             <span className="muted">CLIProxy status:</span>
-            <b>{telemetry.disabled ? 'Disabled' : telemetry.proxyStatus || 'Active'}</b>
+            <b>{telemetry.disabled ? 'Disabled' : capitalize(telemetry.proxyStatus || 'active')}</b>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
             <span className="muted">Requests (last hour):</span>

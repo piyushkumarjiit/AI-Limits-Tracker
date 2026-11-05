@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript contract types for Fleet Quota Deck (FQD) Watermark & Anti-Flagging system.
+ * Shared TypeScript contract types for FQD (Fleet Quota Display) Watermark & Anti-Flagging system.
  * Anchors the shared state model, overview API shape, and manual hold schemas across
  * server backend (WP-4A) and web panel frontend (WP-4B).
  */
@@ -62,8 +62,9 @@ export interface WatermarkWindowView {
   label: string;
   currentRemainingPct: number;
   projectedRemainingPct: number;
-  resetsAt: string;
-  resetSecondsRemaining: number;
+  /** Null when the provider did not report a reset time. */
+  resetsAt: string | null;
+  resetSecondsRemaining: number | null;
   isBinding: boolean;
 }
 

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { Account } from '../../api';
 import type { WatermarkFleetOverview } from '../../../../server/src/cpaWatermarkTypes';
 import { formatResetCountdown } from '../../../../src/utils/formatters';
-import { accountStatus, quotaWindows, ACCOUNT_STATUS_LABEL, TIGHT_THRESHOLD, type AccountStatus } from '../common/cpaUiUtils';
+import { accountStatus, quotaWindows, ACCOUNT_STATUS_LABEL, ACCOUNT_STATUS_BADGE, TIGHT_THRESHOLD, type AccountStatus } from '../common/cpaUiUtils';
 import './QuotaRadar.css';
 
 export interface QuotaRadarProps {
@@ -11,12 +11,7 @@ export interface QuotaRadarProps {
   onSelectAccount?: (a: Account) => void;
 }
 
-const STATUS_BADGE: Record<AccountStatus, string> = {
-  cooldown: 'badge-cool',
-  exhausted: 'badge-bad',
-  healthy: 'badge-ok',
-  tight: 'badge-warn',
-};
+const STATUS_BADGE = ACCOUNT_STATUS_BADGE;
 
 const STATUS_ORDER: AccountStatus[] = ['cooldown', 'exhausted', 'healthy', 'tight'];
 

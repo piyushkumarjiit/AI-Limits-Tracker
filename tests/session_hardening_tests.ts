@@ -133,7 +133,7 @@ function stateWith(baseUrl: string, cookie?: string, bearer?: string): Promise<R
 
 async function runAllTests() {
   console.log('\n========================================');
-  console.log('  AI LIMITS TRACKER - SESSION TESTS     ');
+  console.log('  FQD - SESSION TESTS                   ');
   console.log('========================================\n');
 
   console.log('Suite 1: Session lifetime default');
