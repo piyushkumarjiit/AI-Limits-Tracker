@@ -668,14 +668,17 @@ h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.
 /* Fleet Heatmap Matrix */
 .matrix-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(26px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
   gap: 4px;
   margin-top: 8px;
 }
 .matrix-cell {
-  height: 26px;
+  height: 40px;
   border-radius: 5px;
+  border: 1px solid;
   display: flex;
+  flex-direction: column;
+  gap: 2px;
   align-items: center;
   justify-content: center;
   font-size: 9px;

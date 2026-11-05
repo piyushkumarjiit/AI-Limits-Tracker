@@ -489,6 +489,7 @@ const HomePage: React.FC<{
         agyAccounts={agyAccounts}
         claudeAccounts={claudeAccounts}
         effectiveAccounts={effectiveAccounts}
+        overview={overview}
         hoverAccount={hoverAccount}
         setHoverAccount={setHoverAccount}
         onSelectAccount={(acc) => setDrawerAccount(acc)}

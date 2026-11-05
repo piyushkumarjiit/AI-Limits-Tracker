@@ -73,7 +73,12 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
   const weeklyRem = Math.round(weekly?.remainingPercent ?? 100);
   const rollingRem = Math.round(rolling?.remainingPercent ?? 100);
   const status = accountStatus(account, accountView);
-  const isExhausted = status !== 'healthy' && status !== 'tight';
+  const tone = {
+    healthy: { fg: 'var(--ok)', bg: 'var(--ok-soft)' },
+    tight: { fg: 'var(--warn)', bg: 'var(--warn-soft)' },
+    exhausted: { fg: 'var(--bad)', bg: 'var(--bad-soft)' },
+    cooldown: { fg: '#93c5fd', bg: 'rgba(96, 165, 250, 0.12)' },
+  }[status];
   const nearestReset = weekly?.resetsAt || rolling?.resetsAt;
 
   const handleCopy = () => {
@@ -178,7 +183,7 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
           style={{
             padding: 12,
             borderRadius: 12,
-            background: isExhausted ? 'var(--bad-soft)' : 'var(--ok-soft)',
+            background: tone.bg,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -190,11 +195,11 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: isExhausted ? 'var(--bad)' : 'var(--ok)',
+                background: tone.fg,
                 display: 'inline-block',
               }}
             />
-            <b style={{ color: isExhausted ? 'var(--bad)' : 'var(--ok)', fontSize: 13 }}>
+            <b style={{ color: tone.fg, fontSize: 13 }}>
               {ACCOUNT_STATUS_LABEL[status]}
             </b>
           </div>

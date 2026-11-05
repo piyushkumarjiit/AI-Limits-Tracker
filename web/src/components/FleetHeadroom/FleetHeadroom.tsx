@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
 import type { Account } from '../../api';
+import type { WatermarkFleetOverview } from '../../../../server/src/cpaWatermarkTypes';
+import { PROVIDER_NAMES } from '../../../../src/constants/theme';
 import { getSlotHeadroom } from '../common/headroomUtils';
+import { accountStatus, ACCOUNT_STATUS_BADGE, ACCOUNT_STATUS_LABEL, type AccountStatus } from '../common/cpaUiUtils';
 import './FleetHeadroom.css';
 
 export interface FleetHeadroomProps {
   agyAccounts: Account[];
   claudeAccounts: Account[];
   effectiveAccounts: Account[];
+  overview?: WatermarkFleetOverview | null;
   hoverAccount: Account | null;
   setHoverAccount: (a: Account | null) => void;
   onSelectAccount: (a: Account) => void;
@@ -14,17 +18,18 @@ export interface FleetHeadroomProps {
   claudeHeadroom: string;
 }
 
-const AGGREGATE_BANDS = [
-  { status: 'healthy', title: 'Healthy (above 35%)', color: 'var(--ok)' },
-  { status: 'tight', title: 'Tight (35% or less)', color: 'var(--warn)' },
-  { status: 'exhausted', title: 'Exhausted (0%)', color: 'var(--bad)' },
-  { status: 'nodata', title: 'No data', color: 'var(--muted)' },
-] as const;
+const AGGREGATE_BANDS: { status: AccountStatus; color: string }[] = [
+  { status: 'healthy', color: 'var(--ok)' },
+  { status: 'tight', color: 'var(--warn)' },
+  { status: 'exhausted', color: 'var(--bad)' },
+  { status: 'cooldown', color: 'var(--blue)' },
+];
 
 export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
   agyAccounts,
   claudeAccounts,
   effectiveAccounts,
+  overview,
   hoverAccount,
   setHoverAccount,
   onSelectAccount,
@@ -158,15 +163,17 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
           {/* Hover details pill */}
           {hoverAccount && (() => {
             const h = getSlotHeadroom(hoverAccount, 0);
+            const status = accountStatus(hoverAccount, overview?.accounts.find((v) => v.accountId === hoverAccount.id) || null);
             return (
               <div className="fqd-fleet-headroom__hover-pill" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, padding: '8px 12px', background: 'var(--card-hi)', borderRadius: 8, fontSize: 11 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <span className="badge badge-slot">slot_{slotOf(hoverAccount)}</span>
+                  <span style={{ color: 'var(--muted)' }}>{PROVIDER_NAMES[hoverAccount.providerType] || hoverAccount.providerType}</span>
                   <strong style={{ color: '#fff' }}>{hoverAccount.email || hoverAccount.name}</strong>
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <span style={{ color: h.color, fontWeight: 700 }}>{h.rem}%</span>
-                  <span className={`badge ${h.badge}`}>{h.label}</span>
+                  <span className={`badge ${ACCOUNT_STATUS_BADGE[status]}`}>{ACCOUNT_STATUS_LABEL[status]}</span>
                 </div>
               </div>
             );
@@ -212,16 +219,20 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             {AGGREGATE_BANDS.map((band) => {
               const members = effectiveAccounts
+                .filter((acc) => accountStatus(acc, overview?.accounts.find((v) => v.accountId === acc.id) || null) === band.status)
                 .map((acc, i) => getSlotHeadroom(acc, i))
-                .filter((h) => (h.label === 'No data' ? band.status === 'nodata' : h.status === band.status));
-              const mean = members.length && band.status !== 'nodata'
+                .filter((h) => h.label !== 'No data');
+              const count = effectiveAccounts.filter(
+                (acc) => accountStatus(acc, overview?.accounts.find((v) => v.accountId === acc.id) || null) === band.status,
+              ).length;
+              const mean = members.length
                 ? `${Math.round(members.reduce((sum, h) => sum + h.rem, 0) / members.length)}% mean headroom`
-                : band.status === 'nodata' ? 'Provider has not reported quota' : 'None';
+                : 'No quota data';
               return (
                 <div key={band.status} className="card" style={{ background: 'var(--card-hi)', padding: 12, border: '1px solid var(--border)' }}>
-                  <span className="stat-sub">{band.title}</span>
-                  <span className="stat-val" style={{ color: band.color }}>{plural(members.length)}</span>
-                  <span className="stat-sub">{members.length ? mean : 'None'}</span>
+                  <span className="stat-sub">{ACCOUNT_STATUS_LABEL[band.status]}</span>
+                  <span className="stat-val" style={{ color: band.color }}>{plural(count)}</span>
+                  <span className="stat-sub">{count ? mean : 'None'}</span>
                 </div>
               );
             })}
