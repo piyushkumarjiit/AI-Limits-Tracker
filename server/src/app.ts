@@ -58,6 +58,7 @@ export interface AppDeps {
   tracker: Tracker;
   cpaSync?: CpaSyncEngine;
   cpaRouting?: CpaRoutingExecutor | CpaWatermarkService;
+  cpaWatermarkService?: CpaWatermarkService;
   quotaCache?: QuotaCache;
   telemetryService?: TelemetryService;
 }
@@ -218,6 +219,11 @@ async function handleApi(
   bearerLimiter: ReturnType<typeof createLoginLimiter>
 ) {
   const { store, tracker, cpaSync, cpaRouting, quotaCache } = deps;
+  const cpaWatermarkService: CpaWatermarkService | undefined =
+    deps.cpaWatermarkService ??
+    (cpaRouting && typeof (cpaRouting as any).getFleetOverview === 'function'
+      ? (cpaRouting as CpaWatermarkService)
+      : undefined);
   const path = url.pathname;
   const method = req.method || 'GET';
 
@@ -345,61 +351,101 @@ async function handleApi(
     return send(res, 200, cpaSync.status());
   }
 
+  if (path === '/api/cpa/watermarks' && method === 'GET') {
+    if (cpaWatermarkService) {
+      const overview = await cpaWatermarkService.getFleetOverview();
+      return send(res, 200, overview);
+    }
+    return send(res, 200, {
+      mode: 'off',
+      routingStrategy: 'none',
+      writesBlockedReason: 'not_configured',
+      tierState: 'OPEN',
+      poolRunwayMinutes: null,
+      healthyCount: 0,
+      tightCount: 0,
+      exhaustedCount: 0,
+      quarantinedCount: 0,
+      accounts: [],
+      recentShadowDecisions: [],
+      activeDangerAlerts: [],
+    });
+  }
+
   if (path === '/api/cpa/hold' && method === 'POST') {
     const body = await readBody(req);
     const accountId = typeof body.accountId === 'string' ? body.accountId.trim() : '';
-    const hold = body.hold as ManualHoldType;
     if (!accountId) {
       return send(res, 400, { error: 'accountId is required' });
     }
+
+    const account = store.getAccount(accountId);
+    if (!account) {
+      return send(res, 404, { error: 'Account not found' });
+    }
+
+    const hold = body.hold as ManualHoldType;
     if (hold !== 'none' && hold !== 'quarantine' && hold !== 'airgap') {
       return send(res, 400, { error: 'hold must be one of "none", "quarantine", "airgap"' });
     }
+
     const reason = typeof body.reason === 'string' ? body.reason : undefined;
     const actor = typeof body.actor === 'string' ? body.actor : 'operator';
-    const ttlSeconds = typeof body.ttlSeconds === 'number' ? body.ttlSeconds : typeof body.ttl === 'number' ? body.ttl : 86400;
+    const ttlSeconds = typeof body.ttlSeconds === 'number' && body.ttlSeconds > 0
+      ? body.ttlSeconds
+      : typeof body.ttl === 'number' && body.ttl > 0
+      ? body.ttl
+      : 86400;
 
-    const saved = store.watermarkStore.setManualHold(accountId, hold, reason, actor, ttlSeconds);
+    let result: { hold: any; effectiveState: string };
+    if (cpaWatermarkService) {
+      result = await cpaWatermarkService.setManualHold(accountId, hold, reason, ttlSeconds);
+    } else {
+      const now = Date.now();
+      const expiresAt = hold === 'none' ? null : now + ttlSeconds * 1000;
+      store.setManualHold(accountId, hold, reason, expiresAt, now);
 
-    // If hold is airgap or quarantine, immediately zero routing weight in store if cpa_link exists
-    if (hold === 'airgap' || hold === 'quarantine') {
-      const link = store.getCpaLink(accountId);
-      if (link && link.routingJson) {
-        try {
-          const rJson = JSON.parse(link.routingJson);
-          rJson.applied = 0;
-          rJson.target = 0;
-          rJson.reason = hold === 'airgap' ? 'manual_airgap' : 'manual_quarantine';
-          store.upsertCpaLink({ ...link, routingJson: JSON.stringify(rJson) });
-        } catch {}
+      // If hold is airgap or quarantine, immediately zero routing weight in store if cpa_link exists
+      if (hold === 'airgap' || hold === 'quarantine') {
+        const link = store.getCpaLink(accountId);
+        if (link && link.routingJson) {
+          try {
+            const rJson = JSON.parse(link.routingJson);
+            rJson.applied = 0;
+            rJson.target = 0;
+            rJson.reason = hold === 'airgap' ? 'manual_airgap' : 'manual_quarantine';
+            store.upsertCpaLink({ ...link, routingJson: JSON.stringify(rJson) });
+          } catch {}
+        }
       }
-    }
 
-    // Determine autoState to compute effectiveState
-    const acc = store.getAccount(accountId);
-    let autoState: WatermarkAccountState = 'healthy';
-    if (acc) {
-      const buckets = acc.latestSnapshot?.buckets || [];
+      // Determine autoState to compute effectiveState
+      let autoState: WatermarkAccountState = 'healthy';
+      const buckets = account.latestSnapshot?.buckets || [];
       const lowestRem = buckets.length > 0
         ? Math.min(...buckets.map((b) => b.remainingPercent ?? 100))
         : 100;
-      if (acc.latestSnapshot?.status === 'rate_limited' || lowestRem <= 10) {
+      if (account.latestSnapshot?.status === 'rate_limited' || lowestRem <= 10) {
         autoState = 'exhausted';
       } else if (lowestRem <= 35) {
         autoState = 'tight';
       }
+      const effective = effectiveAccountState(hold, autoState);
+      result = {
+        hold: { accountId, holdType: hold, reason, createdAt: now, expiresAt },
+        effectiveState: effective,
+      };
     }
-    const effective = effectiveAccountState(hold, autoState);
 
     return send(res, 200, {
       ok: true,
       accountId,
-      hold: saved.hold,
-      reason: saved.reason,
-      actor: saved.actor,
-      ttlSeconds: saved.ttlSeconds,
-      expiresAt: saved.expiresAt,
-      effectiveState: effective,
+      hold: result.hold.holdType || result.hold.hold || hold,
+      reason: result.hold.reason ?? reason,
+      actor,
+      ttlSeconds,
+      expiresAt: result.hold.expiresAt,
+      effectiveState: result.effectiveState,
     });
   }
 
@@ -409,8 +455,13 @@ async function handleApi(
   }
 
   if (path === '/api/cpa/overview' && method === 'GET') {
+    if (cpaWatermarkService) {
+      const wmOverview = await cpaWatermarkService.getFleetOverview();
+      return send(res, 200, wmOverview);
+    }
+
     const rawAccounts = store.listAccounts();
-    const activeHolds = store.watermarkStore.listManualHolds();
+    const activeHolds = store.listManualHolds();
     const holdsMap = new Map(activeHolds.map((h) => [h.accountId, h]));
 
     let mode: WatermarkMode = 'shadow';
@@ -467,7 +518,7 @@ async function handleApi(
       }
 
       const manualHoldRecord = holdsMap.get(acc.id);
-      const manualHold: ManualHoldType = manualHoldRecord ? manualHoldRecord.hold : 'none';
+      const manualHold: ManualHoldType = manualHoldRecord ? manualHoldRecord.holdType : 'none';
 
       const buckets = acc.latestSnapshot?.buckets || [];
       const windowViews: WatermarkWindowView[] = buckets.map((b) => {
@@ -583,11 +634,11 @@ async function handleApi(
   }
 
   if (path === '/api/telemetry' && method === 'GET') {
-    const service = deps.telemetryService ?? new TelemetryService();
-    const accounts = store.listAccounts().map((a) => a.id);
-    const telemetry = await service.getTelemetry(accounts);
-    return send(res, 200, telemetry);
-  }
+  const service = deps.telemetryService ?? new TelemetryService();
+  const accounts = store.listAccounts().map((a) => a.id);
+  const telemetry = await service.getTelemetry(accounts);
+  return send(res, 200, telemetry);
+}
 
   if (path === '/api/settings' && method === 'PUT') {
     const body = await readBody(req);

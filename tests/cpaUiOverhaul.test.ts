@@ -1,4 +1,7 @@
-import { DatabaseSync } from 'node:sqlite';
+import { Store } from '../server/src/store';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   type WatermarkFleetOverview,
   type WatermarkAccountView,
@@ -477,55 +480,46 @@ console.log('\nSuite 5: Shadow-Mode Telemetry & Audit Feed Parsing');
 console.log('\nSuite 6: Backend SQLite Manual Hold Store Persistence');
 
 {
-  const db = new DatabaseSync(':memory:');
-  const store = new CpaWatermarkStore(db);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpa-ui-test-'));
+  const store = new Store(tempDir, 'test.db', '0123456789abcdef0123456789abcdef');
 
   // 1. Initially no manual holds
   assertEquals(store.listManualHolds().length, 0, 'No holds initially');
   assertEquals(store.getManualHold('acc-1'), null, 'getManualHold returns null initially');
 
   // 2. Set quarantine hold with TTL
-  const savedQuarantine = store.setManualHold(
-    'acc-1',
-    'quarantine',
-    'Test quarantine reason',
-    'operator_bob',
-    3600
-  );
-  assertEquals(savedQuarantine.accountId, 'acc-1', 'accountId is acc-1');
-  assertEquals(savedQuarantine.hold, 'quarantine', 'hold is quarantine');
-  assertEquals(savedQuarantine.reason, 'Test quarantine reason', 'reason matches');
-  assertEquals(savedQuarantine.actor, 'operator_bob', 'actor matches');
-  assertEquals(savedQuarantine.ttlSeconds, 3600, 'ttlSeconds is 3600');
-  assert(Boolean(savedQuarantine.expiresAt), 'expiresAt is computed');
+  const now = 1000000;
+  const ttlSeconds = 3600;
+  const expiresAt = now + ttlSeconds * 1000;
+  store.setManualHold('acc-1', 'quarantine', 'Test quarantine reason', expiresAt, now);
 
   // 3. Read back from SQLite
-  const loadedQuarantine = store.getManualHold('acc-1');
+  const loadedQuarantine = store.getManualHold('acc-1', now);
   assert(Boolean(loadedQuarantine), 'Loaded quarantine from DB');
-  assertEquals(loadedQuarantine?.hold, 'quarantine', 'Loaded hold is quarantine');
+  assertEquals(loadedQuarantine?.holdType, 'quarantine', 'Loaded hold is quarantine');
   assertEquals(loadedQuarantine?.reason, 'Test quarantine reason', 'Loaded reason matches');
+  assertEquals(loadedQuarantine?.expiresAt, expiresAt, 'expiresAt matches');
 
   // 4. Overwrite with airgap
-  const savedAirgap = store.setManualHold('acc-1', 'airgap', 'Escalated to airgap', 'lead_dev');
-  assertEquals(savedAirgap.hold, 'airgap', 'Updated to airgap');
-  const loadedAirgap = store.getManualHold('acc-1');
-  assertEquals(loadedAirgap?.hold, 'airgap', 'Loaded airgap hold');
+  store.setManualHold('acc-1', 'airgap', 'Escalated to airgap', expiresAt + 3600000, now);
+  const loadedAirgap = store.getManualHold('acc-1', now);
+  assertEquals(loadedAirgap?.holdType, 'airgap', 'Loaded airgap hold');
 
   // 5. Add second account hold
-  store.setManualHold('acc-2', 'quarantine', 'Second account quarantine');
-  assertEquals(store.listManualHolds().length, 2, '2 active holds listed');
+  store.setManualHold('acc-2', 'quarantine', 'Second account quarantine', expiresAt, now);
+  assertEquals(store.listManualHolds(now).length, 2, '2 active holds listed');
 
   // 6. Release hold on acc-1
-  const cleared = store.setManualHold('acc-1', 'none');
-  assertEquals(cleared.hold, 'none', 'Cleared hold returns none');
-  assertEquals(store.getManualHold('acc-1'), null, 'acc-1 hold is now null in DB');
-  assertEquals(store.listManualHolds().length, 1, 'Only acc-2 remains in list');
+  store.setManualHold('acc-1', 'none', undefined, undefined, now);
+  assertEquals(store.getManualHold('acc-1', now), null, 'acc-1 hold is now null in DB');
+  assertEquals(store.listManualHolds(now).length, 1, 'Only acc-2 remains in list');
 
-  // 7. Verify audit history logged in cpa_watermark_history
-  const history = store.getHistory(10);
-  assert(history.length >= 4, 'Audit history contains manual hold entries');
-  const clearedHistory = history.find((h) => h.eventType === 'manual_hold_cleared');
-  assert(Boolean(clearedHistory), 'manual_hold_cleared event logged');
+  // 7. Expired hold automatically pruned
+  assertEquals(store.getManualHold('acc-2', expiresAt + 1000), null, 'Expired hold returns null');
+  assertEquals(store.listManualHolds(expiresAt + 1000).length, 0, 'Expired holds list is empty');
+
+  store.close();
+  fs.rmSync(tempDir, { recursive: true, force: true });
 }
 
 console.log('\n======================================================');

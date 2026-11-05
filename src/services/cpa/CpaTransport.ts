@@ -301,6 +301,15 @@ export class CpaTransport {
   }
 
   /**
+   * Dual-barrier patch credential in CPA: writes weight AND disabled state.
+   * Exhausted/quarantined accounts write weight: 0 AND disabled: true.
+   * Healthy accounts write disabled: false AND positive weight.
+   */
+  async patchCredentialDualBarrier(name: string, disabled: boolean, weight: number): Promise<void> {
+    await this.patchFields({ name, disabled, weight, alt_managed_weight: true });
+  }
+
+  /**
    * Force refresh credential(s) in CPA.
    * Path: POST /v8/management/credentials/refresh (fallback to POST /v0/management/auth-files/refresh).
    */

@@ -1,4 +1,4 @@
-import type { Store } from './store';
+import type { Store, CpaManualHoldRecord } from './store';
 import type { CpaTransport } from '../../src/services/cpa/CpaTransport';
 import type { CpaCredential, LinkRoutingState } from '../../src/services/cpa/types';
 import type { WeightPlan, RoutingConfig } from '../../src/services/cpa/routingPlanner';
@@ -17,6 +17,49 @@ import {
 import { CpaWatermarkStore } from './cpaWatermarkStore';
 import { dualRingData } from '../../src/services/capacity';
 import { forecastWindow } from '../../src/services/stats';
+import { applyDualBarrier } from './cpaSync';
+import {
+  type WatermarkAccountState,
+  type WatermarkTierState,
+  type WatermarkMode,
+  type ManualHoldType,
+  type WatermarkFleetOverview,
+  type WatermarkAccountView,
+  type WatermarkWindowView,
+  effectiveAccountState,
+} from './cpaWatermarkTypes';
+import {
+  DEFAULT_LEAD_TIME_SEC,
+  DEFAULT_TAU_SEC,
+  DEFAULT_T_DRAIN_SEC,
+  DEFAULT_T_POLL_SEC,
+  DEFAULT_COOLDOWN_SEC,
+  evaluateAccountTripwire,
+  applyFailClosedCollectiveFallback,
+  computeDualWindowBurnRate,
+  computeEwmaBurnRate,
+  circuitBreakers,
+  type WindowObservation,
+  type TripwireEvaluation,
+  type TripwireConfig,
+} from './cpaTripwireEngine';
+import type { Tracker } from './tracker';
+
+export {
+  DEFAULT_LEAD_TIME_SEC,
+  DEFAULT_TAU_SEC,
+  DEFAULT_T_DRAIN_SEC,
+  DEFAULT_T_POLL_SEC,
+  DEFAULT_COOLDOWN_SEC,
+  evaluateAccountTripwire,
+  applyFailClosedCollectiveFallback,
+  computeDualWindowBurnRate,
+  computeEwmaBurnRate,
+  circuitBreakers,
+  type WindowObservation,
+  type TripwireEvaluation,
+  type TripwireConfig,
+};
 
 export interface CpaWatermarkRunResult {
   mode: 'off' | 'shadow' | 'enforce';
@@ -33,6 +76,7 @@ export interface CpaWatermarkServiceOptions {
   transport: CpaTransport;
   policyLoader?: CpaPolicyLoader;
   watermarkStore?: CpaWatermarkStore;
+  tracker?: Tracker;
   now?: () => number;
 }
 
@@ -73,6 +117,10 @@ export class CpaWatermarkService {
       options.watermarkStore ??
       this.store.watermarkStore ??
       new CpaWatermarkStore((this.store as any).db);
+
+    if (options.tracker) {
+      options.tracker.setReactive429Handler((accountId) => this.handleReactive429(accountId));
+    }
 
     // Initialize rate limiter token bucket
     const policy = this.policyLoader.getPolicy();
@@ -531,14 +579,17 @@ export class CpaWatermarkService {
       const accountId = plan?.accountId;
 
       try {
-        if (typeof (this.transport as any).patchCredentialWeight === 'function') {
-          await (this.transport as any).patchCredentialWeight(item.name, item.weight);
-        } else {
+        if (typeof (this.transport as any).patchCredentialDualBarrier === 'function') {
+          await (this.transport as any).patchCredentialDualBarrier(item.name, item.weight === 0, item.weight);
+        } else if (typeof this.transport.patchFields === 'function') {
           await this.transport.patchFields({
             name: item.name,
             weight: item.weight,
+            disabled: item.weight === 0,
             alt_managed_weight: true,
           });
+        } else if (typeof (this.transport as any).patchCredentialWeight === 'function') {
+          await (this.transport as any).patchCredentialWeight(item.name, item.weight);
         }
 
         if (this.tokens >= 1) {
@@ -610,5 +661,359 @@ export class CpaWatermarkService {
       console.error('[cpaWatermarkService] Read-back list credentials failed:', err);
       return expectedWeights.size;
     }
+  }
+
+  /**
+   * Reactive circuit breaker handler: Upstream 429 immediately transitions
+   * account to exhausted and executes dual-barrier airgap (weight 0, disabled true)
+   * without waiting for scheduled sync.
+   */
+  public async handleReactive429(
+    accountId: string,
+    options?: { cooldownMs?: number; reason?: string }
+  ): Promise<void> {
+    const now = this.now();
+    const cooldownMs = options?.cooldownMs ?? DEFAULT_COOLDOWN_SEC * 1000;
+    const reason = options?.reason ?? 'upstream_429';
+
+    // 1. Record error in circuit breaker registry
+    circuitBreakers.recordError(accountId, '429', now, cooldownMs);
+
+    // 2. Immediately update account status in store
+    const account = this.store.getAccount(accountId);
+    if (account) {
+      this.store.upsertAccount({
+        ...account,
+        lastStatus: 'rate_limited',
+        lastError: 'HTTP 429 Rate Limited (circuit breaker tripped)',
+      });
+    }
+
+    // 3. Find CPA link and dispatch immediate dual-barrier write
+    const link = this.store.getCpaLink(accountId);
+    if (link) {
+      const routing = this.store.getCpaLinkRouting(accountId) || {};
+      this.store.updateCpaLinkRouting(accountId, {
+        ...routing,
+        applied: 0,
+        cooldown: true,
+        reason,
+        at: now,
+      });
+      this.activeWeightsMap[accountId] = 0;
+
+      try {
+        await applyDualBarrier(this.transport, link.cpaName, 'exhausted', 0);
+      } catch (err) {
+        console.error('[cpaWatermarkService] Failed dual-barrier write on reactive 429 for %s:', link.cpaName, err);
+      }
+    }
+
+    // 4. Update in-memory engine state for account
+    if (link) {
+      this.engineState.accountStates[link.cpaName] = {
+        state: 'cooldown',
+        enteredAt: now,
+        targetWeight: 0,
+      };
+    }
+  }
+
+  /**
+   * Sets or releases an operator manual hold.
+   * Holds cannot be cleared by automation and support an expiration TTL (default 24h).
+   */
+  public async setManualHold(
+    accountId: string,
+    hold: ManualHoldType,
+    reason?: string,
+    ttlSeconds?: number
+  ): Promise<{
+    hold: CpaManualHoldRecord;
+    effectiveState: WatermarkAccountState;
+  }> {
+    const now = this.now();
+    const expiresAt =
+      hold === 'none'
+        ? null
+        : ttlSeconds !== undefined
+        ? now + ttlSeconds * 1000
+        : now + 24 * 3600 * 1000;
+
+    this.store.setManualHold(accountId, hold, reason, expiresAt, now);
+
+    const link = this.store.getCpaLink(accountId);
+    if (link) {
+      if (hold === 'quarantine' || hold === 'airgap') {
+        // Immediate dual-barrier write: weight 0 AND disabled true
+        await applyDualBarrier(this.transport, link.cpaName, hold === 'airgap' ? 'airgapped' : 'quarantined', 0);
+        this.activeWeightsMap[accountId] = 0;
+      } else if (hold === 'none') {
+        // Released hold: restore healthy weight
+        await applyDualBarrier(this.transport, link.cpaName, 'healthy', 1);
+        this.activeWeightsMap[accountId] = 1;
+      }
+    }
+
+    const holdRecord: CpaManualHoldRecord = {
+      accountId,
+      holdType: hold,
+      reason,
+      createdAt: now,
+      expiresAt,
+    };
+
+    const autoState: WatermarkAccountState = 'healthy';
+    const effectiveState = effectiveAccountState(hold, autoState);
+
+    return { hold: holdRecord, effectiveState };
+  }
+
+  /**
+   * Builds the comprehensive WatermarkFleetOverview telemetry snapshot for GET /api/cpa/watermarks.
+   */
+  public async getFleetOverview(simulatedNow?: number): Promise<WatermarkFleetOverview> {
+    const currentNow = simulatedNow ?? this.now();
+    const policy = this.policyLoader.getPolicy();
+    const mode = policy.mode ?? 'shadow';
+
+    // 1. Query routing strategy
+    let routingStrategy = 'weighted-round-robin';
+    if (this.cachedStrategy && currentNow < this.cachedStrategy.expiresAt) {
+      routingStrategy = this.cachedStrategy.value;
+    } else {
+      try {
+        routingStrategy = await this.transport.getRoutingStrategy();
+        this.cachedStrategy = { value: routingStrategy, expiresAt: currentNow + 5 * 60 * 1000 };
+      } catch {
+        routingStrategy = 'weighted-round-robin';
+      }
+    }
+
+    // 2. Fetch CPA credentials
+    let cpaEntries: CpaCredential[] = [];
+    try {
+      const listRes = await this.transport.listCredentials();
+      cpaEntries = Array.isArray(listRes) ? listRes : (listRes?.files ?? []);
+    } catch {
+      cpaEntries = [];
+    }
+
+    // 3. Gather accounts and evaluate tripwires
+    const links = this.store.listCpaLinks().filter((l) => l.state === 'linked');
+    const evaluationsByPool = new Map<string, TripwireEvaluation[]>();
+
+    for (const link of links) {
+      const account = this.store.getAccount(link.accountId);
+      if (!account || !account.isActive) continue;
+
+      const snapshot = account.latestSnapshot;
+      const history = this.store.history(currentNow - 2 * 3600 * 1000, link.accountId);
+
+      const windowObs: WindowObservation[] = [];
+      if (snapshot?.buckets) {
+        for (const b of snapshot.buckets) {
+          const isSession = b.windowType === 'session_5h';
+          const isWeekly = b.windowType === 'weekly_7d';
+          const winHistory = history
+            .filter((p) => (isSession ? p.session != null : isWeekly ? p.weekly != null : false))
+            .map((p) => ({ t: p.t, value: isSession ? p.session : p.weekly }));
+
+          windowObs.push({
+            key: b.windowType ?? b.id,
+            utilizationPct: b.utilizationPercent ?? null,
+            remainingPct: b.remainingPercent ?? (b.utilizationPercent != null ? 100 - b.utilizationPercent : null),
+            resetsAt: b.resetsAt,
+            history: winHistory,
+          });
+        }
+      }
+
+      const evalResult = evaluateAccountTripwire(
+        link.accountId,
+        account.providerType,
+        windowObs,
+        {
+          leadTimeSec: (policy as any).leadTimeSec ?? DEFAULT_LEAD_TIME_SEC,
+          tauSec: policy.intervalSec ?? DEFAULT_TAU_SEC,
+          tDrainSec: DEFAULT_T_DRAIN_SEC,
+          tPollSec: policy.applyLatencySec ?? DEFAULT_T_POLL_SEC,
+          burnRateMax: policy.burnRateMax ?? 15,
+        },
+        currentNow
+      );
+      evalResult.cpaName = link.cpaName;
+
+      // Check reactive circuit breaker cooldown
+      if (circuitBreakers.isCooldownActive(link.accountId, currentNow)) {
+        evalResult.autoState = 'exhausted';
+        evalResult.reason = 'circuit_breaker_429';
+        evalResult.targetWeight = 0;
+        evalResult.disabled = true;
+        evalResult.isCooldown = true;
+      }
+
+      const poolKey = account.providerType;
+      const poolList = evaluationsByPool.get(poolKey) ?? [];
+      poolList.push(evalResult);
+      evaluationsByPool.set(poolKey, poolList);
+    }
+
+    // Apply fail-closed collective fallback per pool
+    const finalEvaluations = new Map<string, TripwireEvaluation>();
+    let collectiveFallbackActive = false;
+
+    for (const [, poolAccounts] of evaluationsByPool.entries()) {
+      const fallbackResult = applyFailClosedCollectiveFallback(poolAccounts, {
+        mode: (policy as any).collectiveFallbackMode ?? 'single_tight',
+      });
+      if (fallbackResult.fallbackActive) {
+        collectiveFallbackActive = true;
+      }
+      for (const ev of fallbackResult.evaluations) {
+        finalEvaluations.set(ev.accountId, ev);
+      }
+    }
+
+    // Assemble WatermarkAccountView array
+    const accountViews: WatermarkAccountView[] = [];
+    let totalRunwayMinutes: number | null = null;
+    let healthyCount = 0;
+    let tightCount = 0;
+    let exhaustedCount = 0;
+    let quarantinedCount = 0;
+
+    for (const link of links) {
+      const account = this.store.getAccount(link.accountId);
+      if (!account || !account.isActive) continue;
+
+      const entry = cpaEntries.find((e) => e.name === link.cpaName || e.auth_index === link.authIndex);
+      let routing: LinkRoutingState = {};
+      if (link.routingJson) {
+        try { routing = JSON.parse(link.routingJson); } catch {}
+      }
+
+      const evalResult = finalEvaluations.get(link.accountId);
+      const autoState = evalResult?.autoState ?? 'healthy';
+
+      // Operator manual hold
+      const holdRecord = this.store.getManualHold(link.accountId, currentNow);
+      const manualHold: ManualHoldType = holdRecord ? holdRecord.holdType : 'none';
+
+      // Effective state: most_restrictive(ManualHold, AutoState)
+      let effectiveState = effectiveAccountState(manualHold, autoState);
+      if (account.lastStatus === 'quarantined') {
+        effectiveState = 'quarantined';
+      }
+
+      const currentWeight = typeof entry?.weight === 'number' ? entry.weight : (routing.applied ?? 0);
+      let targetWeight = evalResult?.targetWeight ?? 100;
+      let isDisabled = Boolean(entry?.disabled);
+
+      if (effectiveState === 'quarantined' || effectiveState === 'airgapped') {
+        targetWeight = 0;
+        isDisabled = true;
+      }
+
+      const windows: WatermarkWindowView[] = [];
+      const snapshot = account.latestSnapshot;
+      if (snapshot?.buckets) {
+        for (const b of snapshot.buckets) {
+          const curRemaining =
+            b.remainingPercent ??
+            (b.utilizationPercent != null ? 100 - b.utilizationPercent : 100);
+          const burnRate = evalResult?.burnRatePerMin ?? 0;
+          const leadMin = (evalResult?.leadTimeSec ?? DEFAULT_LEAD_TIME_SEC) / 60;
+          const projRemaining = Math.max(0, Math.round((curRemaining - burnRate * leadMin) * 10) / 10);
+          const resetsAt = b.resetsAt ?? '';
+          const resetSecondsRemaining = resetsAt
+            ? Math.max(0, Math.round((new Date(resetsAt).getTime() - currentNow) / 1000))
+            : 0;
+
+          windows.push({
+            key: b.windowType ?? b.id,
+            label: b.label ?? b.windowType ?? b.id,
+            currentRemainingPct: curRemaining,
+            projectedRemainingPct: projRemaining,
+            resetsAt,
+            resetSecondsRemaining,
+            isBinding: (evalResult?.bindingWindow ?? '') === (b.windowType ?? b.id),
+          });
+        }
+      }
+
+      const errs15m = circuitBreakers.getErrors15m(link.accountId, currentNow);
+      const readBackDrift = routing.applied != null && currentWeight !== routing.applied;
+
+      const view: WatermarkAccountView = {
+        accountId: link.accountId,
+        name: account.name,
+        provider: account.providerType,
+        email: account.email,
+        state: effectiveState,
+        manualHold,
+        currentWeight,
+        targetWeight,
+        readBackDrift,
+        isQuarantined: effectiveState === 'quarantined',
+        isDisabled,
+        bindingWindow: evalResult?.bindingWindow ?? 'unknown',
+        windows,
+        burnRatePerMin: evalResult?.burnRatePerMin ?? 0,
+        runwayMinutes: evalResult?.runwayMinutes ?? null,
+        recentRequests5m: 0,
+        recentErrors15m: errs15m,
+      };
+
+      accountViews.push(view);
+
+      if (effectiveState === 'healthy') healthyCount++;
+      else if (effectiveState === 'tight' || effectiveState === 'draining') tightCount++;
+      else if (effectiveState === 'exhausted') exhaustedCount++;
+      else if (effectiveState === 'quarantined' || effectiveState === 'airgapped') quarantinedCount++;
+
+      if (view.runwayMinutes != null && view.runwayMinutes > 0) {
+        if (totalRunwayMinutes === null || view.runwayMinutes < totalRunwayMinutes) {
+          totalRunwayMinutes = view.runwayMinutes;
+        }
+      }
+    }
+
+    let tierState: WatermarkTierState = 'OPEN';
+    if (accountViews.length > 0 && healthyCount === 0 && tightCount === 0) {
+      tierState = 'CLOSED';
+    } else if (tightCount > 0 || (accountViews.length > 0 && healthyCount < accountViews.length)) {
+      tierState = 'DEGRADED';
+    }
+
+    const activeDangerAlerts: string[] = [];
+    if (collectiveFallbackActive) {
+      activeDangerAlerts.push('Collective quota fallback active: pool degraded or airgapped');
+    }
+    const has429 = accountViews.some((a) => a.recentErrors15m.http429 > 0);
+    if (has429) {
+      activeDangerAlerts.push('Upstream HTTP 429 rate limit errors detected');
+    }
+    if (quarantinedCount > 0) {
+      activeDangerAlerts.push(`${quarantinedCount} account(s) under operator hold or quarantine`);
+    }
+    if (totalRunwayMinutes !== null && totalRunwayMinutes < 120) {
+      activeDangerAlerts.push(`Fleet pool runway < 2h (${totalRunwayMinutes}m remaining)`);
+    }
+
+    return {
+      mode,
+      routingStrategy,
+      writesBlockedReason: this.lastRunBlocked,
+      tierState,
+      poolRunwayMinutes: totalRunwayMinutes,
+      healthyCount,
+      tightCount,
+      exhaustedCount,
+      quarantinedCount,
+      accounts: accountViews,
+      recentShadowDecisions: [],
+      activeDangerAlerts,
+    };
   }
 }
