@@ -7,6 +7,7 @@ import type {
 import { effectiveAccountState } from '../../../../server/src/cpaWatermarkTypes';
 import type { Account } from '../../api';
 import { dualRingData, type RingWindow } from '../../../../src/services/capacity';
+import { DEFAULT_STATUS_LEVELS, levelsForTier, type TieredStatusLevels } from '../../../../src/constants/statusLevels';
 
 /* ---------------- 2. Invariant Violation Detection ---------------- */
 
@@ -24,7 +25,8 @@ export interface InvariantViolation {
 
 export function detectInvariantViolations(
   overview: WatermarkFleetOverview | null,
-  fallbackAccounts: Account[] = []
+  fallbackAccounts: Account[] = [],
+  levels: TieredStatusLevels = DEFAULT_STATUS_LEVELS
 ): InvariantViolation[] {
   const violations: InvariantViolation[] = [];
   const accountViews = overview?.accounts || [];
@@ -52,14 +54,16 @@ export function detectInvariantViolations(
       }
 
       const strikes = acc.recentErrors15m?.http429 || 0;
-      if (strikes > 0 && acc.state !== 'airgapped' && acc.manualHold !== 'airgap') {
+      // Quarantine and airgap both take the account out of CLIProxy (weight 0, disabled).
+      const outOfPool = acc.state === 'airgapped' || acc.state === 'quarantined' || acc.manualHold !== 'none';
+      if (strikes > 0 && !outOfPool) {
         violations.push({
           id: `inv-429-${acc.accountId}`,
           accountId: acc.accountId,
           accountName: acc.name,
           provider: acc.provider,
           type: 'unairgapped_429',
-          message: `${strikes} HTTP 429 rate limit strike(s) logged on this account within the last 15m. It must be airgapped immediately to prevent upstream anti-flagging penalties.`,
+          message: `${strikes} HTTP 429 rate limit strike(s) logged on this account within the last 15m. Put it in cooldown to take it out of the pool.`,
           currentWeight: acc.currentWeight,
           upstreamState: acc.state,
           recent429Count: strikes,
@@ -73,7 +77,7 @@ export function detectInvariantViolations(
         ? Math.min(...buckets.map((b) => b.remainingPercent ?? 100))
         : 100;
       const is429 = a.latestSnapshot?.status === 'rate_limited';
-      const isExhausted = is429 || lowest <= 10;
+      const isExhausted = is429 || lowest <= levels.pro.exhaustedPct;
 
       if (isExhausted && a.isActive) {
         violations.push({
@@ -100,7 +104,8 @@ export function detectInvariantViolations(
 
 export function deriveRoutingEnforcement(
   account: Account,
-  accountView?: WatermarkAccountView | null
+  accountView?: WatermarkAccountView | null,
+  levels: TieredStatusLevels = DEFAULT_STATUS_LEVELS
 ): {
   effectiveState: 'Active' | 'Tight' | 'Quarantined' | 'Airgapped';
   origin: 'manual' | 'auto';
@@ -118,9 +123,10 @@ export function deriveRoutingEnforcement(
     const lowest = buckets.length > 0
       ? Math.min(...buckets.map((b) => b.remainingPercent ?? 100))
       : 100;
-    if (account.latestSnapshot?.status === 'rate_limited' || lowest <= 10) {
+    const lv = levelsForTier(levels, null);
+    if (account.latestSnapshot?.status === 'rate_limited' || lowest <= lv.exhaustedPct) {
       autoState = 'exhausted';
-    } else if (lowest <= 35) {
+    } else if (lowest <= lv.tightPct) {
       autoState = 'tight';
     }
   }
@@ -164,7 +170,6 @@ export function deriveRoutingEnforcement(
 
 export type AccountStatus = 'cooldown' | 'exhausted' | 'healthy' | 'tight';
 
-export const TIGHT_THRESHOLD = 35;
 
 export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = {
   cooldown: 'Cooldown',
@@ -192,10 +197,16 @@ export function quotaWindows(account: Account): { fiveHour: RingWindow | null; w
 }
 
 /**
+ * The status shown for an account, one rule for every page.
  * Cooldown: FQD or an admin took the account out of the CLIProxy pool.
- * Exhausted: quota hit 0% (or upstream rate-limited) while still in the pool, so callers get 429s.
+ * Exhausted / Tight: for CLIProxy accounts, the state the server reports from the routing
+ * policy; otherwise the tightest window against the policy levels for the account's tier.
  */
-export function accountStatus(account: Account, accountView?: WatermarkAccountView | null): AccountStatus {
+export function accountStatus(
+  account: Account,
+  accountView?: WatermarkAccountView | null,
+  levels: TieredStatusLevels = DEFAULT_STATUS_LEVELS
+): AccountStatus {
   if (
     accountView &&
     (accountView.manualHold !== 'none' ||
@@ -205,8 +216,15 @@ export function accountStatus(account: Account, accountView?: WatermarkAccountVi
   ) {
     return 'cooldown';
   }
+  if (account.latestSnapshot?.status === 'rate_limited') return 'exhausted';
+  if (accountView) {
+    if (accountView.state === 'exhausted') return 'exhausted';
+    if (accountView.state === 'tight' || accountView.state === 'draining') return 'tight';
+    return 'healthy';
+  }
+  const lv = levelsForTier(levels, null);
   const binding = dualRingData(account.latestSnapshot).binding;
-  if (account.latestSnapshot?.status === 'rate_limited' || (binding && binding.remaining <= 0)) return 'exhausted';
-  if (binding && binding.remaining <= TIGHT_THRESHOLD) return 'tight';
+  if (binding && binding.remaining <= lv.exhaustedPct) return 'exhausted';
+  if (binding && binding.remaining <= lv.tightPct) return 'tight';
   return 'healthy';
 }

@@ -9,7 +9,8 @@ import type {
   ManualHoldType,
 } from '../../server/src/cpaWatermarkTypes';
 
-export type Account = AccountEntity;
+/** An account as the panel receives it; cpaLinked marks accounts that come from CLIProxy. */
+export type Account = AccountEntity & { cpaLinked?: boolean };
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -40,7 +41,13 @@ export const api = {
   login: (password: string) => call<{ ok: true }>('/api/login', { method: 'POST', body: json({ password }) }),
   logout: () => call('/api/logout', { method: 'POST' }),
   state: () =>
-    call<{ accounts: Account[]; lastSyncAllAt: string | null; intervalMin: number; telegram: boolean }>('/api/state'),
+    call<{
+      accounts: Account[];
+      lastSyncAllAt: string | null;
+      intervalMin: number;
+      telegram: boolean;
+      gateways?: { cliproxyUrl: string | null; litellmUrl: string | null };
+    }>('/api/state'),
   refreshAll: () => call('/api/refresh', { method: 'POST' }),
   refresh: (id: string) => call<{ account: Account }>(`/api/accounts/${id}/refresh`, { method: 'POST' }),
   rename: (id: string, name: string) => call(`/api/accounts/${id}`, { method: 'PATCH', body: json({ name }) }),
