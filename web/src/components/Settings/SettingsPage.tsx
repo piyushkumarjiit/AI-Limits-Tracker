@@ -49,6 +49,8 @@ export const SettingsPage: React.FC<{
   };
 
   const lv = data.levels;
+  // Enforce needs CLIProxy's weighted-round-robin strategy; otherwise the engine only logs decisions.
+  const enforcePaused = data.overview?.mode === 'enforce' && data.overview?.writesBlockedReason === 'strategy';
   return (
     <>
       {focus && (
@@ -66,8 +68,13 @@ export const SettingsPage: React.FC<{
           {cpa?.enabled ? (
             <>
               <div className="kv"><span className="muted">URL</span><span>{data.gateways.cliproxyUrl ?? '-'}</span></div>
-              <div className="kv"><span className="muted has-tip" title={ROUTING_MODE_TIP}>FQD routing mode</span><span>{cpa.routingMode ?? '-'}</span></div>
+              <div className="kv"><span className="muted has-tip" title={ROUTING_MODE_TIP}>FQD routing mode</span><span>{cpa.routingMode ?? '-'}{enforcePaused ? ' (paused)' : ''}</span></div>
               <div className="kv"><span className="muted has-tip" title="The routing strategy configured in CLIProxy, read from its management API.">CLIProxy strategy</span><span>{data.overview?.routingStrategy ?? '-'}</span></div>
+              {enforcePaused && (
+                <div className="banner warn" style={{ margin: '8px 0', display: 'block' }}>
+                  Enforce is paused: CLIProxy's routing strategy is <code>{data.overview?.routingStrategy}</code>. Set <code>routing.strategy: weighted-round-robin</code> in CLIProxy's <code>config.yaml</code> so FQD can drain and disable accounts. Until then FQD only logs what it would do.
+                </div>
+              )}
               <div className="kv"><span className="muted">Last sync</span><span>{cpa.lastDiscoveryAt ? new Date(cpa.lastDiscoveryAt).toLocaleString() : 'never'}</span></div>
             </>
           ) : (

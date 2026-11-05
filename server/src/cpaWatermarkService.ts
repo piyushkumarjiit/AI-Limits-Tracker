@@ -265,6 +265,13 @@ export class CpaWatermarkService {
         effectiveMode = 'shadow';
       }
     }
+    // Say so once when enforce mode cannot write, instead of failing silently.
+    if (blocked && blocked !== this.lastRunBlocked) {
+      console.warn(
+        "[routing] enforce mode is paused: CLIProxy's routing strategy is not weighted-round-robin. " +
+          "Set routing.strategy: weighted-round-robin in CLIProxy's config.yaml; until then FQD only logs decisions."
+      );
+    }
     this.lastRunBlocked = blocked;
 
     // Fetch CPA credentials
@@ -780,8 +787,8 @@ export class CpaWatermarkService {
     const policy = this.policyLoader.getPolicy();
     const mode = policy.mode ?? 'shadow';
 
-    // 1. Query routing strategy
-    let routingStrategy = 'weighted-round-robin';
+    // 1. Query routing strategy (report 'unknown' rather than assume it when it cannot be read)
+    let routingStrategy = 'unknown';
     if (this.cachedStrategy && currentNow < this.cachedStrategy.expiresAt) {
       routingStrategy = this.cachedStrategy.value;
     } else {
@@ -789,7 +796,7 @@ export class CpaWatermarkService {
         routingStrategy = await this.transport.getRoutingStrategy();
         this.cachedStrategy = { value: routingStrategy, expiresAt: currentNow + 5 * 60 * 1000 };
       } catch {
-        routingStrategy = 'weighted-round-robin';
+        routingStrategy = 'unknown';
       }
     }
 
