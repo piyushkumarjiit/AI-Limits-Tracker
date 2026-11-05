@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Account } from '../../api';
 import type { ProviderType, QuotaBucket } from '../../../../src/models/types';
+import type { WatermarkAccountView } from '../../../../server/src/cpaWatermarkTypes';
 import { LAB_BRAND_PALETTES, PROVIDER_NAMES } from '../../../../src/constants/theme';
 import { formatTimeRemaining, formatResetCountdown } from '../../../../src/utils/formatters';
 import { formatTokenCount } from '../../../../src/services/telemetryService';
+import { CpaDualIndicator } from '../CpaDualIndicator';
 import './AccountDrawer.css';
 
 export interface AccountDrawerTelemetry {
@@ -25,6 +27,8 @@ export interface AccountDrawerTelemetry {
 export interface AccountDrawerProps {
   account: Account | null;
   telemetry?: AccountDrawerTelemetry;
+  accountView?: WatermarkAccountView | null;
+  onOpenEmergency?: (account: Account) => void;
   onClose: () => void;
   onViewFleet?: () => void;
 }
@@ -32,6 +36,8 @@ export interface AccountDrawerProps {
 export const AccountDrawer: React.FC<AccountDrawerProps> = ({
   account,
   telemetry,
+  accountView,
+  onOpenEmergency,
   onClose,
   onViewFleet: _onViewFleet,
 }) => {
@@ -189,6 +195,18 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
               {formatResetCountdown(nearestReset)}
             </span>
           )}
+        </div>
+
+        {/* CPA Dual-Indicator Status & Operator Intervention */}
+        <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12, border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#93c5fd', marginBottom: 8 }}>
+            CPA Dual-Status &amp; Routing Health
+          </div>
+          <CpaDualIndicator
+            account={account}
+            accountView={accountView}
+            onOpenEmergency={onOpenEmergency ? () => onOpenEmergency(account) : undefined}
+          />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

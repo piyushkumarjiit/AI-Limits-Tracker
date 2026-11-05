@@ -2,6 +2,13 @@ import type { AlertLogEntry, ProviderType } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import type { AccountEntity } from '../../src/models/types';
 import type { TelemetryResponse } from '../../src/services/telemetryService';
+import type {
+  WatermarkFleetOverview,
+  WatermarkAccountView,
+  WatermarkAccountState,
+  ManualHoldType,
+  WatermarkHistoryEntry,
+} from '../../server/src/cpaWatermarkTypes';
 
 export type Account = AccountEntity;
 
@@ -57,4 +64,17 @@ export const api = {
   clearAlerts: () => call('/api/alerts', { method: 'DELETE' }),
   setInterval: (intervalMin: number) => call('/api/settings', { method: 'PUT', body: json({ intervalMin }) }),
   telemetry: () => call<TelemetryResponse>('/api/telemetry'),
+  cpaOverview: () => call<WatermarkFleetOverview>('/api/cpa/overview'),
+  cpaHold: (req: { accountId: string; hold: ManualHoldType; reason?: string; ttlSeconds?: number; ttl?: number; actor?: string }) =>
+    call<{
+      ok: true;
+      accountId: string;
+      hold: ManualHoldType;
+      reason?: string;
+      actor?: string;
+      ttlSeconds?: number;
+      expiresAt?: number;
+      effectiveState: WatermarkAccountState;
+    }>('/api/cpa/hold', { method: 'POST', body: json(req) }),
+  cpaAudit: () => call<{ history: WatermarkHistoryEntry[] }>('/api/cpa/audit'),
 };

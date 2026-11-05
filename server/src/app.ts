@@ -20,11 +20,20 @@ import { Tracker } from './tracker';
 import type { CpaSyncEngine } from './cpaSync';
 import type { CpaRoutingExecutor } from './cpaRouting';
 import type { CpaWatermarkService } from './cpaWatermarkService';
-import { effectiveAccountState } from './cpaWatermarkTypes';
 import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
 import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
 import { TelemetryService } from './telemetry';
+import {
+  type WatermarkFleetOverview,
+  type WatermarkAccountView,
+  type WatermarkWindowView,
+  type WatermarkAccountState,
+  type WatermarkTierState,
+  type WatermarkMode,
+  type ManualHoldType,
+  effectiveAccountState,
+} from './cpaWatermarkTypes';
 
 export interface AppConfig {
   adminPassword: string;
@@ -365,8 +374,8 @@ async function handleApi(
 
   if (path === '/api/cpa/hold' && method === 'POST') {
     const body = await readBody(req);
-    const accountId = body.accountId;
-    if (!accountId || typeof accountId !== 'string') {
+    const accountId = typeof body.accountId === 'string' ? body.accountId.trim() : '';
+    if (!accountId) {
       return send(res, 400, { error: 'accountId is required' });
     }
 
@@ -375,22 +384,53 @@ async function handleApi(
       return send(res, 404, { error: 'Account not found' });
     }
 
-    const hold = body.hold;
+    const hold = body.hold as ManualHoldType;
     if (hold !== 'none' && hold !== 'quarantine' && hold !== 'airgap') {
-      return send(res, 400, { error: 'Invalid hold type. Must be one of: none, quarantine, airgap' });
+      return send(res, 400, { error: 'hold must be one of "none", "quarantine", "airgap"' });
     }
 
     const reason = typeof body.reason === 'string' ? body.reason : undefined;
-    const ttlSeconds = typeof body.ttlSeconds === 'number' && body.ttlSeconds > 0 ? body.ttlSeconds : undefined;
+    const actor = typeof body.actor === 'string' ? body.actor : 'operator';
+    const ttlSeconds = typeof body.ttlSeconds === 'number' && body.ttlSeconds > 0
+      ? body.ttlSeconds
+      : typeof body.ttl === 'number' && body.ttl > 0
+      ? body.ttl
+      : 86400;
 
     let result: { hold: any; effectiveState: string };
     if (cpaWatermarkService) {
       result = await cpaWatermarkService.setManualHold(accountId, hold, reason, ttlSeconds);
     } else {
       const now = Date.now();
-      const expiresAt = hold === 'none' ? null : (ttlSeconds ? now + ttlSeconds * 1000 : now + 24 * 3600 * 1000);
+      const expiresAt = hold === 'none' ? null : now + ttlSeconds * 1000;
       store.setManualHold(accountId, hold, reason, expiresAt, now);
-      const effective = effectiveAccountState(hold, 'healthy');
+
+      // If hold is airgap or quarantine, immediately zero routing weight in store if cpa_link exists
+      if (hold === 'airgap' || hold === 'quarantine') {
+        const link = store.getCpaLink(accountId);
+        if (link && link.routingJson) {
+          try {
+            const rJson = JSON.parse(link.routingJson);
+            rJson.applied = 0;
+            rJson.target = 0;
+            rJson.reason = hold === 'airgap' ? 'manual_airgap' : 'manual_quarantine';
+            store.upsertCpaLink({ ...link, routingJson: JSON.stringify(rJson) });
+          } catch {}
+        }
+      }
+
+      // Determine autoState to compute effectiveState
+      let autoState: WatermarkAccountState = 'healthy';
+      const buckets = account.latestSnapshot?.buckets || [];
+      const lowestRem = buckets.length > 0
+        ? Math.min(...buckets.map((b) => b.remainingPercent ?? 100))
+        : 100;
+      if (account.latestSnapshot?.status === 'rate_limited' || lowestRem <= 10) {
+        autoState = 'exhausted';
+      } else if (lowestRem <= 35) {
+        autoState = 'tight';
+      }
+      const effective = effectiveAccountState(hold, autoState);
       result = {
         hold: { accountId, holdType: hold, reason, createdAt: now, expiresAt },
         effectiveState: effective,
@@ -399,17 +439,206 @@ async function handleApi(
 
     return send(res, 200, {
       ok: true,
-      hold: result.hold,
+      accountId,
+      hold: result.hold.holdType || result.hold.hold || hold,
+      reason: result.hold.reason ?? reason,
+      actor,
+      ttlSeconds,
+      expiresAt: result.hold.expiresAt,
       effectiveState: result.effectiveState,
     });
   }
 
-  if (path === '/api/telemetry' && method === 'GET') {
-    const service = deps.telemetryService ?? new TelemetryService();
-    const accounts = store.listAccounts().map((a) => a.id);
-    const telemetry = await service.getTelemetry(accounts);
-    return send(res, 200, telemetry);
+  if (path === '/api/cpa/audit' && method === 'GET') {
+    const history = store.watermarkStore.getHistory(50);
+    return send(res, 200, { history });
   }
+
+  if (path === '/api/cpa/overview' && method === 'GET') {
+    if (cpaWatermarkService) {
+      const wmOverview = await cpaWatermarkService.getFleetOverview();
+      return send(res, 200, wmOverview);
+    }
+
+    const rawAccounts = store.listAccounts();
+    const activeHolds = store.listManualHolds();
+    const holdsMap = new Map(activeHolds.map((h) => [h.accountId, h]));
+
+    let mode: WatermarkMode = 'shadow';
+    let routingStrategy = 'wrr';
+    let writesBlockedReason: string | null = null;
+    let tierState: WatermarkTierState = 'OPEN';
+    const recentShadowDecisions: WatermarkFleetOverview['recentShadowDecisions'] = [];
+
+    if (cpaRouting && typeof (cpaRouting as any).getPolicyLoader === 'function') {
+      const wmService = cpaRouting as CpaWatermarkService;
+      const policy = wmService.getPolicyLoader().getPolicy();
+      mode = policy.mode;
+      const rContext = wmService.getRoutingContext();
+      routingStrategy = rContext.config.mode;
+    }
+
+    const history = store.watermarkStore.getHistory(30);
+    for (const h of history) {
+      if (h.eventType === 'tick' || h.eventType.startsWith('shadow_') || h.eventType.startsWith('tripwire_') || h.eventType.startsWith('manual_hold')) {
+        try {
+          const parsed = JSON.parse(h.summary || '{}');
+          if (parsed.accountId) {
+            recentShadowDecisions.push({
+              at: h.recordedAt,
+              accountId: parsed.accountId,
+              currentWeight: parsed.currentWeight ?? 100,
+              proposedWeight: parsed.proposedWeight ?? 0,
+              reason: parsed.reason || h.eventType,
+            });
+          }
+        } catch {}
+      }
+    }
+
+    const accountViews: WatermarkAccountView[] = [];
+    const activeDangerAlerts: string[] = [];
+
+    let totalHeadroomSum = 0;
+    let totalBurnRateSum = 0;
+    let totalAccountsCount = 0;
+
+    let healthyCount = 0;
+    let tightCount = 0;
+    let exhaustedCount = 0;
+    let quarantinedCount = 0;
+
+    for (const acc of rawAccounts) {
+      const link = store.getCpaLink(acc.id);
+      let routingState: any = null;
+      if (link?.routingJson) {
+        try {
+          routingState = JSON.parse(link.routingJson);
+        } catch {}
+      }
+
+      const manualHoldRecord = holdsMap.get(acc.id);
+      const manualHold: ManualHoldType = manualHoldRecord ? manualHoldRecord.holdType : 'none';
+
+      const buckets = acc.latestSnapshot?.buckets || [];
+      const windowViews: WatermarkWindowView[] = buckets.map((b) => {
+        const rem = Math.round(b.remainingPercent ?? 100);
+        return {
+          key: b.windowType || b.id || 'window',
+          label: b.label || b.id || 'Window',
+          currentRemainingPct: rem,
+          projectedRemainingPct: rem,
+          resetsAt: b.resetsAt || new Date(Date.now() + 3600000).toISOString(),
+          resetSecondsRemaining: b.resetsAt ? Math.max(0, Math.floor((new Date(b.resetsAt).getTime() - Date.now()) / 1000)) : 3600,
+          isBinding: false,
+        };
+      });
+
+      let bindingWin = windowViews[0];
+      for (const w of windowViews) {
+        if (!bindingWin || w.currentRemainingPct < bindingWin.currentRemainingPct) {
+          bindingWin = w;
+        }
+      }
+      if (bindingWin) {
+        bindingWin.isBinding = true;
+      }
+
+      const lowestRem = bindingWin ? bindingWin.currentRemainingPct : 100;
+      totalHeadroomSum += lowestRem;
+      totalAccountsCount++;
+
+      let autoState: WatermarkAccountState = 'healthy';
+      if (acc.latestSnapshot?.status === 'rate_limited' || lowestRem <= 10) {
+        autoState = 'exhausted';
+      } else if (lowestRem <= 35) {
+        autoState = 'tight';
+      }
+
+      const effective = effectiveAccountState(manualHold, autoState);
+
+      if (effective === 'healthy' || effective === 'recovering') healthyCount++;
+      else if (effective === 'tight' || effective === 'draining' || effective === 'probation') tightCount++;
+      else if (effective === 'exhausted') exhaustedCount++;
+      else if (effective === 'quarantined' || effective === 'airgapped') quarantinedCount++;
+
+      const currentWeight = routingState?.applied ?? (acc.isActive ? 100 : 0);
+      const targetWeight = routingState?.target ?? (effective === 'exhausted' || effective === 'airgapped' || effective === 'quarantined' ? 0 : 100);
+      const burnRatePerMin = (acc.latestSnapshot as any)?.burnRatePerMin ?? (lowestRem < 100 ? 0.05 : 0);
+      totalBurnRateSum += burnRatePerMin;
+
+      const runwayMinutes = burnRatePerMin > 0 ? Math.round(lowestRem / burnRatePerMin) : null;
+      const recent429 = acc.latestSnapshot?.status === 'rate_limited' ? 1 : 0;
+
+      // Invariant checks:
+      if ((effective === 'exhausted' || effective === 'quarantined' || effective === 'airgapped' || autoState === 'exhausted') && currentWeight > 0) {
+        activeDangerAlerts.push(
+          `INVARIANT VIOLATION: Account '${acc.name}' is ${effective} upstream but has active routing weight ${currentWeight} > 0!`
+        );
+      }
+      if (recent429 > 0 && effective !== 'airgapped') {
+        activeDangerAlerts.push(
+          `INVARIANT VIOLATION: 429 rate limit strike logged on account '${acc.name}' which is currently ${effective} instead of airgapped!`
+        );
+      }
+
+      accountViews.push({
+        accountId: acc.id,
+        name: acc.name,
+        provider: acc.providerType,
+        email: acc.email,
+        state: effective,
+        manualHold,
+        currentWeight,
+        targetWeight,
+        readBackDrift: Boolean(routingState?.drift),
+        isQuarantined: effective === 'quarantined' || effective === 'airgapped',
+        isDisabled: !acc.isActive,
+        bindingWindow: bindingWin ? bindingWin.key : 'session_5h',
+        windows: windowViews,
+        burnRatePerMin,
+        runwayMinutes,
+        recentRequests5m: (acc.latestSnapshot as any)?.recentRequests5m ?? 12,
+        recentErrors15m: {
+          http429: recent429,
+          http5xx: 0,
+        },
+      });
+    }
+
+    const avgHeadroom = totalAccountsCount > 0 ? Math.round(totalHeadroomSum / totalAccountsCount) : 100;
+    const poolRunwayMinutes = totalBurnRateSum > 0 ? Math.round(avgHeadroom / totalBurnRateSum) : 720;
+
+    if (exhaustedCount >= 3 || (healthyCount === 0 && totalAccountsCount > 0)) {
+      tierState = 'CLOSED';
+    } else if (tightCount > 0 || exhaustedCount > 0) {
+      tierState = 'DEGRADED';
+    }
+
+    const overview: WatermarkFleetOverview = {
+      mode,
+      routingStrategy,
+      writesBlockedReason,
+      tierState,
+      poolRunwayMinutes,
+      healthyCount,
+      tightCount,
+      exhaustedCount,
+      quarantinedCount,
+      accounts: accountViews,
+      recentShadowDecisions,
+      activeDangerAlerts,
+    };
+
+    return send(res, 200, overview);
+  }
+
+  if (path === '/api/telemetry' && method === 'GET') {
+  const service = deps.telemetryService ?? new TelemetryService();
+  const accounts = store.listAccounts().map((a) => a.id);
+  const telemetry = await service.getTelemetry(accounts);
+  return send(res, 200, telemetry);
+}
 
   if (path === '/api/settings' && method === 'PUT') {
     const body = await readBody(req);

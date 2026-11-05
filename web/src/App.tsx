@@ -6,10 +6,20 @@ import {
   QuotaRadar,
   GatewaysSettings,
   AccountDrawer,
+  CpaFleetBanner,
+  CpaDualIndicator,
+  CpaDangerAlert,
+  CpaEmergencyModal,
+  CpaAuditFeed,
 } from './components';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
+import type {
+  WatermarkFleetOverview,
+  WatermarkHistoryEntry,
+  ManualHoldType,
+} from '../../server/src/cpaWatermarkTypes';
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES, severityColor, severityOf } from '../../src/constants/theme';
 import { dualRingData, familySummaries, type Weighting } from '../../src/services/capacity';
@@ -109,7 +119,22 @@ export function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [cpaOverview, setCpaOverview] = useState<WatermarkFleetOverview | null>(null);
+  const [cpaHistory, setCpaHistory] = useState<WatermarkHistoryEntry[]>([]);
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
+  const [emergencyAccount, setEmergencyAccount] = useState<Account | null>(null);
   useTick(60000);
+
+  const loadCpa = useCallback(async () => {
+    try {
+      const ov = await api.cpaOverview();
+      setCpaOverview(ov);
+    } catch {}
+    try {
+      const aud = await api.cpaAudit();
+      if (aud?.history) setCpaHistory(aud.history);
+    } catch {}
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -121,6 +146,7 @@ export function App() {
         telegram: res.telegram,
       });
       setAuthed(true);
+      await loadCpa();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         setAuthed(false);
@@ -128,7 +154,7 @@ export function App() {
         console.error(e);
       }
     }
-  }, []);
+  }, [loadCpa]);
 
   useEffect(() => {
     load();
@@ -139,9 +165,31 @@ export function App() {
     try {
       await api.refreshAll();
       await load();
+      await loadCpa();
     } finally {
       setSyncing(false);
     }
+  };
+
+  const handleApplyHold = async (req: {
+    accountId: string;
+    hold: ManualHoldType;
+    reason?: string;
+    ttlSeconds?: number;
+  }) => {
+    await api.cpaHold(req);
+    await loadCpa();
+    await load();
+  };
+
+  const handleAirgapNow = async (accountId: string, reason?: string) => {
+    await api.cpaHold({
+      accountId,
+      hold: 'airgap',
+      reason: reason || 'Enforce Airgap Now (Operator Action)',
+    });
+    await loadCpa();
+    await load();
   };
 
   if (authed === null) return <div className="splash"><div className="spinner" /></div>;
@@ -161,7 +209,18 @@ export function App() {
       page = <TelemetryVelocity accounts={accounts} />;
       break;
     case 'accounts':
-      page = <AccountsPage accounts={accounts} go={go} reload={load} syncing={syncing} onRefresh={refreshAll} />;
+      page = (
+        <AccountsPage
+          accounts={accounts}
+          go={go}
+          reload={load}
+          syncing={syncing}
+          onRefresh={refreshAll}
+          overview={cpaOverview}
+          onOpenEmergency={(a) => setEmergencyAccount(a)}
+          onAirgapNow={handleAirgapNow}
+        />
+      );
       break;
     case 'add':
       page = <AddPage accounts={accounts} go={go} reload={load} reconnectId={param} />;
@@ -173,7 +232,21 @@ export function App() {
       page = <GatewaysSettings state={state} reload={load} />;
       break;
     default:
-      page = <HomePage state={state} go={go} syncing={syncing} onRefresh={refreshAll} />;
+      page = (
+        <HomePage
+          state={state}
+          go={go}
+          syncing={syncing}
+          onRefresh={refreshAll}
+          overview={cpaOverview}
+          historyEntries={cpaHistory}
+          isAuditOpen={isAuditOpen}
+          onToggleAudit={() => setIsAuditOpen((prev) => !prev)}
+          onOpenEmergency={(a) => setEmergencyAccount(a)}
+          onAirgapNow={handleAirgapNow}
+          onRefreshCpa={loadCpa}
+        />
+      );
   }
 
   const tab = !path ? 'home' : path === 'account' ? 'home' : path;
@@ -220,6 +293,17 @@ export function App() {
         </nav>
 
         {page}
+
+        {/* 1-Click Emergency Action Modal */}
+        {emergencyAccount && (
+          <CpaEmergencyModal
+            account={emergencyAccount}
+            accountView={cpaOverview?.accounts.find((av) => av.accountId === emergencyAccount.id) || null}
+            isOpen={Boolean(emergencyAccount)}
+            onClose={() => setEmergencyAccount(null)}
+            onApplyHold={handleApplyHold}
+          />
+        )}
 
         {/* Enterprise Footer */}
         <footer className="enterprise-footer">
@@ -371,7 +455,30 @@ const Login: React.FC<{ onDone: () => void }> = ({ onDone }) => {
 
 /* ---------------- TAB 1: FLEET COMMAND (Overview) ---------------- */
 
-const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: boolean; onRefresh: () => void }> = ({ state, go }) => {
+const HomePage: React.FC<{
+  state: AppState;
+  go: (to: string) => void;
+  syncing: boolean;
+  onRefresh: () => void;
+  overview: WatermarkFleetOverview | null;
+  historyEntries: WatermarkHistoryEntry[];
+  isAuditOpen: boolean;
+  onToggleAudit: () => void;
+  onOpenEmergency: (account: Account) => void;
+  onAirgapNow: (accountId: string, reason?: string) => Promise<void>;
+  onRefreshCpa: () => void;
+}> = ({
+  state,
+  go,
+  syncing,
+  overview,
+  historyEntries,
+  isAuditOpen,
+  onToggleAudit,
+  onOpenEmergency,
+  onAirgapNow,
+  onRefreshCpa,
+}) => {
   const { accounts } = state;
   const [_telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
   const [drawerAccount, setDrawerAccount] = useState<Account | null>(null);
@@ -420,6 +527,31 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
 
   return (
     <div id="tab-home" className="view-panel active">
+      {/* 1. Global Sticky Fleet Banner & Pool Runway */}
+      <CpaFleetBanner
+        overview={overview}
+        accounts={effectiveAccounts}
+        isAuditOpen={isAuditOpen}
+        onToggleAudit={onToggleAudit}
+        onRefresh={onRefreshCpa}
+        refreshing={syncing}
+      />
+
+      {/* 2. Pulsing Red DANGER Invariant Alert */}
+      <CpaDangerAlert
+        overview={overview}
+        accounts={effectiveAccounts}
+        onEnforceAirgap={onAirgapNow}
+      />
+
+      {/* 3. Collapsible Shadow-Mode Telemetry & Audit Feed */}
+      <CpaAuditFeed
+        overview={overview}
+        historyEntries={historyEntries}
+        isOpen={isAuditOpen}
+        onClose={onToggleAudit}
+      />
+
       {/* 4 KPI Metric Stat Boxes */}
       <div className="grid-4">
         <div className="card stat-box">
@@ -467,6 +599,8 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
       {drawerAccount && (
         <AccountDrawer
           account={drawerAccount}
+          accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
+          onOpenEmergency={onOpenEmergency}
           telemetry={{
             slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
             proxyPort: 8317,
@@ -488,7 +622,25 @@ const HomePage: React.FC<{ state: AppState; go: (to: string) => void; syncing: b
 
 /* ---------------- TAB 2: FLEET INVENTORY (Accounts) ---------------- */
 
-const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; reload: () => Promise<void>; syncing: boolean; onRefresh: () => void }> = ({ accounts, go, reload, syncing, onRefresh }) => {
+const AccountsPage: React.FC<{
+  accounts: Account[];
+  go: (to: string) => void;
+  reload: () => Promise<void>;
+  syncing: boolean;
+  onRefresh: () => void;
+  overview: WatermarkFleetOverview | null;
+  onOpenEmergency: (account: Account) => void;
+  onAirgapNow: (accountId: string, reason?: string) => Promise<void>;
+}> = ({
+  accounts,
+  go,
+  reload: _reload,
+  syncing: _syncing,
+  onRefresh: _onRefresh,
+  overview,
+  onOpenEmergency,
+  onAirgapNow,
+}) => {
   const [filterHealth, setFilterHealth] = useState<'all' | 'healthy' | 'tight'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [providerFilter, setProviderFilter] = useState<'all' | 'antigravity' | 'claude'>('all');
@@ -590,6 +742,13 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
 
   return (
     <div id="tab-accounts" className="view-panel active">
+      {/* Invariant Danger Alert banner if any violations exist */}
+      <CpaDangerAlert
+        overview={overview}
+        accounts={effectiveAccounts}
+        onEnforceAirgap={onAirgapNow}
+      />
+
       {/* Filter Toolbar */}
       <div className="filter-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
@@ -727,6 +886,8 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
                   STATUS {renderSortIndicator('status')}
                 </th>
               )}
+              <th style={{ minWidth: 260 }}>CPA DUAL-STATUS &amp; ROUTING</th>
+              <th style={{ textAlign: 'center' }}>INTERVENTION</th>
             </tr>
           </thead>
           <tbody>
@@ -740,6 +901,7 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
               const slotStr = isClaude ? 'slot_01' : `slot_${String(idx + 1).padStart(2, '0')}`;
               const provStr = a.providerType === 'antigravity' ? 'Google' : a.providerType === 'claude' ? 'Anthropic' : a.providerType;
               const resetStr = isTight ? 'in 1h 14m' : (isClaude ? 'in 3h 10m' : 'Rolling clear');
+              const accView = overview?.accounts.find((av) => av.accountId === a.id);
 
               return (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setDrawerAccount(a)}>
@@ -768,6 +930,39 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
                       </span>
                     </td>
                   )}
+                  {/* CPA Dual-Indicator */}
+                  <td>
+                    <CpaDualIndicator
+                      account={a}
+                      accountView={accView}
+                      compact
+                    />
+                  </td>
+                  {/* 1-Click Emergency Action */}
+                  <td style={{ textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn small"
+                      style={{
+                        background: 'rgba(168, 85, 247, 0.15)',
+                        border: '1px solid rgba(168, 85, 247, 0.4)',
+                        color: '#c084fc',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenEmergency(a);
+                      }}
+                      title="Open Operator Emergency Hold Controls"
+                    >
+                      🛡️ Hold / Airgap
+                    </button>
+                  </td>
                 </tr>
               );
             })}
@@ -779,6 +974,8 @@ const AccountsPage: React.FC<{ accounts: Account[]; go: (to: string) => void; re
       {drawerAccount && (
         <AccountDrawer
           account={drawerAccount}
+          accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
+          onOpenEmergency={onOpenEmergency}
           telemetry={{
             accountId: drawerAccount.id,
             slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
