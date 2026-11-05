@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import {
   type WatermarkAccountState,
   type WatermarkTierState,
@@ -367,15 +367,23 @@ assert(
 console.log('\nSuite 4: esbuild Server Node ESM Banner');
 
 {
-  const expectedBanner =
-    "import { createRequire } from 'node:module'; import { fileURLToPath } from 'node:url'; import { dirname } from 'node:path'; const require = createRequire(import.meta.url); const __filename = fileURLToPath(import.meta.url); const __dirname = dirname(__filename);";
+  // Must match the banner lines in buildServer() (scripts/build.mjs), which are joined with ' '.
+  const expectedBannerLines = [
+    "import { createRequire as __banner_createRequire } from 'node:module';",
+    "import { fileURLToPath as __banner_fileURLToPath } from 'node:url';",
+    "import { dirname as __banner_dirname } from 'node:path';",
+    'const require = __banner_createRequire(import.meta.url);',
+    'const __filename = __banner_fileURLToPath(import.meta.url);',
+    'const __dirname = __banner_dirname(__filename);',
+  ];
+  const expectedBanner = expectedBannerLines.join(' ');
 
   // Check scripts/build.mjs
   const buildScriptPath = path.resolve(__dirname, '../scripts/build.mjs');
   const buildScriptContent = fs.readFileSync(buildScriptPath, 'utf8');
 
   assert(
-    buildScriptContent.includes(expectedBanner),
+    expectedBannerLines.every((line) => buildScriptContent.includes(line)),
     'scripts/build.mjs includes exact Node ESM banner in buildServer()'
   );
 
@@ -393,6 +401,15 @@ console.log('\nSuite 4: esbuild Server Node ESM Banner');
       serverDistContent.startsWith(expectedBanner) || serverDistContent.includes(expectedBanner),
       'server/dist/server.mjs bundle contains Node ESM banner'
     );
+
+    let syntaxOk = false;
+    try {
+      execFileSync(process.execPath, ['--check', serverDistPath], { stdio: 'pipe' });
+      syntaxOk = true;
+    } catch (err: any) {
+      console.error('Syntax check error:', err?.stderr?.toString() || err);
+    }
+    assert(syntaxOk, 'server/dist/server.mjs passes node --check (no banner identifier collisions)');
   } else {
     assert(true, 'server/dist/server.mjs bundle verification skipped (unbuilt in test run)');
   }

@@ -1,5 +1,6 @@
 // Builds the self-hosted server, the web panel (PWA) and the Chrome extension.
 // Usage: node scripts/build.mjs [server|web|extension ...]   (no args = all)
+import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -50,11 +51,23 @@ async function buildServer() {
     platform: 'node',
     format: 'esm',
     target: 'node24',
+    // Every banner binding is prefixed so it can never collide with top-level
+    // identifiers esbuild hoists from bundled modules (e.g. `fileURLToPath`, `dirname`).
+    // Only `require`, `__filename` and `__dirname` keep their names because CJS deps expect them.
     banner: {
-      js: "import { createRequire } from 'node:module'; import { fileURLToPath } from 'node:url'; import { dirname } from 'node:path'; const require = createRequire(import.meta.url); const __filename = fileURLToPath(import.meta.url); const __dirname = dirname(__filename);",
+      js: [
+        "import { createRequire as __banner_createRequire } from 'node:module';",
+        "import { fileURLToPath as __banner_fileURLToPath } from 'node:url';",
+        "import { dirname as __banner_dirname } from 'node:path';",
+        'const require = __banner_createRequire(import.meta.url);',
+        'const __filename = __banner_fileURLToPath(import.meta.url);',
+        'const __dirname = __banner_dirname(__filename);',
+      ].join(' '),
     },
     define: {},
   });
+  // Gate: fail the build if the bundle doesn't parse (e.g. a banner/bundle identifier collision).
+  execFileSync(process.execPath, ['--check', join(root, 'server/dist/server.mjs')], { stdio: 'inherit' });
 }
 
 async function buildExtension() {

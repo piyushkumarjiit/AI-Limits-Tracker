@@ -41,6 +41,9 @@ jobs:
       - name: Typecheck (app, server, web, extension)
         run: npm run typecheck:all
 
+      - name: Build server bundle
+        run: npm run build:server
+
       - name: Tests
         run: npm test
 

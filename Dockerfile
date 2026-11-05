@@ -13,7 +13,7 @@ COPY src ./src
 COPY server ./server
 COPY web ./web
 
-RUN npm run build:web && npm run build:server
+RUN npm run build:web && npm run build:server && node --check server/dist/server.mjs
 
 # ---------- Stage 2: runtime ----------
 # node:24-alpine
