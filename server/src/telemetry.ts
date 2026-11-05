@@ -129,6 +129,9 @@ export class TelemetryService {
   private cache: TelemetryResponse | null = null;
   private cacheExpiresAt = 0;
   private readonly ttlMs: number;
+  /** A day of LiteLLM spend logs can be tens of MB, so the model table refreshes less often than the rest. */
+  private modelsCache: { models: ModelUsage[]; expiresAt: number } | null = null;
+  private static readonly MODELS_TTL_MS = 10 * 60 * 1000;
 
   constructor(config: TelemetryConfig = {}, ttlMs = 60000) {
     this.config = {
@@ -142,7 +145,7 @@ export class TelemetryService {
   }
 
   /** GET a JSON document from a validated proxy base; returns the HTTP status and body (null on failure). */
-  private async getJson(base: URL, path: string, key: string | undefined): Promise<{ status: number; body: any }> {
+  private async getJson(base: URL, path: string, key: string | undefined, timeoutMs = 5000): Promise<{ status: number; body: any }> {
     const target = new URL(path, base);
     if (
       !(target.protocol === 'http:' || target.protocol === 'https:') ||
@@ -155,7 +158,7 @@ export class TelemetryService {
     try {
       const res = await fetch(target, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(timeoutMs),
         headers: { Accept: 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
         redirect: 'error',
       });
@@ -226,12 +229,16 @@ export class TelemetryService {
 
     // 2. LiteLLM: per-model usage over the last 24 hours from spend logs (needs an admin key)
     const liteLlmBase = validateTelemetryBaseUrl(this.config.liteLlmUrl);
-    if (liteLlmBase && this.config.liteLlmKey) {
+    if (liteLlmBase && this.config.liteLlmKey && this.modelsCache && now < this.modelsCache.expiresAt) {
+      liteLlmConnected = true;
+      models = this.modelsCache.models;
+    } else if (liteLlmBase && this.config.liteLlmKey) {
       const day = (t: number) => new Date(t).toISOString().slice(0, 10);
       const { status, body } = await this.getJson(
         liteLlmBase,
         `/spend/logs?summarize=false&start_date=${day(now - 86400000)}&end_date=${day(now + 86400000)}`,
-        this.config.liteLlmKey
+        this.config.liteLlmKey,
+        30000
       );
       if (status === 200 && Array.isArray(body)) {
         liteLlmConnected = true;
@@ -248,12 +255,13 @@ export class TelemetryService {
           byModel.set(log.model, m);
         }
         models = [...byModel.values()].sort((x, y) => y.totalTokens - x.totalTokens);
+        this.modelsCache = { models, expiresAt: now + TelemetryService.MODELS_TTL_MS };
       } else if (status === 401 || status === 403) {
         notes.push('LiteLLM key cannot read spend logs; per-model usage needs an admin (master) key in LITELLM_KEY.');
       } else if (status === 200) {
         notes.push('LiteLLM spend logs returned an unrecognized format.');
       } else {
-        notes.push('LiteLLM is not reachable (set LITELLM_URL).');
+        notes.push('LiteLLM did not answer in time or is not reachable (check LITELLM_URL).');
       }
     } else {
       notes.push('Per-model usage needs LiteLLM (set LITELLM_URL and an admin LITELLM_KEY).');
