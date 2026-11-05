@@ -27,6 +27,9 @@ import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES, severityCo
 import { dualRingData, familySummaries, type Weighting } from '../../src/services/capacity';
 import { formatTimeRemaining, formatResetCountdown, greeting, MONTHS_SHORT } from '../../src/utils/formatters';
 import { Account, api, ApiError } from './api';
+import { accountFamily } from '../../src/services/liteLlmUsage';
+import { fmtCount, fmtSpend, RangePicker, UsageByAlias, USAGE_RANGE_LABEL, useUsage } from './components/UsageByAlias/UsageByAlias';
+import type { ProviderGroup } from './components/FleetHeadroom/FleetHeadroom';
 import { isInsecurePage } from './session';
 import {
   BarChart,
@@ -178,6 +181,9 @@ export function App() {
       page = acc ? <AccountPage account={acc} reload={load} go={go} /> : <Empty title="Account not found" />;
       break;
     }
+    case 'usage':
+      page = <UsageByAlias accounts={accounts} />;
+      break;
     case 'stats':
       page = <TelemetryVelocity accounts={accounts} telemetry={telemetry} />;
       break;
@@ -250,6 +256,9 @@ export function App() {
           <button className={`tab-btn ${tab === 'accounts' ? 'active' : ''}`} onClick={() => go('/accounts')}>
             Accounts
           </button>
+          <button className={`tab-btn ${tab === 'usage' ? 'active' : ''}`} onClick={() => go('/usage')}>
+            Usage
+          </button>
           <button className={`tab-btn ${tab === 'stats' ? 'active' : ''}`} onClick={() => go('/stats')}>
             Telemetry
           </button>
@@ -294,6 +303,13 @@ export function App() {
             <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
           </svg>
           <span className="mob-nav-label">Accounts</span>
+        </div>
+        <div className={`mob-nav-item ${tab === 'usage' ? 'active' : ''}`} onClick={() => go('/usage')}>
+          <svg className="mob-nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 3v18h18"/>
+            <path d="M7 15l4-4 3 3 5-6"/>
+          </svg>
+          <span className="mob-nav-label">Usage</span>
         </div>
         <div className={`mob-nav-item ${tab === 'stats' ? 'active' : ''}`} onClick={() => go('/stats')}>
           <svg className="mob-nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
@@ -430,8 +446,8 @@ const HomePage: React.FC<{
   const [drawerAccount, setDrawerAccount] = useState<Account | null>(null);
 
   const effectiveAccounts = accounts;
-  const agyAccounts = effectiveAccounts.filter((a) => a.providerType === 'antigravity');
-  const claudeAccounts = effectiveAccounts.filter((a) => a.providerType === 'claude');
+  const [usageDays, setUsageDays] = useState(7);
+  const usage = useUsage(usageDays);
 
   const defaultHoverAccount = effectiveAccounts[0];
   const [hoverAccount, setHoverAccount] = useState<Account | null>(defaultHoverAccount || null);
@@ -447,8 +463,22 @@ const HomePage: React.FC<{
     avg(list.map((a) => quotaWindows(a)[key]?.remaining).filter((v): v is number => typeof v === 'number'));
   const bindingAvg = (list: Account[]) =>
     avg(list.map((a) => quotaWindows(a).binding?.remaining).filter((v): v is number => typeof v === 'number'));
-  const agyHeadroom = bindingAvg(agyAccounts);
-  const claudeHeadroom = bindingAvg(claudeAccounts);
+  // One row per provider family seen in FQD accounts or in LiteLLM usage; nothing is hardcoded.
+  const groups: ProviderGroup[] = (() => {
+    const byFamily = new Map<string, ProviderGroup>();
+    const get = (family: string) =>
+      byFamily.get(family) ?? byFamily.set(family, { family, accounts: [], headroom: '-', aliases: [] }).get(family)!;
+    for (const a of effectiveAccounts) get(accountFamily(a.providerType)).accounts.push(a);
+    for (const f of usage?.families ?? []) {
+      const g = get(f.family);
+      g.usage = { requests: f.requests, spend: f.spend };
+      g.aliases = f.aliases;
+    }
+    for (const g of byFamily.values()) g.headroom = bindingAvg(g.accounts);
+    return [...byFamily.values()].sort(
+      (x, y) => y.accounts.length - x.accounts.length || (y.usage?.spend ?? 0) - (x.usage?.spend ?? 0) || x.family.localeCompare(y.family)
+    );
+  })();
   const fiveHourHeadroom = avgWindow(effectiveAccounts, 'fiveHour');
   const weeklyHeadroom = avgWindow(effectiveAccounts, 'weekly');
   const viewOf = (a: Account) => overview?.accounts.find((av) => av.accountId === a.id) || null;
@@ -464,7 +494,7 @@ const HomePage: React.FC<{
         <div className="card stat-box">
           <span className="stat-sub">Fleet Accounts</span>
           <span className="stat-val" style={{ color: 'var(--blue)' }}>{effectiveAccounts.length} {effectiveAccounts.length === 1 ? 'Account' : 'Accounts'}</span>
-          <span className="stat-sub">{agyAccounts.length} Antigravity · {claudeAccounts.length} Claude Code</span>
+          <span className="stat-sub">{groups.filter((g) => g.accounts.length).map((g) => `${g.accounts.length} ${g.family}`).join(' · ') || 'No accounts yet'}</span>
         </div>
         <div className="card stat-box">
           <span className="stat-sub">5-Hour Headroom</span>
@@ -485,16 +515,38 @@ const HomePage: React.FC<{
         </div>
       </div>
 
+      {usage?.connected && (
+        <div className="grid-4 usage-kpis">
+          <div className="card stat-box">
+            <span className="stat-sub">Requests · {USAGE_RANGE_LABEL[usageDays]}</span>
+            <span className="stat-val">{usage.totals.requests.toLocaleString()}</span>
+            <span className="stat-sub">{usage.totals.successful.toLocaleString()} succeeded · LiteLLM</span>
+          </div>
+          <div className="card stat-box">
+            <span className="stat-sub">Spend · {USAGE_RANGE_LABEL[usageDays]}</span>
+            <span className="stat-val">{fmtSpend(usage.totals.spend)}</span>
+            <span className="stat-sub">{fmtCount(usage.totals.tokens)} tokens</span>
+          </div>
+          <div className="card stat-box">
+            <span className="stat-sub">Failed calls</span>
+            <span className="stat-val" style={{ color: usage.totals.failed ? 'var(--warn)' : 'var(--ok)' }}>{usage.totals.failed.toLocaleString()}</span>
+            <span className="stat-sub">{usage.totals.requests ? `${((usage.totals.failed / usage.totals.requests) * 100).toFixed(1)}% of requests` : '-'}</span>
+          </div>
+          <div className="card stat-box" style={{ justifyContent: 'center' }}>
+            <span className="stat-sub">Range</span>
+            <RangePicker days={usageDays} onChange={setUsageDays} />
+          </div>
+        </div>
+      )}
+
       <FleetHeadroom
-        agyAccounts={agyAccounts}
-        claudeAccounts={claudeAccounts}
+        groups={groups}
+        rangeLabel={USAGE_RANGE_LABEL[usageDays]}
         effectiveAccounts={effectiveAccounts}
         overview={overview}
         hoverAccount={hoverAccount}
         setHoverAccount={setHoverAccount}
         onSelectAccount={(acc) => setDrawerAccount(acc)}
-        agyHeadroom={agyHeadroom}
-        claudeHeadroom={claudeHeadroom}
       />
 
       <ActiveAttention

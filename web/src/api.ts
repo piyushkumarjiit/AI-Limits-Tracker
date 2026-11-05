@@ -2,6 +2,7 @@ import type { AlertLogEntry, ProviderType } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import type { AccountEntity } from '../../src/models/types';
 import type { TelemetryResponse } from '../../src/services/telemetryService';
+import type { UsageReport } from '../../src/services/liteLlmUsage';
 import type {
   WatermarkFleetOverview,
   WatermarkAccountState,
@@ -62,6 +63,7 @@ export const api = {
   clearAlerts: () => call('/api/alerts', { method: 'DELETE' }),
   setInterval: (intervalMin: number) => call('/api/settings', { method: 'PUT', body: json({ intervalMin }) }),
   telemetry: () => call<TelemetryResponse>('/api/telemetry'),
+  usage: (days: number) => call<UsageReport>(`/api/usage?days=${days}`),
   cpaStatus: () => call<{ enabled: boolean; lastDiscoveryAt: number | string | null; lastDiscoveryOk: boolean; routingMode?: string }>('/api/cpa/status'),
   telegramTest: () => call<{ ok: true }>('/api/telegram/test', { method: 'POST' }),
   cpaOverview: () => call<WatermarkFleetOverview>('/api/cpa/overview'),
