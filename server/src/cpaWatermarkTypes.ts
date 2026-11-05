@@ -98,6 +98,15 @@ export interface WatermarkShadowDecision {
   reason: string;
 }
 
+export interface WatermarkHistoryEntry {
+  id?: number;
+  recordedAt: number;
+  eventType: string;
+  generation: number;
+  summary: string;
+  stateJson: string;
+}
+
 export interface WatermarkFleetOverview {
   mode: WatermarkMode;
   routingStrategy: string;

@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { EngineState } from './cpaWatermarkEngine';
 import { validateWatermarkPolicy, type FullWatermarkPolicy } from './cpaWatermarkPolicy';
+import type { ManualHoldType } from './cpaWatermarkTypes';
 
 /**
  * Historical audit event entry stored in cpa_watermark_history.
@@ -12,6 +13,19 @@ export interface WatermarkHistoryEntry {
   generation: number;
   summary: string;
   stateJson: string;
+}
+
+/**
+ * Persisted manual operator hold record.
+ */
+export interface PersistedManualHold {
+  accountId: string;
+  hold: ManualHoldType;
+  reason?: string;
+  actor?: string;
+  ttlSeconds?: number;
+  createdAt: number;
+  expiresAt?: number;
 }
 
 function isObject(val: unknown): val is Record<string, unknown> {
@@ -68,6 +82,16 @@ export class CpaWatermarkStore {
 
       CREATE INDEX IF NOT EXISTS idx_cpa_watermark_history_recorded_at
         ON cpa_watermark_history (recorded_at);
+
+      CREATE TABLE IF NOT EXISTS cpa_manual_holds (
+        account_id TEXT PRIMARY KEY,
+        hold TEXT NOT NULL,
+        reason TEXT,
+        actor TEXT,
+        ttl_seconds INTEGER,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER
+      );
     `);
   }
 
@@ -225,6 +249,7 @@ export class CpaWatermarkStore {
     try {
       this.db.exec('DELETE FROM cpa_watermark_state');
       this.db.exec('DELETE FROM cpa_watermark_history');
+      this.db.exec('DELETE FROM cpa_manual_holds');
       this.db.exec('RELEASE cpa_wm_clear');
     } catch (err) {
       try {
@@ -235,5 +260,151 @@ export class CpaWatermarkStore {
       }
       throw err;
     }
+  }
+
+  /**
+   * Sets or clears a manual hold for an account.
+   * If hold is 'none', the active hold is deleted.
+   */
+  public setManualHold(
+    accountId: string,
+    hold: ManualHoldType,
+    reason?: string,
+    actor?: string,
+    ttlSeconds?: number
+  ): PersistedManualHold {
+    const now = Date.now();
+    if (hold === 'none') {
+      this.db.prepare('DELETE FROM cpa_manual_holds WHERE account_id = ?').run(accountId);
+      this.db
+        .prepare(`
+          INSERT INTO cpa_watermark_history (recorded_at, event_type, generation, summary, state_json)
+          VALUES (?, ?, 0, ?, ?)
+        `)
+        .run(
+          now,
+          'manual_hold_cleared',
+          JSON.stringify({ accountId, actor: actor || 'operator', reason: reason || 'Hold cleared' }),
+          JSON.stringify({ accountId, hold: 'none', clearedAt: now })
+        );
+      return {
+        accountId,
+        hold: 'none',
+        reason,
+        actor,
+        createdAt: now,
+      };
+    }
+
+    const defaultTtl = ttlSeconds && ttlSeconds > 0 ? ttlSeconds : 86400; // default 24h
+    const expiresAt = now + defaultTtl * 1000;
+
+    this.db
+      .prepare(`
+        INSERT INTO cpa_manual_holds (account_id, hold, reason, actor, ttl_seconds, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id) DO UPDATE SET
+          hold = excluded.hold,
+          reason = excluded.reason,
+          actor = excluded.actor,
+          ttl_seconds = excluded.ttl_seconds,
+          created_at = excluded.created_at,
+          expires_at = excluded.expires_at
+      `)
+      .run(accountId, hold, reason ?? null, actor ?? 'operator', defaultTtl, now, expiresAt);
+
+    this.db
+      .prepare(`
+        INSERT INTO cpa_watermark_history (recorded_at, event_type, generation, summary, state_json)
+        VALUES (?, ?, 0, ?, ?)
+      `)
+      .run(
+        now,
+        `manual_hold_${hold}`,
+        JSON.stringify({ accountId, hold, actor: actor || 'operator', reason: reason || `Manual ${hold} hold`, expiresAt }),
+        JSON.stringify({ accountId, hold, reason, actor, ttlSeconds: defaultTtl, expiresAt })
+      );
+
+    return {
+      accountId,
+      hold,
+      reason,
+      actor,
+      ttlSeconds: defaultTtl,
+      createdAt: now,
+      expiresAt,
+    };
+  }
+
+  /**
+   * Retrieves active manual hold for an account, pruning if expired.
+   */
+  public getManualHold(accountId: string): PersistedManualHold | null {
+    const now = Date.now();
+    const row = this.db
+      .prepare('SELECT account_id, hold, reason, actor, ttl_seconds, created_at, expires_at FROM cpa_manual_holds WHERE account_id = ?')
+      .get(accountId) as {
+        account_id: string;
+        hold: string;
+        reason: string | null;
+        actor: string | null;
+        ttl_seconds: number | null;
+        created_at: number;
+        expires_at: number | null;
+      } | undefined;
+
+    if (!row) return null;
+
+    if (row.expires_at && row.expires_at < now) {
+      this.db.prepare('DELETE FROM cpa_manual_holds WHERE account_id = ?').run(accountId);
+      return null;
+    }
+
+    return {
+      accountId: row.account_id,
+      hold: row.hold as ManualHoldType,
+      reason: row.reason ?? undefined,
+      actor: row.actor ?? undefined,
+      ttlSeconds: row.ttl_seconds ?? undefined,
+      createdAt: Number(row.created_at),
+      expiresAt: row.expires_at ? Number(row.expires_at) : undefined,
+    };
+  }
+
+  /**
+   * Lists all currently active manual holds, pruning any expired ones.
+   */
+  public listManualHolds(): PersistedManualHold[] {
+    const now = Date.now();
+    this.db.prepare('DELETE FROM cpa_manual_holds WHERE expires_at IS NOT NULL AND expires_at < ?').run(now);
+
+    const rows = this.db
+      .prepare('SELECT account_id, hold, reason, actor, ttl_seconds, created_at, expires_at FROM cpa_manual_holds')
+      .all() as Array<{
+        account_id: string;
+        hold: string;
+        reason: string | null;
+        actor: string | null;
+        ttl_seconds: number | null;
+        created_at: number;
+        expires_at: number | null;
+      }>;
+
+    return rows.map((r) => ({
+      accountId: r.account_id,
+      hold: r.hold as ManualHoldType,
+      reason: r.reason ?? undefined,
+      actor: r.actor ?? undefined,
+      ttlSeconds: r.ttl_seconds ?? undefined,
+      createdAt: Number(r.created_at),
+      expiresAt: r.expires_at ? Number(r.expires_at) : undefined,
+    }));
+  }
+
+  /**
+   * Clears a manual hold explicitly.
+   */
+  public clearManualHold(accountId: string): void {
+    this.setManualHold(accountId, 'none');
   }
 }
