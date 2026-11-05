@@ -270,7 +270,7 @@ Run the test suite across core parsers, API endpoints, and cryptographic securit
 # Run unit & isolation tests
 npm test
 
-# Typecheck all monorepo workspaces (server, web, extension)
+# Typecheck all workspaces (shared, server, web)
 npm run typecheck:all
 
 # Security & deployment tests

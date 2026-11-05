@@ -14,6 +14,8 @@ import { Tracker } from './tracker';
 import { CpaTransport } from '../../src/services/cpa/CpaTransport';
 import { CpaUsageProvider } from '../../src/services/cpa/CpaUsageProvider';
 import { CpaSyncEngine } from './cpaSync';
+import { CpaUsageCollector } from './cpaUsageCollector';
+import { TelemetryService } from './telemetry';
 import { CpaRoutingExecutor } from './cpaRouting';
 import { CpaWatermarkService } from './cpaWatermarkService';
 import { CpaPolicyLoader } from './cpaWatermarkPolicy';
@@ -84,6 +86,7 @@ const tracker = new Tracker(store);
 
 const cpaConfig = resolveCpaConfig(process.env);
 let cpaSync: CpaSyncEngine | undefined;
+let cpaUsage: CpaUsageCollector | undefined;
 let cpaRouting: CpaWatermarkService | CpaRoutingExecutor | undefined;
 let cpaWatermarkService: CpaWatermarkService | undefined;
 let cpaPolicyLoader: CpaPolicyLoader | undefined;
@@ -95,6 +98,7 @@ if (cpaConfig) {
     timeoutMs: cpaConfig.timeoutMs,
   });
   const cpaUsageProvider = new CpaUsageProvider(cpaTransport);
+  cpaUsage = new CpaUsageCollector(store, cpaTransport);
   tracker.setCpaProvider(cpaUsageProvider);
 
   cpaPolicyLoader = new CpaPolicyLoader();
@@ -164,7 +168,7 @@ const server = createApp(
     allowedHosts: ALLOWED_HOSTS,
     maxHeaderSize: 8192,
   },
-  { store, tracker, cpaSync, cpaRouting, cpaWatermarkService, quotaCache }
+  { store, tracker, cpaSync, cpaRouting, cpaWatermarkService, quotaCache, telemetryService: new TelemetryService({ usageSummary: (since) => store.cpaUsageSummary(since) }) }
 );
 
 // Explicit resource bounds: slow/malicious clients cannot hold sockets or headers forever.
@@ -187,6 +191,7 @@ function shutdown(signal: string): void {
   hard.unref();
   tracker.stop();
   if (cpaSync) cpaSync.stop();
+  if (cpaUsage) cpaUsage.stop();
   server.close(() => {
     try {
       store.checkpoint();
@@ -207,4 +212,5 @@ server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   console.log(`FQD server on :${PORT} (data: ${DATA_DIR}, web: ${WEB_DIR})`);
   tracker.start();
   if (cpaSync) cpaSync.start();
+  if (cpaUsage) cpaUsage.start();
 });

@@ -351,6 +351,21 @@ export class CpaTransport {
    * Get routing strategy from CPA.
    * Path: GET /v0/management/routing/strategy.
    */
+  /**
+   * Per-request usage records CLIProxy v8 keeps for a short retention window
+   * (redis-usage-queue-retention-seconds, 60s by default). Reading does not remove them.
+   */
+  async getUsageQueue(): Promise<any[]> {
+    const response = await this.cpaFetch('/v8/management/observability/usage/queue');
+    const text = await this.readResponseText(response);
+    try {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      throw new CpaError(500, 'Invalid JSON received from CPA getUsageQueue');
+    }
+  }
+
   async getRoutingStrategy(): Promise<string> {
     const response = await this.cpaFetch('/v0/management/routing/strategy');
     const text = await this.readResponseText(response);

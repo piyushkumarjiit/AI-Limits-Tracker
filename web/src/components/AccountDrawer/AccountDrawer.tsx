@@ -295,10 +295,16 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
           </div>
               {telemetry.totalTokens > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-            <span className="muted">Tokens routed:</span>
+            <span className="muted">Tokens (last 24h):</span>
             <b>{formatTokenCount(telemetry.totalTokens)}</b>
           </div>
               )}
+              {telemetry.models?.map((m) => (
+                <div key={m.model} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, paddingLeft: 8 }}>
+                  <span className="muted">{m.model}</span>
+                  <span>{m.requests} req · {formatTokenCount(m.totalTokens)} tokens</span>
+                </div>
+              ))}
             </>
           ) : (
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>

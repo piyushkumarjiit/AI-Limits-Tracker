@@ -64,3 +64,6 @@ data/
 tests/vrt/candidate/
 tests/vrt/diff/
 tests/vrt/report/
+
+# Local design-review output
+.lavish/

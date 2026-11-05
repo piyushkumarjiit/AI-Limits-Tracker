@@ -210,7 +210,7 @@ function fakeReq(headers: Record<string, string> = {}, remoteAddress = '10.0.0.1
 
 async function runAllTests() {
   console.log('\n========================================');
-  console.log('  AI LIMITS TRACKER - HARDENING TESTS   ');
+  console.log('  FQD - HARDENING TESTS   ');
   console.log('========================================\n');
 
   console.log('Suite 1: Secret validation');

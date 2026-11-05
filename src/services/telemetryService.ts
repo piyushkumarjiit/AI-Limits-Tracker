@@ -21,6 +21,8 @@ export interface AccountTelemetry {
   /** CLIProxy has this credential disabled (out of the routing pool). */
   disabled?: boolean;
   proxyStatus?: string | null;
+  /** Token usage by model over the last 24 hours, from CLIProxy's usage feed. */
+  models?: ModelUsage[];
   proxySource?: 'litellm' | 'cliproxy' | 'local_estimate';
   slotId?: string;
   proxyPort?: number;

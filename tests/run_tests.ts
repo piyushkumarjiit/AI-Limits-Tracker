@@ -62,7 +62,7 @@ function mockFetch(handler: (url: string, init: any) => { status: number; body: 
 async function runAllTests() {
   const realFetch = globalThis.fetch;
   console.log('\n========================================');
-  console.log('  AI LIMITS TRACKER - UNIT & E2E TESTS  ');
+  console.log('  FQD - UNIT & E2E TESTS  ');
   console.log('========================================\n');
 
   console.log('Suite 1: cURL and manual input');

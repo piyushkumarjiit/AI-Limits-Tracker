@@ -70,6 +70,27 @@ class Vault {
   }
 }
 
+export interface CpaUsageRow {
+  requestId: string;
+  ts: number;
+  email: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  failed: boolean;
+}
+
+export interface CpaUsageSummaryRow {
+  email: string;
+  model: string;
+  requests: number;
+  failed: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 export class Store {
   private db: DatabaseSync;
   private vault: Vault;
@@ -142,6 +163,17 @@ export class Store {
         unlinked_at INTEGER,
         routing_json TEXT
       );
+      CREATE TABLE IF NOT EXISTS cpa_usage (
+        request_id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        email TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        total_tokens INTEGER NOT NULL,
+        failed INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS cpa_usage_ts ON cpa_usage (ts);
       CREATE TABLE IF NOT EXISTS cpa_manual_holds (
         account_id TEXT PRIMARY KEY,
         hold_type TEXT NOT NULL,
@@ -232,6 +264,41 @@ export class Store {
       unlinkedAt: r.unlinked_at != null ? Number(r.unlinked_at) : null,
       routingJson: r.routing_json ?? null,
     };
+  }
+
+  /** Saves CLIProxy usage records once each (keyed by request id); returns how many were new. */
+  addCpaUsage(rows: CpaUsageRow[]): number {
+    const stmt = this.db.prepare(
+      'INSERT OR IGNORE INTO cpa_usage (request_id, ts, email, model, input_tokens, output_tokens, total_tokens, failed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    let added = 0;
+    for (const r of rows) {
+      added += Number(stmt.run(r.requestId, r.ts, r.email, r.model, r.inputTokens, r.outputTokens, r.totalTokens, r.failed ? 1 : 0).changes);
+    }
+    return added;
+  }
+
+  /** Token and request totals per account email and model since `sinceMs`. */
+  cpaUsageSummary(sinceMs: number): CpaUsageSummaryRow[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT email, model, COUNT(*) AS requests, SUM(failed) AS failed, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(total_tokens) AS total_tokens FROM cpa_usage WHERE ts >= ? GROUP BY email, model'
+        )
+        .all(sinceMs) as any[]
+    ).map((r) => ({
+      email: r.email,
+      model: r.model,
+      requests: Number(r.requests),
+      failed: Number(r.failed),
+      inputTokens: Number(r.input_tokens),
+      outputTokens: Number(r.output_tokens),
+      totalTokens: Number(r.total_tokens),
+    }));
+  }
+
+  pruneCpaUsage(beforeMs: number): void {
+    this.db.prepare('DELETE FROM cpa_usage WHERE ts < ?').run(beforeMs);
   }
 
   getCpaLink(accountId: string): CpaLink | null {

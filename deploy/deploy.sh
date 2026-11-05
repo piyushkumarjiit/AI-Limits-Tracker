@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Deploy / update AI Limits Tracker on the VPS.
+# Deploy / update FQD on the VPS.
 # Run from the repo root after `npm run build`:  bash deploy/deploy.sh
 set -euo pipefail
 
-APP_DIR=/opt/ai-limits-tracker
+APP_DIR=/opt/fqd
 DOMAIN="${DOMAIN:?set DOMAIN=your-domain}"
 
 echo "==> Installing files to $APP_DIR"
@@ -27,19 +27,19 @@ ENV
 fi
 
 echo "==> systemd service"
-sudo cp deploy/aitracker.service /etc/systemd/system/aitracker.service
+sudo cp deploy/fqd.service /etc/systemd/system/fqd.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now aitracker
-sudo systemctl restart aitracker
+sudo systemctl enable --now fqd
+sudo systemctl restart fqd
 
-if [ ! -f /etc/nginx/sites-enabled/aitracker ]; then
+if [ ! -f /etc/nginx/sites-enabled/fqd ]; then
   echo "==> nginx vhost for $DOMAIN"
-  sudo sed "s/limits.example.com/$DOMAIN/" deploy/nginx.conf | sudo tee /etc/nginx/sites-available/aitracker >/dev/null
-  sudo ln -sf /etc/nginx/sites-available/aitracker /etc/nginx/sites-enabled/aitracker
+  sudo sed "s/limits.example.com/$DOMAIN/" deploy/nginx.conf | sudo tee /etc/nginx/sites-available/fqd >/dev/null
+  sudo ln -sf /etc/nginx/sites-available/fqd /etc/nginx/sites-enabled/fqd
   sudo nginx -t && sudo systemctl reload nginx
   echo "==> TLS via certbot"
   sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m admin@"$DOMAIN" --redirect || true
 fi
 
 echo "==> Done. https://$DOMAIN"
-sudo systemctl --no-pager status aitracker | head -5
+sudo systemctl --no-pager status fqd | head -5

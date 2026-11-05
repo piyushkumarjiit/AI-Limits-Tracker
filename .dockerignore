@@ -11,7 +11,6 @@ data
 *.db-wal
 *.db-shm
 assets
-extension
 landing
 deploy
 integrations

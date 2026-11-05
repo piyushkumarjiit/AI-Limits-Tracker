@@ -1,5 +1,5 @@
-// Builds the self-hosted server, the web panel (PWA) and the Chrome extension.
-// Usage: node scripts/build.mjs [server|web|extension ...]   (no args = all)
+// Builds the self-hosted server and the web panel (PWA).
+// Usage: node scripts/build.mjs [server|web ...]   (no args = all)
 import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -70,28 +70,6 @@ async function buildServer() {
   execFileSync(process.execPath, ['--check', join(root, 'server/dist/server.mjs')], { stdio: 'inherit' });
 }
 
-async function buildExtension() {
-  const src = join(root, 'extension');
-  const out = join(src, 'dist');
-  rmSync(out, { recursive: true, force: true });
-  mkdirSync(out, { recursive: true });
-  await build({
-    ...common,
-    entryPoints: {
-      background: join(src, 'src/background.ts'),
-      popup: join(src, 'src/popup.tsx'),
-    },
-    outdir: out,
-    format: 'esm',
-    target: 'chrome110',
-  });
-  cpSync(join(src, 'public'), out, { recursive: true });
-  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  const manifest = JSON.parse(readFileSync(join(src, 'manifest.json'), 'utf8'));
-  manifest.version = pkg.version;
-  writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
-}
 
 if (want('server')) await buildServer();
 if (want('web')) await buildWeb();
-if (want('extension') && existsSync(join(root, 'extension/src/background.ts'))) await buildExtension();
