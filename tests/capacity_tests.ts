@@ -46,16 +46,17 @@ console.log('Suite 1: Severity thresholds & rank');
 {
   assert(severityOf(100) === 'healthy', 'severityOf: 100 -> healthy');
   assert(severityOf(50) === 'healthy', 'severityOf: 50 -> healthy');
+  // Default levels are the policy's Pro tier: tight at 20%, exhausted at 2%.
   assert(severityOf(36) === 'healthy', 'severityOf: 36 -> healthy');
-  assert(severityOf(35) === 'warning', 'severityOf: 35 -> warning');
-  assert(severityOf(25) === 'warning', 'severityOf: 25 -> warning');
-  assert(severityOf(21) === 'warning', 'severityOf: 21 -> warning');
-  assert(severityOf(20) === 'critical', 'severityOf: 20 -> critical');
-  assert(severityOf(15) === 'critical', 'severityOf: 15 -> critical');
-  assert(severityOf(11) === 'critical', 'severityOf: 11 -> critical');
-  assert(severityOf(10) === 'exhausted', 'severityOf: 10 -> exhausted');
-  assert(severityOf(5) === 'exhausted', 'severityOf: 5 -> exhausted');
+  assert(severityOf(21) === 'healthy', 'severityOf: 21 -> healthy');
+  assert(severityOf(20) === 'warning', 'severityOf: 20 -> warning (policy drain level)');
+  assert(severityOf(10) === 'warning', 'severityOf: 10 -> warning');
+  assert(severityOf(3) === 'warning', 'severityOf: 3 -> warning');
+  assert(severityOf(2) === 'exhausted', 'severityOf: 2 -> exhausted (policy hard stop)');
   assert(severityOf(0) === 'exhausted', 'severityOf: 0 -> exhausted');
+  // Explicit levels (e.g. a Non-Pro account) are honoured.
+  assert(severityOf(40, { tightPct: 40, exhaustedPct: 5 }) === 'warning', 'severityOf: 40 with Non-Pro levels -> warning');
+  assert(severityOf(5, { tightPct: 40, exhaustedPct: 5 }) === 'exhausted', 'severityOf: 5 with Non-Pro levels -> exhausted');
   assert(severityOf(-5) === 'exhausted', 'severityOf: negative -> exhausted');
   assert(severityOf(null) === 'unknown', 'severityOf: null -> unknown');
   assert(severityOf(undefined as any) === 'unknown', 'severityOf: undefined -> unknown');
@@ -75,8 +76,8 @@ console.log('Suite 1: Severity thresholds & rank');
   assert(SEVERITY_COLORS.unknown === '#a1a1aa', 'SEVERITY_COLORS unknown matches spec');
 
   assert(severityColor(100) === '#1f9d74', 'severityColor(100) -> healthy color');
-  assert(severityColor(30) === '#d97706', 'severityColor(30) -> warning color');
-  assert(severityColor(15) === '#ea580c', 'severityColor(15) -> critical color');
+  assert(severityColor(30) === '#1f9d74', 'severityColor(30) -> healthy color (above the 20% drain level)');
+  assert(severityColor(15) === '#d97706', 'severityColor(15) -> warning color');
   assert(severityColor(0) === '#dc2626', 'severityColor(0) -> exhausted color');
   assert(severityColor(null) === '#a1a1aa', 'severityColor(null) -> unknown color');
   assert(severityColor(100, 'gemini') === '#3b5bdb', 'severityColor(100, gemini) preserves ringBlue');
@@ -104,13 +105,13 @@ console.log('\nSuite 2: Dual-ring resolution & binding');
     remainingPercent: 35,
   };
 
-  // 5h=90, weekly=35 -> binding=weekly (35%), outer=weekly, inner=5h, severity=warning
+  // 5h=90, weekly=35 -> binding=weekly (35%), outer=weekly, inner=5h, severity=healthy (above the 20% drain level)
   const res = resolveRingWindows([b5h, bWeekly]);
   assert(res.inner?.remaining === 90, 'Dual-ring: inner is 5h (90%)');
   assert(res.outer?.remaining === 35, 'Dual-ring: outer is weekly (35%)');
   assert(res.binding === res.outer, 'Dual-ring: binding is weekly');
   assert(res.effectiveRemaining === 35, 'Dual-ring: effectiveRemaining is 35%');
-  assert(res.severity === 'warning', 'Dual-ring: severity is warning');
+  assert(res.severity === 'healthy', 'Dual-ring: severity is healthy at 35%');
 
   // Case with weekly=40 -> healthy
   const bWeekly40: QuotaBucket = { ...bWeekly, remainingPercent: 40, utilizationPercent: 60 };
@@ -121,12 +122,12 @@ console.log('\nSuite 2: Dual-ring resolution & binding');
   assert(resWeekly40.inner?.remaining === 90, 'Dual-ring: inner is 5h (90%)');
   assert(resWeekly40.severity === 'healthy', 'Dual-ring: 40% is healthy under >35 scale');
 
-  // Case where 5h is lower: 5h=15, weekly=80 -> binding=5h (15%), severity=critical
+  // Case where 5h is lower: 5h=15, weekly=80 -> binding=5h (15%), severity=warning
   const b5hLow: QuotaBucket = { ...b5h, remainingPercent: 15, utilizationPercent: 85 };
   const res2 = resolveRingWindows([b5hLow, bWeekly]);
   assert(res2.binding === res2.inner, 'Dual-ring: binding is 5h when 5h is lower');
   assert(res2.effectiveRemaining === 15, 'Dual-ring: effectiveRemaining is 15%');
-  assert(res2.severity === 'critical', 'Dual-ring: severity is critical');
+  assert(res2.severity === 'warning', 'Dual-ring: severity is warning at 15%');
 }
 
 // ----------------------------------------------------

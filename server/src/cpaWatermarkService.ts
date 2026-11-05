@@ -12,6 +12,9 @@ import {
 import {
   CpaPolicyLoader,
   classifyAccount,
+  statusLevelsOf,
+  DEFAULT_ACCOUNT_CLASSIFICATION,
+  type AccountClassification,
   type FullWatermarkPolicy,
 } from './cpaWatermarkPolicy';
 import { CpaWatermarkStore } from './cpaWatermarkStore';
@@ -802,6 +805,7 @@ export class CpaWatermarkService {
     // 3. Gather accounts and evaluate tripwires
     const links = this.store.listCpaLinks().filter((l) => l.state === 'linked');
     const evaluationsByPool = new Map<string, TripwireEvaluation[]>();
+    const classifications = new Map<string, AccountClassification>();
 
     for (const link of links) {
       const account = this.store.getAccount(link.accountId);
@@ -829,11 +833,18 @@ export class CpaWatermarkService {
         }
       }
 
+      // Tight / exhausted levels come from the policy for this account's tier.
+      const classification = classifyAccount(link.cpaName, policy.classificationRules);
+      const levels = classification.tier === 'non_pro' ? policy.nonPro : policy.pro;
+      classifications.set(link.accountId, classification);
+
       const evalResult = evaluateAccountTripwire(
         link.accountId,
         account.providerType,
         windowObs,
         {
+          exhaustedFloorPct: levels.hardStopPct,
+          tightFloorPct: levels.drainPct,
           leadTimeSec: (policy as any).leadTimeSec ?? DEFAULT_LEAD_TIME_SEC,
           tauSec: policy.intervalSec ?? DEFAULT_TAU_SEC,
           tDrainSec: DEFAULT_T_DRAIN_SEC,
@@ -894,7 +905,16 @@ export class CpaWatermarkService {
       }
 
       const evalResult = finalEvaluations.get(link.accountId);
-      const autoState = evalResult?.autoState ?? 'healthy';
+      let autoState: WatermarkAccountState = evalResult?.autoState ?? 'healthy';
+      // For accounts the routing engine manages, report the engine's own state so the
+      // status always matches what FQD does (or, in shadow mode, would do) in CLIProxy.
+      const engineAccount = this.engineState.accountStates?.[link.cpaName];
+      if (engineAccount && evalResult?.reason !== 'circuit_breaker_429') {
+        if (engineAccount.state === 'hard_stop') autoState = 'exhausted';
+        else if (engineAccount.state === 'drain') autoState = 'draining';
+        else if (engineAccount.state === 'healthy' || engineAccount.state === 'ramping') autoState = 'healthy';
+      }
+      const classification = classifications.get(link.accountId) ?? DEFAULT_ACCOUNT_CLASSIFICATION;
 
       // Operator manual hold
       const holdRecord = this.store.getManualHold(link.accountId, currentNow);
@@ -963,6 +983,8 @@ export class CpaWatermarkService {
         runwayMinutes: evalResult?.runwayMinutes ?? null,
         recentRequests5m: 0,
         recentErrors15m: errs15m,
+        tier: classification.tier,
+        managed: classification.managed && routing.managed !== false,
       };
 
       accountViews.push(view);
@@ -1014,6 +1036,7 @@ export class CpaWatermarkService {
       accounts: accountViews,
       recentShadowDecisions: [],
       activeDangerAlerts,
+      statusLevels: statusLevelsOf(policy),
     };
   }
 }

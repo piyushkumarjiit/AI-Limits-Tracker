@@ -24,16 +24,16 @@
 If you route coding agents through a pool of subscription accounts (Google Antigravity, Claude, ChatGPT/Codex, Gemini CLI) with [CLIProxy](https://github.com/router-for-me/CLIProxyAPI) or [LiteLLM](https://github.com/BerriAI/litellm), FQD tells you how much quota each account has left and can keep exhausted accounts out of the pool.
 
 - **Per-account quota windows.** Reads the 5-hour and weekly limits each provider reports, with reset countdowns, burn rate and projected exhaustion time.
-- **Four account states**, used the same way across every page:
+- **Four account states**, used the same way across every page. The levels come from the routing policy ([`deploy/policy.example.yaml`](deploy/policy.example.yaml)); the defaults below are for Pro accounts (Non-Pro: tight at 40%, exhausted at 5%).
 
   | State | Meaning |
   | :--- | :--- |
-  | Healthy | Tightest window above 35% |
-  | Tight | Tightest window at 35% or below |
-  | Exhausted | 0% left (or rate-limited) while still receiving traffic |
+  | Healthy | Tightest window above the drain level (20%) |
+  | Tight | Tightest window at or below the drain level (20%) |
+  | Exhausted | At or below the hard stop (2%), or rate-limited, while still receiving traffic |
   | Cooldown | Taken out of the CLIProxy pool by FQD or an operator |
 
-- **CLIProxy pool control.** Discovers the credentials CLIProxy is serving, then plans routing weights from headroom. In `shadow` mode (the default) it only logs what it would do; in `enforce` mode it sets weight 0 and disables exhausted accounts, and restores them after they recover. Operators can also quarantine or airgap an account by hand from the account drawer.
+- **CLIProxy pool control.** Discovers the credentials CLIProxy is serving, then plans routing weights from headroom. In `shadow` mode (the default) it only logs what it would do; in `enforce` mode it sets weight 0 and disables exhausted accounts, and restores them after they recover. Operators can also take an account out of rotation by hand with Cooldown in the account panel.
 - **Proxy telemetry.** Requests and tokens per account and model from CLIProxy.
 - **Usage by alias.** Requests, failures, tokens and spend for each LiteLLM alias over today, 7 or 30 days, expandable to the models behind the alias and the CLIProxy accounts that served them. Providers seen only in LiteLLM (for example a DeepSeek API key) get their own overview row automatically.
 - **Machine-readable output.** `GET /api/quota` (JSON) and `GET /metrics` (Prometheus) for dashboards and alerting.
@@ -84,7 +84,8 @@ All integrations are configured through environment variables; see [`.env.exampl
 | :--- | :--- | :--- |
 | CLIProxy | `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY` | Account discovery, quota and routing. Plain `http://` is accepted only for loopback and private-network addresses. |
 | CLIProxy request counts | `CPA_USAGE_POLL_SEC` | Needs `usage-statistics-enabled` in the CLIProxy config (v8+). |
-| Routing mode | `CPA_ROUTING_MODE` | `off`, `shadow` (default) or `enforce`. Enforce requires CLIProxy's weighted round-robin strategy. |
+| Routing mode | `CPA_ROUTING_MODE` | `off`, `shadow` (default) or `enforce`. Enforce requires CLIProxy's weighted round-robin strategy. Overrides the policy file's mode. |
+| Routing policy | `CPA_WATERMARK_POLICY_FILE` | Optional YAML with the tight / exhausted levels and account tiers; see [`deploy/policy.example.yaml`](deploy/policy.example.yaml). |
 | LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Usage by alias, model and provider. Use a read-only `proxy_admin_viewer` user key and not your master key. |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional alert channel. |
 

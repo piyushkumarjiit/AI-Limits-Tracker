@@ -17,7 +17,7 @@ import { CpaSyncEngine } from './cpaSync';
 import { CpaUsageCollector } from './cpaUsageCollector';
 import { TelemetryService } from './telemetry';
 import { CpaWatermarkService } from './cpaWatermarkService';
-import { CpaPolicyLoader } from './cpaWatermarkPolicy';
+import { CpaPolicyLoader, classifyAccount, statusLevelsOf } from './cpaWatermarkPolicy';
 import { resolveCpaConfig } from './config';
 import { QuotaCache } from './quotaCache';
 import { renderMetrics } from './metrics';
@@ -88,7 +88,23 @@ let cpaSync: CpaSyncEngine | undefined;
 let cpaUsage: CpaUsageCollector | undefined;
 let cpaRouting: CpaWatermarkService | undefined;
 let cpaWatermarkService: CpaWatermarkService | undefined;
-let cpaPolicyLoader: CpaPolicyLoader | undefined;
+// The watermark policy drives routing, account status, bar colours and alerts, with or
+// without CLIProxy. Load it once at startup and hot-reload it when the file changes.
+const cpaPolicyLoader = new CpaPolicyLoader({
+  onError: (err) => console.warn(`[policy] ${err.message}; using the safe shadow defaults`),
+});
+cpaPolicyLoader.loadPolicy();
+cpaPolicyLoader.startWatcher();
+console.log(
+  `[policy] ${cpaPolicyLoader.getResolvedPath() ?? 'no policy file found, using built-in defaults'} (mode ${cpaPolicyLoader.getPolicy().mode})`
+);
+tracker.setStatusLevels((accountId) => {
+  const policy = cpaPolicyLoader.getPolicy();
+  const account = store.getAccount(accountId);
+  const cls = classifyAccount(store.getCpaLink(accountId)?.cpaName ?? account?.name ?? '', policy.classificationRules);
+  const levels = statusLevelsOf(policy);
+  return cls.tier === 'non_pro' ? levels.nonPro : levels.pro;
+});
 
 if (cpaConfig) {
   const cpaTransport = new CpaTransport({
@@ -100,7 +116,6 @@ if (cpaConfig) {
   cpaUsage = new CpaUsageCollector(store, cpaTransport);
   tracker.setCpaProvider(cpaUsageProvider);
 
-  cpaPolicyLoader = new CpaPolicyLoader();
   cpaWatermarkService = new CpaWatermarkService({
     store,
     transport: cpaTransport,
@@ -167,7 +182,17 @@ const server = createApp(
     allowedHosts: ALLOWED_HOSTS,
     maxHeaderSize: 8192,
   },
-  { store, tracker, cpaSync, cpaRouting, cpaWatermarkService, quotaCache, telemetryService: new TelemetryService({ usageSummary: (since) => store.cpaUsageSummary(since) }) }
+  {
+    store,
+    tracker,
+    cpaSync,
+    cpaRouting,
+    cpaWatermarkService,
+    quotaCache,
+    telemetryService: new TelemetryService({ usageSummary: (since) => store.cpaUsageSummary(since) }),
+    policyLoader: cpaPolicyLoader,
+    gatewayUrls: { cliproxy: cpaConfig?.baseUrl, litellm: process.env.LITELLM_URL },
+  }
 );
 
 // Explicit resource bounds: slow/malicious clients cannot hold sockets or headers forever.
@@ -189,6 +214,7 @@ function shutdown(signal: string): void {
   }, 10000);
   hard.unref();
   tracker.stop();
+  cpaPolicyLoader.stopWatcher();
   if (cpaSync) cpaSync.stop();
   if (cpaUsage) cpaUsage.stop();
   server.close(() => {

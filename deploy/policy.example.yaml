@@ -1,0 +1,39 @@
+# FQD routing policy (example).
+#
+# Copy to the path in CPA_WATERMARK_POLICY_FILE (default /app/config/policy.yaml) and
+# edit. FQD reloads the file when it changes. Without a file FQD uses exactly these
+# defaults. A file that fails validation is ignored and FQD falls back to shadow mode.
+#
+# These levels drive everything FQD decides about quota: routing in CLIProxy, the
+# Healthy / Tight / Exhausted status in the panel, bar colours and Telegram alerts.
+
+# off: FQD leaves routing alone. shadow: FQD logs what it would change.
+# enforce: FQD drains and disables accounts in CLIProxy (needs its weighted
+# round-robin strategy). CPA_ROUTING_MODE in the environment overrides this value.
+mode: shadow
+
+# Pro accounts serve traffic first. Percentages are quota remaining.
+pro:
+  drainPct: 20             # Tight: weight drops to 1 so in-flight sessions finish
+  drainRecoveryPct: 24     # back to normal weight above this
+  hardStopPct: 2           # Exhausted: weight 0 and disabled
+  hardStopRecoveryPct: 5   # leaves the hard stop above this
+
+# Non-Pro accounts are a fallback pool, used only when no Pro account in the same
+# provider can take traffic.
+nonPro:
+  drainPct: 40
+  drainRecoveryPct: 44
+  hardStopPct: 5
+  hardStopRecoveryPct: 8
+
+# Classification rules decide each account's tier and whether FQD manages it.
+# They match the CLIProxy auth file name, first match wins. When this list is left
+# out, every account is a managed Pro account (the rule below). When you write your
+# own list, accounts that match none of your rules are left unmanaged.
+classificationRules:
+  - pattern: "*"
+    provider: auto          # use the account's own provider
+    tier: pro               # pro or non_pro
+    modality: subscription_pool
+    managed: true

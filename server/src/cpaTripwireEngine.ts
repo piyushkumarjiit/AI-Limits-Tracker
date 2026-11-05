@@ -1,4 +1,5 @@
 import type { WatermarkAccountState } from './cpaWatermarkTypes';
+import { DEFAULT_STATUS_LEVELS } from '../../src/constants/statusLevels';
 
 export const DEFAULT_TAU_SEC = 60;
 export const DEFAULT_T_DRAIN_SEC = 30;
@@ -9,8 +10,9 @@ export const DEFAULT_T_POLL_SEC = 5;
 export const DEFAULT_LEAD_TIME_SEC =
   5 * DEFAULT_TAU_SEC + DEFAULT_T_DRAIN_SEC + DEFAULT_T_POLL_SEC;
 
-export const DEFAULT_EXHAUSTED_FLOOR_PCT = 5;
-export const DEFAULT_TIGHT_FLOOR_PCT = 15;
+/** Fallback floors when a caller passes none: the policy's default Pro levels. */
+export const DEFAULT_EXHAUSTED_FLOOR_PCT = DEFAULT_STATUS_LEVELS.pro.exhaustedPct;
+export const DEFAULT_TIGHT_FLOOR_PCT = DEFAULT_STATUS_LEVELS.pro.tightPct;
 export const DEFAULT_FAST_WINDOW_MIN = 2;
 export const DEFAULT_SLOW_WINDOW_MIN = 10;
 export const DEFAULT_COOLDOWN_SEC = 335;
@@ -228,8 +230,8 @@ export function evaluateAccountTripwire(
   }
 
   // Tripwire state determination:
-  // If projected headroom <= H_exhausted (5%) OR current H(t) <= H_exhausted -> exhausted
-  // If projected headroom <= H_tight (15%) OR current H(t) <= H_tight -> tight
+  // If projected headroom <= H_exhausted (policy hardStopPct) OR current H(t) <= H_exhausted -> exhausted
+  // If projected headroom <= H_tight (policy drainPct) OR current H(t) <= H_tight -> tight
   // Otherwise -> healthy
   let autoState: WatermarkAccountState = 'healthy';
   let reason = 'headroom_healthy';

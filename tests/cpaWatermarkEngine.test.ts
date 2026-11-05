@@ -149,7 +149,8 @@ console.log('\nSuite 2: Multi-Window Projection Formula');
 // -----------------------------------------------------------------------------
 console.log('\nSuite 3: Two-Stage Watermark & Hysteresis');
 {
-  const policy: WatermarkPolicyConfig = { mode: 'enforce' };
+  // Explicit Pro levels so the hysteresis steps below do not depend on the shipped defaults.
+  const policy: WatermarkPolicyConfig = { mode: 'enforce', pro: { hardStopPct: 5, hardStopRecoveryPct: 8 } };
   let state = makeInitialState();
   const now = 1700000000000;
 
@@ -682,7 +683,7 @@ console.log('\nSuite 12: Non-Pro Stickiness & Standby Stability');
 // -----------------------------------------------------------------------------
 console.log('\nSuite 13: Invariant 3 Safety & Violation Observability');
 {
-  const policy: WatermarkPolicyConfig = { mode: 'enforce' };
+  const policy: WatermarkPolicyConfig = { mode: 'enforce', pro: { hardStopPct: 5, hardStopRecoveryPct: 8 } };
   const state = makeInitialState();
   const now = 1700000000000;
 
