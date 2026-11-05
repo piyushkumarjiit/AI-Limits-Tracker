@@ -42,7 +42,7 @@ export const TelemetryVelocity: React.FC<TelemetryVelocityProps> = ({ accounts, 
         <div className="card stat-box">
           <span className="stat-sub">LiteLLM</span>
           <span className="stat-val">{telemetry?.global.providers.litellm ? 'Connected' : 'Not connected'}</span>
-          <span className="stat-sub">Per-model usage</span>
+          <span className="stat-sub">Per-model usage (CLIProxy feed used when absent)</span>
         </div>
       </div>
 
@@ -104,6 +104,7 @@ export const TelemetryVelocity: React.FC<TelemetryVelocityProps> = ({ accounts, 
                   <th>LAST HOUR</th>
                   <th>FAILED (LAST HOUR)</th>
                   <th>SINCE PROXY START</th>
+                  <th>TOKENS (24H)</th>
                 </tr>
               </thead>
               <tbody>
@@ -114,6 +115,7 @@ export const TelemetryVelocity: React.FC<TelemetryVelocityProps> = ({ accounts, 
                     <td>{t!.requestsLastHour ?? 0}</td>
                     <td>{t!.failedLastHour ?? 0}</td>
                     <td>{t!.successCount ?? 0} ok / {t!.failedCount ?? 0} failed</td>
+                    <td>{t!.totalTokens > 0 ? formatTokenCount(t!.totalTokens) : '-'}</td>
                   </tr>
                 ))}
               </tbody>

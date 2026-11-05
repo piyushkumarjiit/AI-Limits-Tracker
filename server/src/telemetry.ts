@@ -7,6 +7,7 @@
  */
 
 import { isAllowedHttpHost } from './config';
+import type { CpaUsageSummaryRow } from './store';
 
 export interface AccountTelemetry {
   accountId: string;
@@ -24,6 +25,8 @@ export interface AccountTelemetry {
   /** CLIProxy has this credential disabled (out of the routing pool). */
   disabled?: boolean;
   proxyStatus?: string | null;
+  /** Token usage by model over the last 24 hours, from CLIProxy's usage feed. */
+  models?: ModelUsage[];
   proxySource?: 'litellm' | 'cliproxy' | 'local_estimate';
   slotId?: string;
   proxyPort?: number;
@@ -59,6 +62,8 @@ export interface TelemetryResponse {
 }
 
 export interface TelemetryConfig {
+  /** Reads 24h CLIProxy usage collected by CpaUsageCollector. */
+  usageSummary?: (sinceMs: number) => CpaUsageSummaryRow[];
   liteLlmUrl?: string;
   liteLlmKey?: string;
   cliProxyPort?: number;
@@ -140,6 +145,7 @@ export class TelemetryService {
       cliProxyPort: config.cliProxyPort || Number(process.env.CLIPROXY_PORT) || 8317,
       cliProxyUrl: config.cliProxyUrl || process.env.CLIPROXY_URL || process.env.CPA_BASE_URL || 'http://127.0.0.1:8317',
       cliProxyKey: config.cliProxyKey || process.env.CLIPROXY_KEY || process.env.CPA_MANAGEMENT_KEY,
+      usageSummary: config.usageSummary,
     };
     this.ttlMs = ttlMs;
   }
@@ -227,6 +233,31 @@ export class TelemetryService {
       }
     }
 
+    // 1b. CLIProxy usage feed: tokens per account and model over the last 24 hours
+    const usage = this.config.usageSummary ? this.config.usageSummary(now - 86400000) : [];
+    const cliProxyModels = new Map<string, ModelUsage>();
+    for (const u of usage) {
+      const add = (m: ModelUsage) => {
+        m.requests += u.requests;
+        m.promptTokens += u.inputTokens;
+        m.completionTokens += u.outputTokens;
+        m.totalTokens += u.totalTokens;
+      };
+      const fleet = cliProxyModels.get(u.model) ?? { model: u.model, requests: 0, totalTokens: 0, promptTokens: 0, completionTokens: 0 };
+      add(fleet);
+      cliProxyModels.set(u.model, fleet);
+      const id = idByEmail.get(u.email.toLowerCase());
+      const acc = id ? accountTelemetryMap[id] : undefined;
+      if (!acc) continue;
+      acc.totalTokens += u.totalTokens;
+      acc.promptTokens += u.inputTokens;
+      acc.completionTokens += u.outputTokens;
+      const perModel = { model: u.model, requests: 0, totalTokens: 0, promptTokens: 0, completionTokens: 0 };
+      add(perModel);
+      (acc.models ??= []).push(perModel);
+    }
+    for (const acc of Object.values(accountTelemetryMap)) acc.models?.sort((x, y) => y.totalTokens - x.totalTokens);
+
     // 2. LiteLLM: per-model usage over the last 24 hours from spend logs (needs an admin key)
     const liteLlmBase = validateTelemetryBaseUrl(this.config.liteLlmUrl);
     if (liteLlmBase && this.config.liteLlmKey && this.modelsCache && now < this.modelsCache.expiresAt) {
@@ -265,6 +296,10 @@ export class TelemetryService {
       }
     } else {
       notes.push('Per-model usage needs LiteLLM (set LITELLM_URL and an admin LITELLM_KEY).');
+    }
+
+    if (!models?.length && cliProxyModels.size) {
+      models = [...cliProxyModels.values()].sort((x, y) => y.totalTokens - x.totalTokens);
     }
 
     const connected = liteLlmConnected || cliProxyConnected;
