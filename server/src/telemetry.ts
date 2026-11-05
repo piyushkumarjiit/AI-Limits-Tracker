@@ -8,6 +8,7 @@
 
 import { isAllowedHttpHost } from './config';
 import type { CpaUsageSummaryRow } from './store';
+import { LiteLlmUsageService, type UsageReport } from '../../src/services/liteLlmUsage';
 
 export interface AccountTelemetry {
   accountId: string;
@@ -45,7 +46,7 @@ export interface GlobalTelemetryStatus {
   notes?: string[];
 }
 
-/** Per-model usage over the last 24 hours, from LiteLLM spend logs. */
+/** Per-model usage over the last 24 hours, from CLIProxy's usage feed. */
 export interface ModelUsage {
   model: string;
   requests: number;
@@ -134,9 +135,7 @@ export class TelemetryService {
   private cache: TelemetryResponse | null = null;
   private cacheExpiresAt = 0;
   private readonly ttlMs: number;
-  /** A day of LiteLLM spend logs can be tens of MB, so the model table refreshes less often than the rest. */
-  private modelsCache: { models: ModelUsage[]; expiresAt: number } | null = null;
-  private static readonly MODELS_TTL_MS = 10 * 60 * 1000;
+  private liteLlm: LiteLlmUsageService;
 
   constructor(config: TelemetryConfig = {}, ttlMs = 60000) {
     this.config = {
@@ -148,6 +147,16 @@ export class TelemetryService {
       usageSummary: config.usageSummary,
     };
     this.ttlMs = ttlMs;
+    const liteBase = validateTelemetryBaseUrl(this.config.liteLlmUrl);
+    this.liteLlm = new LiteLlmUsageService(
+      async (path, timeoutMs) => (liteBase && this.config.liteLlmKey ? this.getJson(liteBase, path, this.config.liteLlmKey, timeoutMs) : null),
+      (since) => (this.config.usageSummary ? this.config.usageSummary(since) : [])
+    );
+  }
+
+  /** LiteLLM usage by alias, model and provider family over 1, 7 or 30 days. */
+  usage(days: number, idByEmail: Map<string, string>): Promise<UsageReport> {
+    return this.liteLlm.get(days, idByEmail);
   }
 
   /** GET a JSON document from a validated proxy base; returns the HTTP status and body (null on failure). */
@@ -176,7 +185,7 @@ export class TelemetryService {
 
   /**
    * Passive, read-only fetch of proxy telemetry with TTL caching.
-   * CLIProxy supplies per-credential request counts; LiteLLM spend logs supply per-model usage.
+   * CLIProxy supplies per-credential request counts and per-model tokens; LiteLLM supplies alias usage.
    * NEVER triggers native token refreshes.
    */
   async getTelemetry(accounts: Array<string | { id: string; email?: string | null }> = []): Promise<TelemetryResponse> {
@@ -258,45 +267,10 @@ export class TelemetryService {
     }
     for (const acc of Object.values(accountTelemetryMap)) acc.models?.sort((x, y) => y.totalTokens - x.totalTokens);
 
-    // 2. LiteLLM: per-model usage over the last 24 hours from spend logs (needs an admin key)
-    const liteLlmBase = validateTelemetryBaseUrl(this.config.liteLlmUrl);
-    if (liteLlmBase && this.config.liteLlmKey && this.modelsCache && now < this.modelsCache.expiresAt) {
-      liteLlmConnected = true;
-      models = this.modelsCache.models;
-    } else if (liteLlmBase && this.config.liteLlmKey) {
-      const day = (t: number) => new Date(t).toISOString().slice(0, 10);
-      const { status, body } = await this.getJson(
-        liteLlmBase,
-        `/spend/logs?summarize=false&start_date=${day(now - 86400000)}&end_date=${day(now + 86400000)}`,
-        this.config.liteLlmKey,
-        30000
-      );
-      if (status === 200 && Array.isArray(body)) {
-        liteLlmConnected = true;
-        const byModel = new Map<string, ModelUsage>();
-        for (const log of body.slice(0, 50000)) {
-          if (!log || typeof log.model !== 'string' || !log.model) continue;
-          const startedAt = Date.parse(log.startTime ?? log.start_time ?? '');
-          if (Number.isFinite(startedAt) && startedAt < now - 86400000) continue;
-          const m = byModel.get(log.model) ?? { model: log.model, requests: 0, totalTokens: 0, promptTokens: 0, completionTokens: 0 };
-          m.requests += 1;
-          m.totalTokens += Number(log.total_tokens) || 0;
-          m.promptTokens += Number(log.prompt_tokens) || 0;
-          m.completionTokens += Number(log.completion_tokens) || 0;
-          byModel.set(log.model, m);
-        }
-        models = [...byModel.values()].sort((x, y) => y.totalTokens - x.totalTokens);
-        this.modelsCache = { models, expiresAt: now + TelemetryService.MODELS_TTL_MS };
-      } else if (status === 401 || status === 403) {
-        notes.push('LiteLLM key cannot read spend logs; per-model usage needs an admin (master) key in LITELLM_KEY.');
-      } else if (status === 200) {
-        notes.push('LiteLLM spend logs returned an unrecognized format.');
-      } else {
-        notes.push('LiteLLM did not answer in time or is not reachable (check LITELLM_URL).');
-      }
-    } else {
-      notes.push('Per-model usage needs LiteLLM (set LITELLM_URL and an admin LITELLM_KEY).');
-    }
+    // 2. LiteLLM: daily aggregated usage by alias (see liteLlmUsage.ts)
+    const liteReport = await this.usage(1, idByEmail);
+    liteLlmConnected = liteReport.connected;
+    notes.push(...liteReport.notes);
 
     if (!models?.length && cliProxyModels.size) {
       models = [...cliProxyModels.values()].sort((x, y) => y.totalTokens - x.totalTokens);

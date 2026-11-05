@@ -16,7 +16,6 @@ import { CpaUsageProvider } from '../../src/services/cpa/CpaUsageProvider';
 import { CpaSyncEngine } from './cpaSync';
 import { CpaUsageCollector } from './cpaUsageCollector';
 import { TelemetryService } from './telemetry';
-import { CpaRoutingExecutor } from './cpaRouting';
 import { CpaWatermarkService } from './cpaWatermarkService';
 import { CpaPolicyLoader } from './cpaWatermarkPolicy';
 import { resolveCpaConfig } from './config';
@@ -87,7 +86,7 @@ const tracker = new Tracker(store);
 const cpaConfig = resolveCpaConfig(process.env);
 let cpaSync: CpaSyncEngine | undefined;
 let cpaUsage: CpaUsageCollector | undefined;
-let cpaRouting: CpaWatermarkService | CpaRoutingExecutor | undefined;
+let cpaRouting: CpaWatermarkService | undefined;
 let cpaWatermarkService: CpaWatermarkService | undefined;
 let cpaPolicyLoader: CpaPolicyLoader | undefined;
 

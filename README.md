@@ -34,7 +34,8 @@ If you route coding agents through a pool of subscription accounts (Google Antig
   | Cooldown | Taken out of the CLIProxy pool by FQD or an operator |
 
 - **CLIProxy pool control.** Discovers the credentials CLIProxy is serving, then plans routing weights from headroom. In `shadow` mode (the default) it only logs what it would do; in `enforce` mode it sets weight 0 and disables exhausted accounts, and restores them after they recover. Operators can also quarantine or airgap an account by hand from the account drawer.
-- **Proxy telemetry.** Requests per account from CLIProxy, and per-model request and token counts from LiteLLM spend logs.
+- **Proxy telemetry.** Requests and tokens per account and model from CLIProxy.
+- **Usage by alias.** Requests, failures, tokens and spend for each LiteLLM alias over today, 7 or 30 days, expandable to the models behind the alias and the CLIProxy accounts that served them. Providers seen only in LiteLLM (for example a DeepSeek API key) get their own overview row automatically.
 - **Machine-readable output.** `GET /api/quota` (JSON) and `GET /metrics` (Prometheus) for dashboards and alerting.
 - **Alerts.** Low-quota, reset and re-login alerts in the app, and optionally in Telegram.
 
@@ -84,7 +85,7 @@ All integrations are configured through environment variables; see [`.env.exampl
 | CLIProxy | `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY` | Account discovery, quota and routing. Plain `http://` is accepted only for loopback and private-network addresses. |
 | CLIProxy request counts | `CPA_USAGE_POLL_SEC` | Needs `usage-statistics-enabled` in the CLIProxy config (v8+). |
 | Routing mode | `CPA_ROUTING_MODE` | `off`, `shadow` (default) or `enforce`. Enforce requires CLIProxy's weighted round-robin strategy. |
-| LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Per-model usage. The key needs admin read access (master key or a `proxy_admin_viewer` user). |
+| LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Usage by alias, model and provider. The key needs admin read access (master key or a `proxy_admin_viewer` user). |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional alert channel. |
 
 Accounts that CLIProxy does not serve can be added directly from the Accounts page.

@@ -4,7 +4,6 @@ import { CpaTransport } from '../../src/services/cpa/CpaTransport';
 import { CpaCredential, CpaListResponse } from '../../src/services/cpa/types';
 import { CpaLink, ReconcileAction, reconcile } from '../../src/services/cpa/reconcile';
 import type { AccountCredentials } from '../../src/models/types';
-import type { CpaRoutingExecutor } from './cpaRouting';
 import type { CpaWatermarkService } from './cpaWatermarkService';
 import type { WatermarkAccountState } from './cpaWatermarkTypes';
 
@@ -21,7 +20,7 @@ export interface CpaSyncStatus {
   routingMode?: string;
 }
 
-export type RoutingRunner = CpaRoutingExecutor | CpaWatermarkService;
+export type RoutingRunner = CpaWatermarkService;
 
 /**
  * Dual-barrier airgap write helper:

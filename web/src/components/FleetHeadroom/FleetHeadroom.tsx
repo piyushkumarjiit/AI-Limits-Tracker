@@ -4,18 +4,27 @@ import type { WatermarkFleetOverview } from '../../../../server/src/cpaWatermark
 import { PROVIDER_NAMES } from '../../../../src/constants/theme';
 import { getSlotHeadroom } from '../common/headroomUtils';
 import { accountStatus, ACCOUNT_STATUS_BADGE, ACCOUNT_STATUS_LABEL, type AccountStatus } from '../common/cpaUiUtils';
+import { fmtSpend } from '../UsageByAlias/UsageByAlias';
+import '../UsageByAlias/UsageByAlias.css';
 import './FleetHeadroom.css';
 
+/** One overview row: a provider family seen in FQD accounts and/or LiteLLM usage. */
+export interface ProviderGroup {
+  family: string;
+  accounts: Account[];
+  headroom: string;
+  aliases: string[];
+  usage?: { requests: number; spend: number };
+}
+
 export interface FleetHeadroomProps {
-  agyAccounts: Account[];
-  claudeAccounts: Account[];
+  groups: ProviderGroup[];
+  rangeLabel: string;
   effectiveAccounts: Account[];
   overview?: WatermarkFleetOverview | null;
   hoverAccount: Account | null;
   setHoverAccount: (a: Account | null) => void;
   onSelectAccount: (a: Account) => void;
-  agyHeadroom: string;
-  claudeHeadroom: string;
 }
 
 const AGGREGATE_BANDS: { status: AccountStatus; color: string }[] = [
@@ -26,15 +35,13 @@ const AGGREGATE_BANDS: { status: AccountStatus; color: string }[] = [
 ];
 
 export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
-  agyAccounts,
-  claudeAccounts,
+  groups,
+  rangeLabel,
   effectiveAccounts,
   overview,
   hoverAccount,
   setHoverAccount,
   onSelectAccount,
-  agyHeadroom,
-  claudeHeadroom,
 }) => {
   const slotOf = (acc: Account) => String(effectiveAccounts.findIndex((a) => a.id === acc.id) + 1).padStart(2, '0');
   const plural = (n: number) => `${n} ${n === 1 ? 'Account' : 'Accounts'}`;
@@ -70,101 +77,71 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
         </div>
       </div>
 
-      {effectiveAccounts.length === 0 && (
+      {effectiveAccounts.length === 0 && groups.length === 0 && (
         <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>
           Headroom appears here once accounts report quota.
         </div>
       )}
 
       {/* 1. Cell View */}
-      {effectiveAccounts.length > 0 && activeView === 'cell' && (
+      {groups.length > 0 && activeView === 'cell' && (
         <div id="view-cap-cell" className="scale-box" style={{ borderLeft: '3px solid var(--blue)' }}>
-          <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
-            <span><strong>Google Antigravity</strong> ({plural(agyAccounts.length)})</span>
-            <span style={headroomStyle(agyHeadroom)}><strong>{agyHeadroom === '-' ? 'No data' : `${agyHeadroom}% Headroom`}</strong></span>
-          </div>
-          <div className="gradient-bar-track">
-            {agyAccounts.map((acc, idx) => {
-              const h = getSlotHeadroom(acc, idx);
-              const slotLabel = slotOf(acc);
-              const isSelected = hoverAccount?.id === acc.id || (!hoverAccount && h.isTight);
-              return (
-                <div
-                  key={acc.id}
-                  className="grad-segment"
-                  style={{
-                    borderColor: isSelected ? (h.isTight ? h.color : '#60a5fa') : undefined,
-                    transform: isSelected ? 'translateY(-2px)' : undefined,
-                  }}
-                  onMouseEnter={() => setHoverAccount(acc)}
-                  onClick={() => onSelectAccount(acc)}
-                >
-                  <span className="grad-segment-label">{slotLabel}</span>
-                  <div
-                    className="grad-segment-fill"
-                    style={{
-                      height: `${Math.max(10, h.rem)}%`,
-                      background: h.fill,
-                    }}
-                  >
-                    <div
-                      className="grad-segment-waterline"
-                      style={{
-                        color: h.waterlineColor,
-                        background: h.waterlineBg,
-                      }}
-                    />
-                  </div>
-                  <div className="grad-segment-tooltip" style={{ borderColor: h.isTight ? h.color : undefined }}>
-                    <strong>{acc.email || acc.name}</strong> (Slot {slotLabel})<br />
-                    <span style={{ color: h.color }}>{h.rem}% {h.label}</span>
-                  </div>
+          {groups.map((g, gi) => (
+            <div key={g.family} className="fh-group" style={{ marginTop: gi ? 14 : 0 }}>
+              <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, fontSize: 11, marginBottom: 6 }}>
+                <span>
+                  <strong>{g.family}</strong> ({g.accounts.length ? plural(g.accounts.length) : 'usage only'})
+                  {g.usage && (
+                    <span style={{ color: 'var(--muted)' }}> · {g.usage.requests.toLocaleString()} req · {fmtSpend(g.usage.spend)} ({rangeLabel})</span>
+                  )}
+                </span>
+                {g.accounts.length > 0 && (
+                  <span style={headroomStyle(g.headroom)}><strong>{g.headroom === '-' ? 'No data' : `${g.headroom}% Headroom`}</strong></span>
+                )}
+              </div>
+              {g.accounts.length > 0 ? (
+                <div className="gradient-bar-track">
+                  {g.accounts.map((acc, idx) => {
+                    const h = getSlotHeadroom(acc, idx);
+                    const slotLabel = slotOf(acc);
+                    const isSelected = hoverAccount?.id === acc.id;
+                    return (
+                      <div
+                        key={acc.id}
+                        className="grad-segment"
+                        style={{
+                          borderColor: isSelected ? (h.isTight ? h.color : '#60a5fa') : undefined,
+                          transform: isSelected ? 'translateY(-2px)' : undefined,
+                        }}
+                        onMouseEnter={() => setHoverAccount(acc)}
+                        onClick={() => onSelectAccount(acc)}
+                      >
+                        <span className="grad-segment-label">{slotLabel}</span>
+                        <div className="grad-segment-fill" style={{ height: `${Math.max(10, h.rem)}%`, background: h.fill }}>
+                          <div className="grad-segment-waterline" style={{ color: h.waterlineColor, background: h.waterlineBg }} />
+                        </div>
+                        <div className="grad-segment-tooltip" style={{ borderColor: h.isTight ? h.color : undefined }}>
+                          <strong>{acc.email || acc.name}</strong> (Slot {slotLabel})<br />
+                          <span style={{ color: h.color }}>{h.rem}% {h.label}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
-
-          <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 12, marginBottom: 6 }}>
-            <span><strong>Claude Code</strong> ({plural(claudeAccounts.length)})</span>
-            <span style={headroomStyle(claudeHeadroom)}><strong>{claudeHeadroom === '-' ? 'No data' : `${claudeHeadroom}% Headroom`}</strong></span>
-          </div>
-          <div className="gradient-bar-track fqd-fleet-headroom__claude-track" style={{ height: 48, display: 'flex', gap: 4, justifyContent: 'flex-start' }}>
-            {claudeAccounts.map((acc, idx) => {
-              const h = getSlotHeadroom(acc, idx);
-              const slotLabel = slotOf(acc);
-              const isSelected = hoverAccount?.id === acc.id;
-              return (
-                <div
-                  key={acc.id}
-                  className="grad-segment fqd-fleet-headroom__claude-segment"
-                  style={{
-                    flex: '0 0 calc((100% - 52px) / 14)',
-                    maxWidth: 85,
-                    height: 48,
-                    borderColor: isSelected ? (h.isTight ? h.color : '#ea580c') : undefined,
-                    transform: isSelected ? 'translateY(-2px)' : undefined,
-                  }}
-                  onMouseEnter={() => setHoverAccount(acc)}
-                  onClick={() => onSelectAccount(acc)}
-                >
-                  <span className="grad-segment-label">{slotLabel}</span>
-                  <div
-                    className="grad-segment-fill"
-                    style={{
-                      height: `${Math.max(10, h.rem)}%`,
-                      background: h.fill,
-                    }}
-                  >
-                    <div className="grad-segment-waterline" style={{ color: h.waterlineColor, background: h.waterlineBg }} />
-                  </div>
-                  <div className="grad-segment-tooltip" style={{ borderColor: h.isTight ? h.color : '#ea580c' }}>
-                    <strong>{acc.email || acc.name}</strong> (Slot {slotLabel})<br />
-                    <span style={{ color: h.color }}>{h.rem}% {h.label}</span>
-                  </div>
+              ) : (
+                <div className="fh-usage">No quota window for this provider (API key through LiteLLM), so usage and spend are shown instead of headroom.</div>
+              )}
+              {g.aliases.length > 0 && (
+                <div className="fh-aliases">
+                  <span>Fed by</span>
+                  {g.aliases.slice(0, 6).map((a) => (
+                    <a key={a} className="ux-chip ux-chip-alias" href="#/usage">{a}</a>
+                  ))}
+                  {g.aliases.length > 6 && <a className="ux-chip ux-chip-alias" href="#/usage">+{g.aliases.length - 6} more</a>}
                 </div>
-              );
-            })}
-          </div>
+              )}
+            </div>
+          ))}
 
           {/* Hover details pill */}
           {hoverAccount && (() => {

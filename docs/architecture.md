@@ -8,9 +8,8 @@ FQD is a single Node.js (22 or 24) process that polls quota data, stores it in S
  endpoints          │                 │                                     │
                     │ cpaSync ◀───────┤──▶ quotaCache ──▶ /api/quota        │
  CLIProxy mgmt API ◀┼▶ cpaWatermark*  │                └─▶ /metrics         │
-                    │   cpaRouting    │                                     │
  CLIProxy usage  ──▶│ cpaUsageCollector ──▶ telemetry ──▶ /api/telemetry   │
- LiteLLM spend   ──▶│                                                       │
+ LiteLLM activity──▶│ liteLlmUsage (src/services) ──▶ /api/usage            │
                     │ app.ts (HTTP, auth, CSRF) ──▶ static web/dist (React) │
                     └───────────────────────────────────────────────────────┘
 ```
@@ -36,8 +35,8 @@ FQD is a single Node.js (22 or 24) process that polls quota data, stores it in S
 | `tracker.ts` | Polls each native account's provider on the refresh interval and records snapshots and history. |
 | `cpaSync.ts` | Discovers credentials served by CLIProxy and links them to FQD accounts. |
 | `cpaWatermarkPolicy.ts`, `cpaWatermarkEngine.ts`, `cpaTripwireEngine.ts`, `cpaWatermarkService.ts` | The routing policy: loads the optional YAML policy, evaluates per-account state (healthy, tight, exhausted, quarantined, airgapped), applies manual holds and, in `enforce` mode, writes weights and disabled flags to CLIProxy. |
-| `cpaRouting.ts` | Earlier weight executor. Production now uses `cpaWatermarkService`; this class is only exercised by its tests and is a removal candidate. |
-| `cpaUsageCollector.ts`, `telemetry.ts` | Read-only request and token telemetry from CLIProxy's usage queue and LiteLLM spend logs. |
+| `cpaUsageCollector.ts`, `telemetry.ts` | Read-only request and token telemetry from CLIProxy's usage queue. |
+| `src/services/liteLlmUsage.ts` | LiteLLM usage for `/api/usage`: reads the aggregated daily activity and the alias map (`/model/info`), groups by alias and provider family, and joins aliases to CLIProxy accounts on the model name. Needs an admin-read key. |
 | `quotaCache.ts`, `metrics.ts` | Build the `/api/quota` view and Prometheus text with ETags. |
 | `notify.ts` | In-app alert log and optional Telegram delivery. |
 | `net.ts` | Outbound guard: resolves hostnames and refuses private or reserved addresses for provider calls; caps response size. |
@@ -55,7 +54,8 @@ Every page uses this function so counts and labels agree.
 
 ## Known limitations
 
-- The overview's cell view groups Antigravity and Claude accounts only; accounts from other providers appear in the matrix and aggregate views, the Accounts table and the Quota Radar.
+- The overview builds one row per provider family from FQD accounts and LiteLLM usage. Families that only appear in LiteLLM (API keys) have no quota window, so they show usage and spend instead of headroom.
+- Alias-to-account shares use CLIProxy's last 24 hours; aliases that share a model share those numbers.
 - `app.ts` routes requests with a long `if` chain and also contains a fallback overview builder used when the watermark service is not configured; both are candidates for splitting into route modules.
 - `App.tsx` and `ui.tsx` are large single files; new UI should go into `web/src/components/`.
 - Metric names keep the `alt_` prefix inherited from AI Limits Tracker for dashboard compatibility.

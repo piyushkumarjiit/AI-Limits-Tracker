@@ -18,7 +18,6 @@ import { serveStatic } from './static';
 import { Store } from './store';
 import { Tracker } from './tracker';
 import type { CpaSyncEngine } from './cpaSync';
-import type { CpaRoutingExecutor } from './cpaRouting';
 import type { CpaWatermarkService } from './cpaWatermarkService';
 import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cpa/routingPlanner';
 import { QuotaCache, QuotaQuery } from './quotaCache';
@@ -61,7 +60,7 @@ export interface AppDeps {
   store: Store;
   tracker: Tracker;
   cpaSync?: CpaSyncEngine;
-  cpaRouting?: CpaRoutingExecutor | CpaWatermarkService;
+  cpaRouting?: CpaWatermarkService;
   cpaWatermarkService?: CpaWatermarkService;
   quotaCache?: QuotaCache;
   telemetryService?: TelemetryService;
@@ -635,6 +634,14 @@ async function handleApi(
     };
 
     return send(res, 200, overview);
+  }
+
+  if (path === '/api/usage' && method === 'GET') {
+    const service = deps.telemetryService ?? (defaultTelemetry ??= new TelemetryService());
+    const idByEmail = new Map<string, string>();
+    for (const a of store.listAccounts()) if (a.email) idByEmail.set(a.email.toLowerCase(), a.id);
+    const days = Number(url.searchParams.get('days')) || 1;
+    return send(res, 200, await service.usage(days, idByEmail));
   }
 
   if (path === '/api/telemetry' && method === 'GET') {
