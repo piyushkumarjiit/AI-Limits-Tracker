@@ -12,13 +12,9 @@ import {
 } from '../server/src/cpaWatermarkTypes';
 import { CpaWatermarkStore } from '../server/src/cpaWatermarkStore';
 import {
-  formatRunway,
-  calculatePoolSummary,
   detectInvariantViolations,
   type InvariantViolation,
-  deriveUpstreamQuota,
   deriveRoutingEnforcement,
-  parseAuditItems,
 } from '../web/src/components/common/cpaUiUtils';
 import type { Account } from '../web/src/api';
 
@@ -45,138 +41,6 @@ function assertEquals<T>(actual: T, expected: T, testName: string) {
 console.log('======================================================');
 console.log('  CPA UI OVERHAUL & COMPONENT STATE LOGIC TESTS       ');
 console.log('======================================================\n');
-
-// -----------------------------------------------------------------------------
-// Suite 1: Fleet Header Banner & Pool Runway Calculations
-// -----------------------------------------------------------------------------
-console.log('Suite 1: Fleet Header Banner & Pool Runway Calculations');
-
-{
-  // formatRunway tests
-  assertEquals(formatRunway(null).urgency, 'nominal', 'formatRunway(null) is nominal');
-  assertEquals(formatRunway(null).text, 'Nominal (No Burn)', 'formatRunway(null) text is Nominal');
-  assertEquals(formatRunway(-10).urgency, 'nominal', 'formatRunway(-10) is nominal');
-  assertEquals(formatRunway(NaN).urgency, 'nominal', 'formatRunway(NaN) is nominal');
-
-  // Urgent: <= 60 minutes
-  assertEquals(formatRunway(45).urgency, 'urgent', 'formatRunway(45) urgency is urgent');
-  assertEquals(formatRunway(45).text, '45m runway', 'formatRunway(45) text is 45m runway');
-  assertEquals(formatRunway(60).urgency, 'urgent', 'formatRunway(60) urgency is urgent');
-
-  // Warning: 61 - 719 minutes (< 12 hours)
-  assertEquals(formatRunway(150).urgency, 'warning', 'formatRunway(150) urgency is warning');
-  assertEquals(formatRunway(150).text, '2h 30m runway', 'formatRunway(150) text is 2h 30m runway');
-
-  // Safe: 12 - 47 hours
-  assertEquals(formatRunway(1200).urgency, 'safe', 'formatRunway(1200) urgency is safe');
-  assertEquals(formatRunway(1200).text, '20h runway', 'formatRunway(1200) text is 20h runway');
-
-  // Multi-day safe: >= 48 hours
-  assertEquals(formatRunway(3000).urgency, 'safe', 'formatRunway(3000) urgency is safe');
-  assertEquals(formatRunway(3000).text, '2d 2h runway', 'formatRunway(3000) text has days');
-}
-
-{
-  // calculatePoolSummary with mock account views
-  const agyViews: WatermarkAccountView[] = [
-    {
-      accountId: 'agy-1',
-      name: 'AGY Slot 1',
-      provider: 'antigravity',
-      state: 'healthy',
-      manualHold: 'none',
-      currentWeight: 100,
-      targetWeight: 100,
-      readBackDrift: false,
-      isQuarantined: false,
-      isDisabled: false,
-      bindingWindow: 'session_5h',
-      windows: [
-        {
-          key: 'session_5h',
-          label: '5-Hour',
-          currentRemainingPct: 80,
-          projectedRemainingPct: 75,
-          resetsAt: new Date().toISOString(),
-          resetSecondsRemaining: 3600,
-          isBinding: true,
-        },
-      ],
-      burnRatePerMin: 0.1,
-      runwayMinutes: 800,
-      recentRequests5m: 10,
-      recentErrors15m: { http429: 0, http5xx: 0 },
-    },
-    {
-      accountId: 'agy-2',
-      name: 'AGY Slot 2',
-      provider: 'antigravity',
-      state: 'tight',
-      manualHold: 'none',
-      currentWeight: 60,
-      targetWeight: 60,
-      readBackDrift: false,
-      isQuarantined: false,
-      isDisabled: false,
-      bindingWindow: 'session_5h',
-      windows: [
-        {
-          key: 'session_5h',
-          label: '5-Hour',
-          currentRemainingPct: 30,
-          projectedRemainingPct: 25,
-          resetsAt: new Date().toISOString(),
-          resetSecondsRemaining: 1800,
-          isBinding: true,
-        },
-      ],
-      burnRatePerMin: 0.2,
-      runwayMinutes: 150,
-      recentRequests5m: 25,
-      recentErrors15m: { http429: 0, http5xx: 0 },
-    },
-    {
-      accountId: 'agy-3',
-      name: 'AGY Slot 3',
-      provider: 'antigravity',
-      state: 'exhausted',
-      manualHold: 'none',
-      currentWeight: 0,
-      targetWeight: 0,
-      readBackDrift: false,
-      isQuarantined: true,
-      isDisabled: false,
-      bindingWindow: 'session_5h',
-      windows: [
-        {
-          key: 'session_5h',
-          label: '5-Hour',
-          currentRemainingPct: 5,
-          projectedRemainingPct: 0,
-          resetsAt: new Date().toISOString(),
-          resetSecondsRemaining: 600,
-          isBinding: true,
-        },
-      ],
-      burnRatePerMin: 0,
-      runwayMinutes: null,
-      recentRequests5m: 0,
-      recentErrors15m: { http429: 1, http5xx: 0 },
-    },
-  ];
-
-  const summary = calculatePoolSummary('antigravity', agyViews, []);
-  assertEquals(summary.provider, 'antigravity', 'Summary provider is antigravity');
-  assertEquals(summary.totalCount, 3, 'Summary total count is 3');
-  // (80 + 30 + 5) / 3 = 115 / 3 = 38%
-  assertEquals(summary.headroomPct, 38, 'Headroom is average 38%');
-  // burnRateSum = 0.1 + 0.2 = 0.3. 38 / 0.3 = 127 minutes runway
-  assertEquals(summary.runwayMinutes, 127, 'Runway minutes correctly calculated from total burn');
-  assertEquals(summary.activeCount, 1, 'Active count is 1');
-  assertEquals(summary.tightCount, 1, 'Tight count is 1');
-  assertEquals(summary.exhaustedCount, 1, 'Exhausted count is 1');
-  assertEquals(summary.quarantinedCount, 0, 'Quarantined count is 0');
-}
 
 // -----------------------------------------------------------------------------
 // Suite 2: Dual-Indicator Account Card Status & Origins
@@ -220,10 +84,6 @@ console.log('\nSuite 2: Dual-Indicator Account Card Status & Origins');
     },
   };
 
-  const quota = deriveUpstreamQuota(mockAccount, null);
-  assertEquals(quota.headroomPct, 65, 'deriveUpstreamQuota headroom is 65%');
-  assertEquals(quota.bindingWindow, '5h', '5h window correctly detected as binding');
-  assertEquals(quota.severity, 'healthy', '65% headroom classified as healthy');
 
   // Test Auto Routing Enforcement
   const routingAuto = deriveRoutingEnforcement(mockAccount, null);
@@ -391,87 +251,6 @@ console.log('\nSuite 4: 1-Click Emergency Action & State Precedence Math');
   assertEquals(effectiveAccountState('none', 'healthy'), 'healthy', 'clear hold restores healthy');
   assertEquals(effectiveAccountState('none', 'tight'), 'tight', 'clear hold restores tight');
   assertEquals(effectiveAccountState('none', 'exhausted'), 'exhausted', 'clear hold restores exhausted');
-}
-
-// -----------------------------------------------------------------------------
-// Suite 5: Shadow-Mode Telemetry & Audit Feed Parsing
-// -----------------------------------------------------------------------------
-console.log('\nSuite 5: Shadow-Mode Telemetry & Audit Feed Parsing');
-
-{
-  const overviewWithDecisions: WatermarkFleetOverview = {
-    mode: 'shadow',
-    routingStrategy: 'wrr',
-    writesBlockedReason: null,
-    tierState: 'OPEN',
-    poolRunwayMinutes: 600,
-    healthyCount: 3,
-    tightCount: 0,
-    exhaustedCount: 0,
-    quarantinedCount: 0,
-    accounts: [],
-    recentShadowDecisions: [
-      {
-        at: 1700000000000,
-        accountId: 'acc-tripwire-1',
-        currentWeight: 100,
-        proposedWeight: 1,
-        reason: 'velocity_drain: projected exhaustion in 18m before 5h window reset',
-      },
-      {
-        at: 1700000060000,
-        accountId: 'acc-429-prevent',
-        currentWeight: 100,
-        proposedWeight: 0,
-        reason: '429_prevention: tripwire halted traffic before upstream rate limit',
-      },
-      {
-        at: 1700000120000,
-        accountId: 'acc-leadtime-1',
-        currentWeight: 80,
-        proposedWeight: 50,
-        reason: 'lead_time_projection: window refill scheduled in 42m',
-      },
-    ],
-    activeDangerAlerts: [],
-  };
-
-  const historyEntries: WatermarkHistoryEntry[] = [
-    {
-      id: 1,
-      recordedAt: 1700000180000,
-      eventType: 'manual_hold_airgap',
-      generation: 1,
-      summary: JSON.stringify({
-        accountId: 'acc-emergency-1',
-        actor: 'operator_alice',
-        reason: 'Suspected token leak, immediate airgap',
-      }),
-      stateJson: '{}',
-    },
-  ];
-
-  const parsed = parseAuditItems(overviewWithDecisions, historyEntries);
-  assertEquals(parsed.length, 4, 'Parsed 4 total audit items');
-
-  const tripwireItem = parsed.find((p) => p.accountId === 'acc-tripwire-1');
-  assert(Boolean(tripwireItem), 'Tripwire item exists');
-  assertEquals(tripwireItem?.type, 'tripwire', 'Classified as tripwire');
-  assertEquals(tripwireItem?.oldWeight, 100, 'Old weight is 100');
-  assertEquals(tripwireItem?.newWeight, 1, 'New weight is 1');
-
-  const item429 = parsed.find((p) => p.accountId === 'acc-429-prevent');
-  assert(Boolean(item429), '429 prevention item exists');
-  assertEquals(item429?.type, '429', 'Classified as 429');
-
-  const leadtimeItem = parsed.find((p) => p.accountId === 'acc-leadtime-1');
-  assert(Boolean(leadtimeItem), 'Leadtime item exists');
-  assertEquals(leadtimeItem?.type, 'leadtime', 'Classified as leadtime');
-
-  const holdItem = parsed.find((p) => p.accountId === 'acc-emergency-1');
-  assert(Boolean(holdItem), 'Manual hold item exists');
-  assertEquals(holdItem?.type, 'hold', 'Classified as hold');
-  assertEquals(holdItem?.details, 'Actor: operator_alice', 'Actor details parsed');
 }
 
 // -----------------------------------------------------------------------------

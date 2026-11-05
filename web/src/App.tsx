@@ -6,20 +6,17 @@ import {
   QuotaRadar,
   GatewaysSettings,
   AccountDrawer,
-  CpaFleetBanner,
-  CpaDualIndicator,
   CpaDangerAlert,
-  CpaEmergencyModal,
-  CpaAuditFeed,
 } from './components';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlertLogEntry, ProviderType, QuotaBucket } from '../../src/models/types';
 import type { Forecast, StatPoint, UsageStats } from '../../src/services/stats';
 import type {
   WatermarkFleetOverview,
-  WatermarkHistoryEntry,
   ManualHoldType,
 } from '../../server/src/cpaWatermarkTypes';
+
+type HoldRequest = { accountId: string; hold: ManualHoldType; reason?: string };
 import { bindingBucket, headlineBucket } from '../../src/services/providers/common';
 import { accountChartColor, Colors, PROVIDER_COMPANY, PROVIDER_NAMES, severityColor, severityOf } from '../../src/constants/theme';
 import { dualRingData, familySummaries, type Weighting } from '../../src/services/capacity';
@@ -120,19 +117,12 @@ export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [cpaOverview, setCpaOverview] = useState<WatermarkFleetOverview | null>(null);
-  const [cpaHistory, setCpaHistory] = useState<WatermarkHistoryEntry[]>([]);
-  const [isAuditOpen, setIsAuditOpen] = useState(false);
-  const [emergencyAccount, setEmergencyAccount] = useState<Account | null>(null);
   useTick(60000);
 
   const loadCpa = useCallback(async () => {
     try {
       const ov = await api.cpaOverview();
       setCpaOverview(ov);
-    } catch {}
-    try {
-      const aud = await api.cpaAudit();
-      if (aud?.history) setCpaHistory(aud.history);
     } catch {}
   }, []);
 
@@ -171,23 +161,8 @@ export function App() {
     }
   };
 
-  const handleApplyHold = async (req: {
-    accountId: string;
-    hold: ManualHoldType;
-    reason?: string;
-    ttlSeconds?: number;
-  }) => {
+  const handleApplyHold = async (req: HoldRequest) => {
     await api.cpaHold(req);
-    await loadCpa();
-    await load();
-  };
-
-  const handleAirgapNow = async (accountId: string, reason?: string) => {
-    await api.cpaHold({
-      accountId,
-      hold: 'airgap',
-      reason: reason || 'Enforce Airgap Now (Operator Action)',
-    });
     await loadCpa();
     await load();
   };
@@ -217,8 +192,7 @@ export function App() {
           syncing={syncing}
           onRefresh={refreshAll}
           overview={cpaOverview}
-          onOpenEmergency={(a) => setEmergencyAccount(a)}
-          onAirgapNow={handleAirgapNow}
+          onApplyHold={handleApplyHold}
         />
       );
       break;
@@ -239,12 +213,7 @@ export function App() {
           syncing={syncing}
           onRefresh={refreshAll}
           overview={cpaOverview}
-          historyEntries={cpaHistory}
-          isAuditOpen={isAuditOpen}
-          onToggleAudit={() => setIsAuditOpen((prev) => !prev)}
-          onOpenEmergency={(a) => setEmergencyAccount(a)}
-          onAirgapNow={handleAirgapNow}
-          onRefreshCpa={loadCpa}
+          onApplyHold={handleApplyHold}
         />
       );
   }
@@ -293,17 +262,6 @@ export function App() {
         </nav>
 
         {page}
-
-        {/* 1-Click Emergency Action Modal */}
-        {emergencyAccount && (
-          <CpaEmergencyModal
-            account={emergencyAccount}
-            accountView={cpaOverview?.accounts.find((av) => av.accountId === emergencyAccount.id) || null}
-            isOpen={Boolean(emergencyAccount)}
-            onClose={() => setEmergencyAccount(null)}
-            onApplyHold={handleApplyHold}
-          />
-        )}
 
         {/* Enterprise Footer */}
         <footer className="enterprise-footer">
@@ -461,23 +419,12 @@ const HomePage: React.FC<{
   syncing: boolean;
   onRefresh: () => void;
   overview: WatermarkFleetOverview | null;
-  historyEntries: WatermarkHistoryEntry[];
-  isAuditOpen: boolean;
-  onToggleAudit: () => void;
-  onOpenEmergency: (account: Account) => void;
-  onAirgapNow: (accountId: string, reason?: string) => Promise<void>;
-  onRefreshCpa: () => void;
+  onApplyHold: (req: HoldRequest) => Promise<void>;
 }> = ({
   state,
   go,
-  syncing,
   overview,
-  historyEntries,
-  isAuditOpen,
-  onToggleAudit,
-  onOpenEmergency,
-  onAirgapNow,
-  onRefreshCpa,
+  onApplyHold,
 }) => {
   const { accounts } = state;
   const [_telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
@@ -527,30 +474,7 @@ const HomePage: React.FC<{
 
   return (
     <div id="tab-home" className="view-panel active">
-      {/* 1. Global Sticky Fleet Banner & Pool Runway */}
-      <CpaFleetBanner
-        overview={overview}
-        accounts={effectiveAccounts}
-        isAuditOpen={isAuditOpen}
-        onToggleAudit={onToggleAudit}
-        onRefresh={onRefreshCpa}
-        refreshing={syncing}
-      />
-
-      {/* 2. Pulsing Red DANGER Invariant Alert */}
-      <CpaDangerAlert
-        overview={overview}
-        accounts={effectiveAccounts}
-        onEnforceAirgap={onAirgapNow}
-      />
-
-      {/* 3. Collapsible Shadow-Mode Telemetry & Audit Feed */}
-      <CpaAuditFeed
-        overview={overview}
-        historyEntries={historyEntries}
-        isOpen={isAuditOpen}
-        onClose={onToggleAudit}
-      />
+      <CpaDangerAlert overview={overview} accounts={effectiveAccounts} />
 
       {/* 4 KPI Metric Stat Boxes */}
       <div className="grid-4">
@@ -600,7 +524,7 @@ const HomePage: React.FC<{
         <AccountDrawer
           account={drawerAccount}
           accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
-          onOpenEmergency={onOpenEmergency}
+          onApplyHold={onApplyHold}
           telemetry={{
             slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
             proxyPort: 8317,
@@ -629,8 +553,7 @@ const AccountsPage: React.FC<{
   syncing: boolean;
   onRefresh: () => void;
   overview: WatermarkFleetOverview | null;
-  onOpenEmergency: (account: Account) => void;
-  onAirgapNow: (accountId: string, reason?: string) => Promise<void>;
+  onApplyHold: (req: HoldRequest) => Promise<void>;
 }> = ({
   accounts,
   go,
@@ -638,8 +561,7 @@ const AccountsPage: React.FC<{
   syncing: _syncing,
   onRefresh: _onRefresh,
   overview,
-  onOpenEmergency,
-  onAirgapNow,
+  onApplyHold,
 }) => {
   const [filterHealth, setFilterHealth] = useState<'all' | 'healthy' | 'tight'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -663,7 +585,9 @@ const AccountsPage: React.FC<{
     const isClaude = a.providerType === 'claude';
     if (a.email?.includes('vishakha') || (!isClaude && idx === 13)) return 34;
     const ring = dualRingData(a.latestSnapshot);
-    if (ring.outer !== undefined && ring.outer !== null) return Math.round(ring.outer.remaining);
+    // 5H column: inner is the 5-hour window when both exist; outer is the weekly (or only) window.
+    const win = ring.inner ?? ring.outer;
+    if (win) return Math.round(win.remaining);
     return isClaude ? 84 : 78;
   };
 
@@ -742,12 +666,7 @@ const AccountsPage: React.FC<{
 
   return (
     <div id="tab-accounts" className="view-panel active">
-      {/* Invariant Danger Alert banner if any violations exist */}
-      <CpaDangerAlert
-        overview={overview}
-        accounts={effectiveAccounts}
-        onEnforceAirgap={onAirgapNow}
-      />
+      <CpaDangerAlert overview={overview} accounts={effectiveAccounts} />
 
       {/* Filter Toolbar */}
       <div className="filter-toolbar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -886,8 +805,6 @@ const AccountsPage: React.FC<{
                   STATUS {renderSortIndicator('status')}
                 </th>
               )}
-              <th style={{ minWidth: 260 }}>CPA DUAL-STATUS &amp; ROUTING</th>
-              <th style={{ textAlign: 'center' }}>INTERVENTION</th>
             </tr>
           </thead>
           <tbody>
@@ -901,7 +818,6 @@ const AccountsPage: React.FC<{
               const slotStr = isClaude ? 'slot_01' : `slot_${String(idx + 1).padStart(2, '0')}`;
               const provStr = a.providerType === 'antigravity' ? 'Google' : a.providerType === 'claude' ? 'Anthropic' : a.providerType;
               const resetStr = isTight ? 'in 1h 14m' : (isClaude ? 'in 3h 10m' : 'Rolling clear');
-              const accView = overview?.accounts.find((av) => av.accountId === a.id);
 
               return (
                 <tr key={a.id} style={{ cursor: 'pointer' }} onClick={() => setDrawerAccount(a)}>
@@ -930,39 +846,6 @@ const AccountsPage: React.FC<{
                       </span>
                     </td>
                   )}
-                  {/* CPA Dual-Indicator */}
-                  <td>
-                    <CpaDualIndicator
-                      account={a}
-                      accountView={accView}
-                      compact
-                    />
-                  </td>
-                  {/* 1-Click Emergency Action */}
-                  <td style={{ textAlign: 'center' }}>
-                    <button
-                      type="button"
-                      className="btn small"
-                      style={{
-                        background: 'rgba(168, 85, 247, 0.15)',
-                        border: '1px solid rgba(168, 85, 247, 0.4)',
-                        color: '#c084fc',
-                        padding: '4px 10px',
-                        borderRadius: 6,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenEmergency(a);
-                      }}
-                      title="Open Operator Emergency Hold Controls"
-                    >
-                      🛡️ Hold / Airgap
-                    </button>
-                  </td>
                 </tr>
               );
             })}
@@ -975,7 +858,7 @@ const AccountsPage: React.FC<{
         <AccountDrawer
           account={drawerAccount}
           accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
-          onOpenEmergency={onOpenEmergency}
+          onApplyHold={onApplyHold}
           telemetry={{
             accountId: drawerAccount.id,
             slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
