@@ -204,7 +204,7 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
-  console.log(`AI Limits Tracker server on :${PORT} (data: ${DATA_DIR}, web: ${WEB_DIR})`);
+  console.log(`FQD server on :${PORT} (data: ${DATA_DIR}, web: ${WEB_DIR})`);
   tracker.start();
   if (cpaSync) cpaSync.start();
 });

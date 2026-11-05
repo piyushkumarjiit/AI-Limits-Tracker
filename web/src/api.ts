@@ -62,6 +62,8 @@ export const api = {
   clearAlerts: () => call('/api/alerts', { method: 'DELETE' }),
   setInterval: (intervalMin: number) => call('/api/settings', { method: 'PUT', body: json({ intervalMin }) }),
   telemetry: () => call<TelemetryResponse>('/api/telemetry'),
+  cpaStatus: () => call<{ enabled: boolean; lastDiscoveryAt: number | string | null; lastDiscoveryOk: boolean; routingMode?: string }>('/api/cpa/status'),
+  telegramTest: () => call<{ ok: true }>('/api/telegram/test', { method: 'POST' }),
   cpaOverview: () => call<WatermarkFleetOverview>('/api/cpa/overview'),
   cpaHold: (req: { accountId: string; hold: ManualHoldType; reason?: string; ttlSeconds?: number; ttl?: number; actor?: string }) =>
     call<{

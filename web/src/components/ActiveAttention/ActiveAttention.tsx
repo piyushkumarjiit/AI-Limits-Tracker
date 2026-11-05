@@ -1,6 +1,8 @@
 import React from 'react';
 import type { Account } from '../../api';
 import { getSlotHeadroom } from '../common/headroomUtils';
+import { dualRingData } from '../../../../src/services/capacity';
+import { formatResetCountdown } from '../../../../src/utils/formatters';
 import './ActiveAttention.css';
 
 export interface ActiveAttentionProps {
@@ -29,8 +31,9 @@ export const ActiveAttention: React.FC<ActiveAttentionProps> = ({
           <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>All accounts operating above 35% headroom floor.</div>
         ) : (
           attentionAccounts.slice(0, 3).map(({ account: a, info: h, idx }) => {
-            const slotStr = a.providerType === 'claude' ? 'slot_01' : `slot_${String(idx + 1).padStart(2, '0')}`;
-            const resetStr = h.isExhausted ? 'in 1h 14m (14:30 UTC)' : 'Rolling window recovery in progress';
+            const slotStr = `slot_${String(idx + 1).padStart(2, '0')}`;
+            const binding = dualRingData(a.latestSnapshot).binding;
+            const resetStr = binding?.bucket.resetsAt ? formatResetCountdown(binding.bucket.resetsAt) : '-';
             return (
               <div
                 key={a.id}
@@ -52,7 +55,7 @@ export const ActiveAttention: React.FC<ActiveAttentionProps> = ({
                   <div>
                     <strong className="fqd-active-attention__title" style={{ color: '#fff', fontSize: 13 }}>{a.email || a.name}</strong>
                     <div className="fqd-active-attention__sub" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                      High consumption detected ? 5h Burst window at {h.rem}% ({h.reqs} reqs)
+                      {binding ? `${binding.bucket.label}: ${h.rem}% remaining` : "No quota data"}
                     </div>
                   </div>
                 </div>

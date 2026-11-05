@@ -24,6 +24,7 @@ import { validateRoutingConfig, type RoutingConfig } from '../../src/services/cp
 import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
 import { TelemetryService } from './telemetry';
+import { sendTelegram } from './notify';
 import {
   type WatermarkFleetOverview,
   type WatermarkAccountView,
@@ -743,6 +744,10 @@ async function handleApi(
   }
 
   if (path === '/api/alerts' && method === 'GET') return send(res, 200, { alerts: store.alerts(100) });
+  if (path === '/api/telegram/test' && method === 'POST') {
+    const result = await sendTelegram('FQD test message', 'Telegram alerts are configured correctly.');
+    return send(res, result.ok ? 200 : 400, result.ok ? { ok: true } : { error: result.error });
+  }
   if (path === '/api/alerts' && method === 'DELETE') {
     store.clearAlerts();
     return send(res, 200, { ok: true });

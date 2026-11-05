@@ -5,7 +5,7 @@ import type { ManualHoldType, WatermarkAccountView } from '../../../../server/sr
 import { LAB_BRAND_PALETTES, PROVIDER_NAMES } from '../../../../src/constants/theme';
 import { formatTimeRemaining, formatResetCountdown } from '../../../../src/utils/formatters';
 import { formatTokenCount } from '../../../../src/services/telemetryService';
-import { deriveRoutingEnforcement } from '../common/cpaUiUtils';
+import { accountStatus, deriveRoutingEnforcement, ACCOUNT_STATUS_LABEL } from '../common/cpaUiUtils';
 import './AccountDrawer.css';
 
 export interface AccountDrawerTelemetry {
@@ -82,7 +82,8 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
 
   const weeklyRem = Math.round(weekly?.remainingPercent ?? 100);
   const rollingRem = Math.round(rolling?.remainingPercent ?? 100);
-  const isExhausted = (account.latestSnapshot?.status === 'ok' ? false : account.latestSnapshot?.status === 'rate_limited') || weeklyRem <= 10 || rollingRem <= 10;
+  const status = accountStatus(account, accountView);
+  const isExhausted = status !== 'healthy' && status !== 'tight';
   const nearestReset = weekly?.resetsAt || rolling?.resetsAt;
 
   const handleCopy = () => {
@@ -160,7 +161,7 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
             }}
             aria-label="Close"
           >
-            ?
+            ✕
           </button>
         </div>
 
@@ -206,7 +207,7 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
               }}
             />
             <b style={{ color: isExhausted ? 'var(--bad)' : 'var(--ok)', fontSize: 13 }}>
-              {isExhausted ? 'Cooldown Active' : 'Ready & Healthy'}
+              {ACCOUNT_STATUS_LABEL[status]}
             </b>
           </div>
           {nearestReset && (
@@ -286,31 +287,6 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
             {holdError && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--bad)' }}>{holdError}</div>}
           </div>
         )}
-
-        {/* 7-Day Quota Cycle Strip */}
-        <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>7-Day Quota Cycle</span>
-            <b style={{ fontSize: 13, color: weeklyRem <= 35 ? 'var(--warn)' : 'var(--ok)' }}>
-              {weeklyRem}% Balance ({Math.round(weeklyRem * 10)}k / 1M)
-            </b>
-          </div>
-          <div style={{ height: 8, background: 'var(--track)', borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
-            <div style={{ height: '100%', width: `${weeklyRem}%`, background: weeklyRem <= 35 ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'linear-gradient(90deg, #10b981, #059669)', borderRadius: 4 }} />
-          </div>
-          <div className="dh-calendar-strip" style={{ marginBottom: 8 }}>
-            <div className="dh-day-pill past">D1</div>
-            <div className="dh-day-pill past">D2</div>
-            <div className={`dh-day-pill ${weeklyRem <= 35 ? 'tight' : 'current'}`}>D3</div>
-            <div className="dh-day-pill">D4</div>
-            <div className="dh-day-pill">D5</div>
-            <div className="dh-day-pill">D6</div>
-            <div className="dh-day-pill">D7</div>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            Weekly Reset: <strong style={{ color: '#e5e7eb' }}>{formatResetCountdown(weekly?.resetsAt || nearestReset)}</strong>
-          </div>
-        </div>
 
         {/* Telemetry info */}
         <div style={{ background: 'var(--card-hi)', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
