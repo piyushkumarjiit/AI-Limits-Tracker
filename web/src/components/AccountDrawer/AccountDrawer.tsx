@@ -3,7 +3,7 @@ import type { Account } from '../../api';
 import type { ProviderType, QuotaBucket } from '../../../../src/models/types';
 import type { ManualHoldType, WatermarkAccountView } from '../../../../server/src/cpaWatermarkTypes';
 import { LAB_BRAND_PALETTES, PROVIDER_NAMES } from '../../../../src/constants/theme';
-import { formatTimeRemaining, formatResetCountdown } from '../../../../src/utils/formatters';
+import { capitalize, formatTimeRemaining, formatResetCountdown } from '../../../../src/utils/formatters';
 import { formatTokenCount, type AccountTelemetry } from '../../../../src/services/telemetryService';
 import { accountStatus, deriveRoutingEnforcement, ACCOUNT_STATUS_LABEL } from '../common/cpaUiUtils';
 import './AccountDrawer.css';
@@ -265,12 +265,12 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
               placeholder="Reason (optional)"
               value={holdReason}
               onChange={(e) => setHoldReason(e.target.value)}
-              style={{ width: '100%', marginBottom: 8, boxSizing: 'border-box' }}
+              style={{ width: '100%', marginBottom: 8, padding: '6px 10px', fontSize: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6 }}
             />
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="btn small" disabled={holdBusy} onClick={() => applyHold('quarantine')} title="Take out of rotation (standby cooldown)">Quarantine</button>
-              <button type="button" className="btn small" disabled={holdBusy} onClick={() => applyHold('airgap')} title="Remove from the CLIProxy pool immediately">Airgap</button>
-              <button type="button" className="btn small" disabled={holdBusy || routing.origin !== 'manual'} onClick={() => applyHold('none')} title="Return to automatic routing">Clear hold</button>
+              <button type="button" className="filter-btn" disabled={holdBusy} onClick={() => applyHold('quarantine')} title="Take out of rotation (standby cooldown)">Quarantine</button>
+              <button type="button" className="filter-btn" disabled={holdBusy} onClick={() => applyHold('airgap')} title="Remove from the CLIProxy pool immediately">Airgap</button>
+              <button type="button" className="filter-btn" disabled={holdBusy || routing.origin !== 'manual'} onClick={() => applyHold('none')} title="Return to automatic routing">Clear hold</button>
             </div>
             {holdError && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--bad)' }}>{holdError}</div>}
           </div>
@@ -283,7 +283,7 @@ export const AccountDrawer: React.FC<AccountDrawerProps> = ({
             <>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
             <span className="muted">CLIProxy status:</span>
-            <b>{telemetry.disabled ? 'Disabled' : telemetry.proxyStatus || 'Active'}</b>
+            <b>{telemetry.disabled ? 'Disabled' : capitalize(telemetry.proxyStatus || 'active')}</b>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
             <span className="muted">Requests (last hour):</span>

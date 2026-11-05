@@ -957,18 +957,6 @@ h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.
 }
 
 /* Native Mobile Responsive Queries */
-@media (max-width: 640px) {
-  body { padding: 8px; }
-  .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .grid-3, .grid-2 { grid-template-columns: 1fr; gap: 8px; }
-  .review-header { flex-direction: column; gap: 10px; }
-  .tab-bar { display: none; }
-  .mobile-bottom-nav { display: flex !important; }
-  .data-table-container { display: none; }
-  .mobile-accounts-list { display: flex !important; }
-  .deck-content { padding-bottom: 70px; }
-}
-
 @media (min-width: 641px) {
   .tab-bar { display: flex !important; }
   .mobile-bottom-nav { display: none !important; }
@@ -986,6 +974,8 @@ h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.
   .data-table-container { display: none !important; }
   .mobile-accounts-list { display: flex !important; }
   .deck-content { padding-bottom: 75px; }
+  /* Fourteen-plus slots share a phone-width track: keep the numbers inside their cells. */
+  .grad-segment-label { font-size: 9px; letter-spacing: 0; }
 }
 
 /* ---------- Primitives ---------- */
@@ -1360,8 +1350,8 @@ button.card:active { transform: scale(0.985); background: #f7f6f2; }
   z-index: 2;
 }
 
-/* Enterprise Footer */
-.enterprise-footer {
+/* App Footer */
+.app-footer {
   margin-top: 40px;
   padding: 20px 0;
   border-top: 1px solid var(--border);
@@ -1372,11 +1362,11 @@ button.card:active { transform: scale(0.985); background: #f7f6f2; }
   font-size: 12px;
   color: var(--muted);
 }
-.enterprise-footer a {
+.app-footer a {
   color: var(--muted);
   text-decoration: none;
   transition: color 0.15s ease;
 }
-.enterprise-footer a:hover {
+.app-footer a:hover {
   color: #38bdf8;
 }

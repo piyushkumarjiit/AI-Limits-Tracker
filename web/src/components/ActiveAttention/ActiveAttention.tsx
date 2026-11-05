@@ -1,22 +1,30 @@
 import React from 'react';
 import type { Account } from '../../api';
-import { getSlotHeadroom } from '../common/headroomUtils';
+import type { WatermarkFleetOverview } from '../../../../server/src/cpaWatermarkTypes';
 import { dualRingData } from '../../../../src/services/capacity';
+import { accountStatus, ACCOUNT_STATUS_BADGE, ACCOUNT_STATUS_LABEL } from '../common/cpaUiUtils';
 import { formatResetCountdown } from '../../../../src/utils/formatters';
 import './ActiveAttention.css';
 
 export interface ActiveAttentionProps {
   accounts: Account[];
+  overview?: WatermarkFleetOverview | null;
   onSelectAccount: (a: Account) => void;
 }
 
 export const ActiveAttention: React.FC<ActiveAttentionProps> = ({
   accounts,
+  overview,
   onSelectAccount,
 }) => {
+  // Same four states as the Accounts page: everything that is not Healthy needs a look.
   const attentionAccounts = accounts
-    .map((a, i) => ({ account: a, info: getSlotHeadroom(a, i), idx: i }))
-    .filter(({ info }) => info.isTight);
+    .map((a, idx) => ({
+      account: a,
+      idx,
+      status: accountStatus(a, overview?.accounts.find((v) => v.accountId === a.id) || null),
+    }))
+    .filter(({ status }) => status !== 'healthy');
 
   return (
     <div className="card fqd-active-attention" style={{ marginBottom: 14 }}>
@@ -28,23 +36,26 @@ export const ActiveAttention: React.FC<ActiveAttentionProps> = ({
       </div>
       <div style={{ display: 'grid', gap: 10 }}>
         {attentionAccounts.length === 0 ? (
-          <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>All accounts operating above 35% headroom floor.</div>
+          <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>All accounts are above the 35% headroom floor.</div>
         ) : (
-          attentionAccounts.slice(0, 3).map(({ account: a, info: h, idx }) => {
+          attentionAccounts.slice(0, 3).map(({ account: a, idx, status }) => {
             const slotStr = `slot_${String(idx + 1).padStart(2, '0')}`;
             const binding = dualRingData(a.latestSnapshot).binding;
-            const resetStr = binding?.bucket.resetsAt ? formatResetCountdown(binding.bucket.resetsAt) : '-';
+            const resetStr = formatResetCountdown(binding?.bucket.resetsAt);
+            const rem = binding ? Math.max(0, Math.round(binding.remaining)) : null;
+            const severe = status === 'exhausted';
+            const color = severe ? '#f87171' : status === 'tight' ? '#fbbf24' : '#93c5fd';
             return (
               <div
                 key={a.id}
-                className={`fqd-active-attention__item ${h.isExhausted ? 'fqd-active-attention__item--exhausted' : 'fqd-active-attention__item--tight'}`}
+                className={`fqd-active-attention__item fqd-active-attention__item--${status}`}
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   padding: '12px 14px',
-                  background: h.isExhausted ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)',
-                  border: '1px solid ' + (h.isExhausted ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)'),
+                  background: severe ? 'rgba(239,68,68,0.08)' : status === 'tight' ? 'rgba(245,158,11,0.08)' : 'rgba(96,165,250,0.08)',
+                  border: '1px solid ' + (severe ? 'rgba(239,68,68,0.3)' : status === 'tight' ? 'rgba(245,158,11,0.3)' : 'rgba(96,165,250,0.3)'),
                   borderRadius: 8,
                   cursor: 'pointer',
                 }}
@@ -55,14 +66,14 @@ export const ActiveAttention: React.FC<ActiveAttentionProps> = ({
                   <div>
                     <strong className="fqd-active-attention__title" style={{ color: '#fff', fontSize: 13 }}>{a.email || a.name}</strong>
                     <div className="fqd-active-attention__sub" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
-                      {binding ? `${binding.bucket.label}: ${h.rem}% remaining` : "No quota data"}
+                      {binding ? `${binding.bucket.label}: ${rem}% remaining` : 'No quota data'}
                     </div>
                   </div>
                 </div>
                 <div className="fqd-active-attention__right" style={{ textAlign: 'right' }}>
-                  <span className={`badge ${h.badge}`}>{h.label} ({h.rem}%)</span>
-                  <div className="fqd-active-attention__recovery" style={{ fontSize: 11, color: h.color, marginTop: 4 }}>
-                    Next Recovery: {resetStr}
+                  <span className={`badge ${ACCOUNT_STATUS_BADGE[status]}`}>{ACCOUNT_STATUS_LABEL[status]}</span>
+                  <div className="fqd-active-attention__recovery" style={{ fontSize: 11, color, marginTop: 4 }}>
+                    Resets {resetStr}
                   </div>
                 </div>
               </div>

@@ -532,8 +532,8 @@ async function handleApi(
           label: b.label || b.id || 'Window',
           currentRemainingPct: rem,
           projectedRemainingPct: rem,
-          resetsAt: b.resetsAt || new Date(Date.now() + 3600000).toISOString(),
-          resetSecondsRemaining: b.resetsAt ? Math.max(0, Math.floor((new Date(b.resetsAt).getTime() - Date.now()) / 1000)) : 3600,
+          resetsAt: b.resetsAt || null,
+          resetSecondsRemaining: b.resetsAt ? Math.max(0, Math.floor((new Date(b.resetsAt).getTime() - Date.now()) / 1000)) : null,
           isBinding: false,
         };
       });
@@ -568,7 +568,7 @@ async function handleApi(
 
       const currentWeight = routingState?.applied ?? (acc.isActive ? 100 : 0);
       const targetWeight = routingState?.target ?? (effective === 'exhausted' || effective === 'airgapped' || effective === 'quarantined' ? 0 : 100);
-      const burnRatePerMin = (acc.latestSnapshot as any)?.burnRatePerMin ?? (lowestRem < 100 ? 0.05 : 0);
+      const burnRatePerMin = (acc.latestSnapshot as any)?.burnRatePerMin ?? 0;
       totalBurnRateSum += burnRatePerMin;
 
       const runwayMinutes = burnRatePerMin > 0 ? Math.round(lowestRem / burnRatePerMin) : null;
@@ -602,7 +602,7 @@ async function handleApi(
         windows: windowViews,
         burnRatePerMin,
         runwayMinutes,
-        recentRequests5m: (acc.latestSnapshot as any)?.recentRequests5m ?? 12,
+        recentRequests5m: (acc.latestSnapshot as any)?.recentRequests5m ?? 0,
         recentErrors15m: {
           http429: recent429,
           http5xx: 0,
@@ -611,7 +611,7 @@ async function handleApi(
     }
 
     const avgHeadroom = totalAccountsCount > 0 ? Math.round(totalHeadroomSum / totalAccountsCount) : 100;
-    const poolRunwayMinutes = totalBurnRateSum > 0 ? Math.round(avgHeadroom / totalBurnRateSum) : 720;
+    const poolRunwayMinutes = totalBurnRateSum > 0 ? Math.round(avgHeadroom / totalBurnRateSum) : null;
 
     if (exhaustedCount >= 3 || (healthyCount === 0 && totalAccountsCount > 0)) {
       tierState = 'CLOSED';

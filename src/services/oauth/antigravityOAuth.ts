@@ -133,7 +133,7 @@ export async function exchangeAntigravityCode(code: string, verifier: string): P
   });
   if (!data?.refresh_token) {
     throw new Error(
-      'Google did not return a refresh token — remove AI Limits Tracker/Antigravity at myaccount.google.com/permissions and sign in again'
+      'Google did not return a refresh token — revoke Antigravity access at myaccount.google.com/permissions and sign in again'
     );
   }
   const creds = tokensToCredentials(data);

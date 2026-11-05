@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import type { Account } from '../../api';
-import { dualRingData } from '../../../../src/services/capacity';
 import { getSlotHeadroom } from '../common/headroomUtils';
 import './FleetHeadroom.css';
 
@@ -15,6 +14,13 @@ export interface FleetHeadroomProps {
   claudeHeadroom: string;
 }
 
+const AGGREGATE_BANDS = [
+  { status: 'healthy', title: 'Healthy (above 35%)', color: 'var(--ok)' },
+  { status: 'tight', title: 'Tight (35% or less)', color: 'var(--warn)' },
+  { status: 'exhausted', title: 'Exhausted (0%)', color: 'var(--bad)' },
+  { status: 'nodata', title: 'No data', color: 'var(--muted)' },
+] as const;
+
 export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
   agyAccounts,
   claudeAccounts,
@@ -25,6 +31,11 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
   agyHeadroom,
   claudeHeadroom,
 }) => {
+  const slotOf = (acc: Account) => String(effectiveAccounts.findIndex((a) => a.id === acc.id) + 1).padStart(2, '0');
+  const plural = (n: number) => `${n} ${n === 1 ? 'Account' : 'Accounts'}`;
+  const headroomStyle = (v: string) => ({
+    color: v === '-' ? 'var(--muted)' : Number(v) <= 0 ? 'var(--bad)' : Number(v) <= 35 ? 'var(--warn)' : 'var(--ok)',
+  });
   const [capView, setCapView] = useState<'auto' | 'cell' | 'matrix' | 'aggregate'>('auto');
 
   const activeView = capView === 'auto'
@@ -58,13 +69,13 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
       {activeView === 'cell' && (
         <div id="view-cap-cell" className="scale-box" style={{ borderLeft: '3px solid var(--blue)' }}>
           <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
-            <span><strong>Google Antigravity</strong> ({agyAccounts.length} Accounts)</span>
-            <span style={{ color: 'var(--ok)' }}><strong>{agyHeadroom === '-' ? 'No data' : `${agyHeadroom}% Headroom`}</strong></span>
+            <span><strong>Google Antigravity</strong> ({plural(agyAccounts.length)})</span>
+            <span style={headroomStyle(agyHeadroom)}><strong>{agyHeadroom === '-' ? 'No data' : `${agyHeadroom}% Headroom`}</strong></span>
           </div>
           <div className="gradient-bar-track">
             {agyAccounts.map((acc, idx) => {
               const h = getSlotHeadroom(acc, idx);
-              const slotLabel = String(idx + 1).padStart(2, '0');
+              const slotLabel = slotOf(acc);
               const isSelected = hoverAccount?.id === acc.id || (!hoverAccount && h.isTight);
               return (
                 <div
@@ -103,13 +114,13 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
           </div>
 
           <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 12, marginBottom: 6 }}>
-            <span><strong>Claude Code</strong> ({claudeAccounts.length} Account)</span>
-            <span style={{ color: 'var(--ok)' }}><strong>{claudeHeadroom === '-' ? 'No data' : `${claudeHeadroom}% Headroom`}</strong></span>
+            <span><strong>Claude Code</strong> ({plural(claudeAccounts.length)})</span>
+            <span style={headroomStyle(claudeHeadroom)}><strong>{claudeHeadroom === '-' ? 'No data' : `${claudeHeadroom}% Headroom`}</strong></span>
           </div>
           <div className="gradient-bar-track fqd-fleet-headroom__claude-track" style={{ height: 48, display: 'flex', gap: 4, justifyContent: 'flex-start' }}>
-            {claudeAccounts.map((acc) => {
-              const ring = dualRingData(acc.latestSnapshot);
-              const rem = ring.outer ? ring.outer.remaining : ring.inner ? ring.inner.remaining : 84;
+            {claudeAccounts.map((acc, idx) => {
+              const h = getSlotHeadroom(acc, idx);
+              const slotLabel = slotOf(acc);
               const isSelected = hoverAccount?.id === acc.id;
               return (
                 <div
@@ -119,25 +130,25 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
                     flex: '0 0 calc((100% - 52px) / 14)',
                     maxWidth: 85,
                     height: 48,
-                    borderColor: isSelected ? '#ea580c' : undefined,
+                    borderColor: isSelected ? (h.isTight ? h.color : '#ea580c') : undefined,
                     transform: isSelected ? 'translateY(-2px)' : undefined,
                   }}
                   onMouseEnter={() => setHoverAccount(acc)}
                   onClick={() => onSelectAccount(acc)}
                 >
-                  <span className="grad-segment-label">01</span>
+                  <span className="grad-segment-label">{slotLabel}</span>
                   <div
                     className="grad-segment-fill"
                     style={{
-                      height: `${Math.max(10, rem)}%`,
-                      background: 'linear-gradient(0deg, #7c2d12, #ea580c)',
+                      height: `${Math.max(10, h.rem)}%`,
+                      background: h.fill,
                     }}
                   >
-                    <div className="grad-segment-waterline" style={{ color: '#fdba74', background: '#ffedd5' }} />
+                    <div className="grad-segment-waterline" style={{ color: h.waterlineColor, background: h.waterlineBg }} />
                   </div>
-                  <div className="grad-segment-tooltip" style={{ borderColor: '#ea580c' }}>
-                    <strong>{acc.email || acc.name}</strong><br />
-                    {Math.round(rem)}% available · Anthropic rolling
+                  <div className="grad-segment-tooltip" style={{ borderColor: h.isTight ? h.color : '#ea580c' }}>
+                    <strong>{acc.email || acc.name}</strong> (Slot {slotLabel})<br />
+                    <span style={{ color: h.color }}>{h.rem}% {h.label}</span>
                   </div>
                 </div>
               );
@@ -146,14 +157,11 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
 
           {/* Hover details pill */}
           {hoverAccount && (() => {
-            const hovIdx = agyAccounts.findIndex(a => a.id === hoverAccount.id);
-            const isClaude = hoverAccount.providerType === 'claude';
-            const h = getSlotHeadroom(hoverAccount, hovIdx >= 0 ? hovIdx : 0);
-            const slotStr = isClaude ? 'slot_01' : `slot_${String(hovIdx >= 0 ? hovIdx + 1 : 14).padStart(2, '0')}`;
+            const h = getSlotHeadroom(hoverAccount, 0);
             return (
               <div className="fqd-fleet-headroom__hover-pill" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, padding: '8px 12px', background: 'var(--card-hi)', borderRadius: 8, fontSize: 11 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className="badge badge-slot">{slotStr}</span>
+                  <span className="badge badge-slot">slot_{slotOf(hoverAccount)}</span>
                   <strong style={{ color: '#fff' }}>{hoverAccount.email || hoverAccount.name}</strong>
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -166,32 +174,30 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
         </div>
       )}
 
-      {/* 2. Matrix View */}
+      {/* 2. Matrix View: one compact cell per account, every provider */}
       {activeView === 'matrix' && (
         <div id="view-cap-matrix" className="scale-box" style={{ borderLeft: '3px solid var(--purple)' }}>
           <div style={{ fontSize: 11, marginBottom: 8, color: 'var(--muted)' }}>
-            Dual-Row Matrix: Displaying 32 provisioned gateway slots
+            {plural(effectiveAccounts.length)} · tightest window per account
           </div>
           <div className="matrix-grid">
-            {Array.from({ length: 32 }).map((_, i) => {
-              const isWarn = i === 13;
-              const isAlt = i === 10 || i === 22;
+            {effectiveAccounts.map((acc, i) => {
+              const h = getSlotHeadroom(acc, i);
+              const hasData = h.label !== 'No data';
               return (
                 <div
-                  key={i}
+                  key={acc.id}
                   className="matrix-cell"
+                  title={`${acc.email || acc.name}: ${hasData ? `${h.rem}% ${h.label}` : 'No data'}`}
                   style={{
-                    borderColor: isWarn ? '#f59e0b' : isAlt ? '#38bdf8' : 'rgba(59,130,246,0.2)',
-                    background: isWarn ? 'rgba(245,158,11,0.1)' : 'rgba(15,23,42,0.8)',
+                    borderColor: h.isTight ? h.color : 'rgba(59,130,246,0.2)',
+                    background: h.isTight ? 'rgba(245,158,11,0.1)' : 'rgba(15,23,42,0.8)',
                   }}
-                  onClick={() => {
-                    const acc = effectiveAccounts[i % effectiveAccounts.length];
-                    if (acc) onSelectAccount(acc);
-                  }}
+                  onClick={() => onSelectAccount(acc)}
                 >
-                  <span className="matrix-cell-id">{String(i + 1).padStart(2, '0')}</span>
-                  <span className="matrix-cell-val" style={{ color: isWarn ? '#fbbf24' : '#60a5fa' }}>
-                    {isWarn ? '34%' : '90%'}
+                  <span className="matrix-cell-id">{slotOf(acc)}</span>
+                  <span className="matrix-cell-val" style={{ color: hasData ? h.color : 'var(--muted)' }}>
+                    {hasData ? `${h.rem}%` : '-'}
                   </span>
                 </div>
               );
@@ -200,20 +206,25 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
         </div>
       )}
 
-      {/* 3. Aggregate View */}
+      {/* 3. Aggregate View: accounts grouped by headroom band */}
       {activeView === 'aggregate' && (
         <div id="view-cap-aggregate" className="scale-box" style={{ borderLeft: '3px solid var(--ok)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-            <div className="card" style={{ background: 'var(--card-hi)', padding: 12, border: '1px solid var(--border)' }}>
-              <span className="stat-sub">High-Capacity Pool (Healthy)</span>
-              <span className="stat-val" style={{ color: 'var(--ok)' }}>14 Accounts</span>
-              <span className="stat-sub">94.2% Mean Headroom</span>
-            </div>
-            <div className="card" style={{ background: 'var(--card-hi)', padding: 12, border: '1px solid var(--border)' }}>
-              <span className="stat-sub">Near-Limit Triage (Tight)</span>
-              <span className="stat-val" style={{ color: 'var(--warn)' }}>1 Account</span>
-              <span className="stat-sub">34.0% Burst Remaining</span>
-            </div>
+            {AGGREGATE_BANDS.map((band) => {
+              const members = effectiveAccounts
+                .map((acc, i) => getSlotHeadroom(acc, i))
+                .filter((h) => (h.label === 'No data' ? band.status === 'nodata' : h.status === band.status));
+              const mean = members.length && band.status !== 'nodata'
+                ? `${Math.round(members.reduce((sum, h) => sum + h.rem, 0) / members.length)}% mean headroom`
+                : band.status === 'nodata' ? 'Provider has not reported quota' : 'None';
+              return (
+                <div key={band.status} className="card" style={{ background: 'var(--card-hi)', padding: 12, border: '1px solid var(--border)' }}>
+                  <span className="stat-sub">{band.title}</span>
+                  <span className="stat-val" style={{ color: band.color }}>{plural(members.length)}</span>
+                  <span className="stat-sub">{members.length ? mean : 'None'}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

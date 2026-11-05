@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Account } from '../../api';
 import { formatTokenCount, type TelemetryResponse } from '../../../../src/services/telemetryService';
+import { capitalize } from '../../../../src/utils/formatters';
 import './TelemetryVelocity.css';
 
 export interface TelemetryVelocityProps {
@@ -111,7 +112,7 @@ export const TelemetryVelocity: React.FC<TelemetryVelocityProps> = ({ accounts, 
                 {rows.map(({ account, t }) => (
                   <tr key={account.id}>
                     <td><strong>{account.email || account.name}</strong></td>
-                    <td>{t!.disabled ? 'Disabled' : t!.proxyStatus || 'Active'}</td>
+                    <td>{t!.disabled ? 'Disabled' : capitalize(t!.proxyStatus || 'active')}</td>
                     <td>{t!.requestsLastHour ?? 0}</td>
                     <td>{t!.failedLastHour ?? 0}</td>
                     <td>{t!.successCount ?? 0} ok / {t!.failedCount ?? 0} failed</td>
