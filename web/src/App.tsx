@@ -103,12 +103,16 @@ export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [cpaOverview, setCpaOverview] = useState<WatermarkFleetOverview | null>(null);
+  const [telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
   useTick(60000);
 
   const loadCpa = useCallback(async () => {
     try {
       const ov = await api.cpaOverview();
       setCpaOverview(ov);
+    } catch {}
+    try {
+      setTelemetry(await api.telemetry());
     } catch {}
   }, []);
 
@@ -167,7 +171,7 @@ export function App() {
       break;
     }
     case 'stats':
-      page = <TelemetryVelocity accounts={accounts} />;
+      page = <TelemetryVelocity accounts={accounts} telemetry={telemetry} />;
       break;
     case 'accounts':
       page = (
@@ -178,6 +182,7 @@ export function App() {
           syncing={syncing}
           onRefresh={refreshAll}
           overview={cpaOverview}
+          telemetry={telemetry}
           onApplyHold={handleApplyHold}
         />
       );
@@ -199,6 +204,7 @@ export function App() {
           syncing={syncing}
           onRefresh={refreshAll}
           overview={cpaOverview}
+          telemetry={telemetry}
           onApplyHold={handleApplyHold}
         />
       );
@@ -403,15 +409,16 @@ const HomePage: React.FC<{
   syncing: boolean;
   onRefresh: () => void;
   overview: WatermarkFleetOverview | null;
+  telemetry: TelemetryResponse | null;
   onApplyHold: (req: HoldRequest) => Promise<void>;
 }> = ({
   state,
   go,
   overview,
+  telemetry,
   onApplyHold,
 }) => {
   const { accounts } = state;
-  const [_telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
   const [drawerAccount, setDrawerAccount] = useState<Account | null>(null);
 
   const effectiveAccounts = accounts;
@@ -420,10 +427,6 @@ const HomePage: React.FC<{
 
   const defaultHoverAccount = effectiveAccounts[0];
   const [hoverAccount, setHoverAccount] = useState<Account | null>(defaultHoverAccount || null);
-
-  useEffect(() => {
-    api.telemetry().then(setTelemetry).catch(() => {});
-  }, [state.lastSyncAllAt]);
 
   useEffect(() => {
     if (!hoverAccount && effectiveAccounts.length > 0) {
@@ -495,14 +498,8 @@ const HomePage: React.FC<{
           account={drawerAccount}
           accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
           onApplyHold={onApplyHold}
-          telemetry={{
-            slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
-            proxyPort: 8317,
-            totalTokens: 1450000,
-            promptTokens: 1100000,
-            completionTokens: 350000,
-            requestCount: 45,
-          }}
+          telemetry={telemetry?.accounts[drawerAccount.id] ?? null}
+          telemetryNotes={telemetry?.global.notes}
           onClose={() => setDrawerAccount(null)}
           onViewFleet={() => {
             setDrawerAccount(null);
@@ -523,6 +520,7 @@ const AccountsPage: React.FC<{
   syncing: boolean;
   onRefresh: () => void;
   overview: WatermarkFleetOverview | null;
+  telemetry: TelemetryResponse | null;
   onApplyHold: (req: HoldRequest) => Promise<void>;
 }> = ({
   accounts,
@@ -531,6 +529,7 @@ const AccountsPage: React.FC<{
   syncing: _syncing,
   onRefresh: _onRefresh,
   overview,
+  telemetry,
   onApplyHold,
 }) => {
   const [filterHealth, setFilterHealth] = useState<'all' | AccountStatus>('all');
@@ -802,17 +801,8 @@ const AccountsPage: React.FC<{
           account={drawerAccount}
           accountView={overview?.accounts.find((av) => av.accountId === drawerAccount.id) || null}
           onApplyHold={onApplyHold}
-          telemetry={{
-            accountId: drawerAccount.id,
-            slotId: getSlotLabel(drawerAccount, effectiveAccounts.indexOf(drawerAccount)),
-            proxyPort: 8317,
-            totalTokens: 1450000,
-            promptTokens: 1100000,
-            completionTokens: 350000,
-            requestCount: 45,
-            lastRoutedAt: new Date().toISOString(),
-            proxySource: drawerAccount.providerType === 'claude' ? 'litellm' : 'cliproxy',
-          }}
+          telemetry={telemetry?.accounts[drawerAccount.id] ?? null}
+          telemetryNotes={telemetry?.global.notes}
           onClose={() => setDrawerAccount(null)}
           onViewFleet={() => setDrawerAccount(null)}
         />

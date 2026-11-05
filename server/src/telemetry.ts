@@ -15,6 +15,15 @@ export interface AccountTelemetry {
   completionTokens: number;
   requestCount: number;
   lastRoutedAt: string | null;
+  /** Successful requests CLIProxy has routed through this credential since it started. */
+  successCount?: number;
+  failedCount?: number;
+  /** Requests in the last hour (CLIProxy's recent 10-minute buckets). */
+  requestsLastHour?: number;
+  failedLastHour?: number;
+  /** CLIProxy has this credential disabled (out of the routing pool). */
+  disabled?: boolean;
+  proxyStatus?: string | null;
   proxySource?: 'litellm' | 'cliproxy' | 'local_estimate';
   slotId?: string;
   proxyPort?: number;
@@ -29,11 +38,24 @@ export interface GlobalTelemetryStatus {
     cliproxy: boolean;
   };
   lastCheckedAt: string;
+  /** Why a source is not contributing data, in plain words. */
+  notes?: string[];
 }
+
+/** Per-model usage over the last 24 hours, from LiteLLM spend logs. */
+export interface ModelUsage {
+  model: string;
+  requests: number;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
 
 export interface TelemetryResponse {
   global: GlobalTelemetryStatus;
   accounts: Record<string, AccountTelemetry>;
+  models?: ModelUsage[];
 }
 
 export interface TelemetryConfig {
@@ -113,158 +135,128 @@ export class TelemetryService {
       liteLlmUrl: config.liteLlmUrl || process.env.LITELLM_URL,
       liteLlmKey: config.liteLlmKey || process.env.LITELLM_KEY,
       cliProxyPort: config.cliProxyPort || Number(process.env.CLIPROXY_PORT) || 8317,
-      cliProxyUrl: config.cliProxyUrl || process.env.CLIPROXY_URL || 'http://127.0.0.1:8317',
+      cliProxyUrl: config.cliProxyUrl || process.env.CLIPROXY_URL || process.env.CPA_BASE_URL || 'http://127.0.0.1:8317',
       cliProxyKey: config.cliProxyKey || process.env.CLIPROXY_KEY || process.env.CPA_MANAGEMENT_KEY,
     };
     this.ttlMs = ttlMs;
   }
 
+  /** GET a JSON document from a validated proxy base; returns the HTTP status and body (null on failure). */
+  private async getJson(base: URL, path: string, key: string | undefined): Promise<{ status: number; body: any }> {
+    const target = new URL(path, base);
+    if (
+      !(target.protocol === 'http:' || target.protocol === 'https:') ||
+      (target.protocol === 'http:' && !isAllowedHttpHost(target.hostname)) ||
+      target.username ||
+      target.password
+    ) {
+      return { status: 0, body: null };
+    }
+    try {
+      const res = await fetch(target, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000),
+        headers: { Accept: 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        redirect: 'error',
+      });
+      return { status: res.status, body: res.ok ? await res.json().catch(() => null) : null };
+    } catch {
+      return { status: 0, body: null };
+    }
+  }
+
   /**
-   * Passive fetch of telemetry with TTL caching and graceful fallback.
+   * Passive, read-only fetch of proxy telemetry with TTL caching.
+   * CLIProxy supplies per-credential request counts; LiteLLM spend logs supply per-model usage.
    * NEVER triggers native token refreshes.
    */
-  async getTelemetry(accountIds: string[] = []): Promise<TelemetryResponse> {
+  async getTelemetry(accounts: Array<string | { id: string; email?: string | null }> = []): Promise<TelemetryResponse> {
     const now = Date.now();
     if (this.cache && now < this.cacheExpiresAt) {
       return this.cache;
     }
 
+    const notes: string[] = [];
     let liteLlmConnected = false;
     let cliProxyConnected = false;
     const accountTelemetryMap: Record<string, AccountTelemetry> = {};
+    let models: ModelUsage[] | undefined;
 
-    // 1. Check CLIProxy telemetry passively (non-blocking, timeout 2s)
-    const validatedCliProxyBase = validateTelemetryBaseUrl(this.config.cliProxyUrl);
-    if (validatedCliProxyBase) {
-      try {
-        const targetUrl = new URL('/v8/management/credentials', validatedCliProxyBase);
-        if (
-          (targetUrl.protocol === 'http:' || targetUrl.protocol === 'https:') &&
-          (targetUrl.protocol !== 'http:' || isAllowedHttpHost(targetUrl.hostname)) &&
-          !targetUrl.username &&
-          !targetUrl.password
-        ) {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 2000);
-          const headers: Record<string, string> = { 'Accept': 'application/json' };
-          if (this.config.cliProxyKey) {
-            headers['Authorization'] = `Bearer ${this.config.cliProxyKey}`;
-            headers['X-Management-Key'] = this.config.cliProxyKey;
-          }
-          let res = await fetch(targetUrl, {
-            method: 'GET',
-            signal: controller.signal,
-            headers,
-            redirect: 'error',
-          }).catch(() => null);
+    // FQD accounts are matched to CLIProxy credentials by email.
+    const idByEmail = new Map<string, string>();
+    for (const acc of accounts) {
+      if (typeof acc !== 'string' && acc.email) idByEmail.set(acc.email.toLowerCase(), acc.id);
+    }
 
-          if (res && res.status === 404) {
-            const fallbackUrl = new URL('/v0/management/auth-files', validatedCliProxyBase);
-            res = await fetch(fallbackUrl, {
-              method: 'GET',
-              signal: controller.signal,
-              headers,
-              redirect: 'error',
-            }).catch(() => null);
-          }
-          clearTimeout(timeout);
-
-          if (res && res.ok) {
-            cliProxyConnected = true;
-            const data: any = await res.json().catch(() => null);
-            if (data && Array.isArray(data.sessions)) {
-              for (const s of data.sessions) {
-                const id = s.account_id || s.credential_name || s.auth_index;
-                if (id) {
-                  accountTelemetryMap[id] = {
-                    accountId: id,
-                    totalTokens: Number(s.total_tokens) || (Number(s.prompt_tokens) || 0) + (Number(s.completion_tokens) || 0),
-                    promptTokens: Number(s.prompt_tokens) || 0,
-                    completionTokens: Number(s.completion_tokens) || 0,
-                    requestCount: Number(s.request_count) || 1,
-                    lastRoutedAt: s.last_routed_at || new Date().toISOString(),
-                    proxySource: 'cliproxy',
-                    slotId: s.slot_id || `${s.provider || 'proxy'}_slot_01`,
-                    proxyPort: this.config.cliProxyPort,
-                  };
-                }
-              }
-            } else if (data && Array.isArray(data.files)) {
-              for (const f of data.files) {
-                const id = f.account_id || f.name || f.auth_index;
-                if (id) {
-                  accountTelemetryMap[id] = {
-                    accountId: id,
-                    totalTokens: Number(f.total_tokens) || (Number(f.prompt_tokens) || 0) + (Number(f.completion_tokens) || 0),
-                    promptTokens: Number(f.prompt_tokens) || 0,
-                    completionTokens: Number(f.completion_tokens) || 0,
-                    requestCount: Number(f.request_count) || 1,
-                    lastRoutedAt: f.last_routed_at || (f.updated_at ? new Date(f.updated_at).toISOString() : new Date().toISOString()),
-                    proxySource: 'cliproxy',
-                    slotId: f.slot_id || `${f.provider || 'proxy'}_slot_01`,
-                    proxyPort: this.config.cliProxyPort,
-                  };
-                }
-              }
-            }
-          }
+    // 1. CLIProxy: per-credential request counters from the management API
+    const cliProxyBase = validateTelemetryBaseUrl(this.config.cliProxyUrl);
+    if (cliProxyBase) {
+      const { status, body } = await this.getJson(cliProxyBase, '/v0/management/auth-files', this.config.cliProxyKey);
+      if (status === 200 && body && Array.isArray(body.files)) {
+        cliProxyConnected = true;
+        for (const file of body.files) {
+          const email = String(file.email || file.account || '').toLowerCase();
+          const id = idByEmail.get(email);
+          if (!id) continue;
+          const recent: any[] = Array.isArray(file.recent_requests) ? file.recent_requests.slice(-6) : [];
+          const success = Number(file.success) || 0;
+          const failed = Number(file.failed) || 0;
+          accountTelemetryMap[id] = {
+            accountId: id,
+            totalTokens: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            requestCount: success + failed,
+            successCount: success,
+            failedCount: failed,
+            requestsLastHour: recent.reduce((n, r) => n + (Number(r?.success) || 0) + (Number(r?.failed) || 0), 0),
+            failedLastHour: recent.reduce((n, r) => n + (Number(r?.failed) || 0), 0),
+            disabled: file.disabled === true,
+            proxyStatus: typeof file.status === 'string' ? file.status : null,
+            lastRoutedAt: null,
+            proxySource: 'cliproxy',
+          };
         }
-      } catch {
-        // Passive fallback - ignore network/proxy errors
+      } else if (status === 401 || status === 403) {
+        notes.push('CLIProxy rejected the management key (set CPA_MANAGEMENT_KEY).');
+      } else {
+        notes.push('CLIProxy management API is not reachable (set CPA_BASE_URL).');
       }
     }
 
-    // 2. Check LiteLLM telemetry passively if configured
-    const validatedLiteLlmBase = validateTelemetryBaseUrl(this.config.liteLlmUrl);
-    if (validatedLiteLlmBase && this.config.liteLlmKey) {
-      try {
-        const targetUrl = new URL('/spend/calculate', validatedLiteLlmBase);
-        if (
-          (targetUrl.protocol === 'http:' || targetUrl.protocol === 'https:') &&
-          (targetUrl.protocol !== 'http:' || isAllowedHttpHost(targetUrl.hostname)) &&
-          !targetUrl.username &&
-          !targetUrl.password
-        ) {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 2000);
-          const res = await fetch(targetUrl, {
-            method: 'GET',
-            signal: controller.signal,
-            headers: {
-              'Authorization': `Bearer ${this.config.liteLlmKey}`,
-              'Accept': 'application/json',
-            },
-            redirect: 'error',
-          }).catch(() => null);
-          clearTimeout(timeout);
-
-          if (res && res.ok) {
-            liteLlmConnected = true;
-            const data: any = await res.json().catch(() => null);
-            if (data && typeof data === 'object') {
-              for (const key of Object.keys(data)) {
-                const val = data[key];
-                if (val && typeof val === 'object') {
-                  const existing = accountTelemetryMap[key];
-                  accountTelemetryMap[key] = {
-                    accountId: key,
-                    totalTokens: (existing?.totalTokens || 0) + (Number(val.total_tokens) || 0),
-                    promptTokens: (existing?.promptTokens || 0) + (Number(val.prompt_tokens) || 0),
-                    completionTokens: (existing?.completionTokens || 0) + (Number(val.completion_tokens) || 0),
-                    requestCount: (existing?.requestCount || 0) + (Number(val.request_count) || 0),
-                    lastRoutedAt: val.last_routed_at || existing?.lastRoutedAt || new Date().toISOString(),
-                    proxySource: 'litellm',
-                    slotId: existing?.slotId || `litellm_slot_${key}`,
-                    proxyPort: existing?.proxyPort,
-                  };
-                }
-              }
-            }
-          }
+    // 2. LiteLLM: per-model usage over the last 24 hours from spend logs (needs an admin key)
+    const liteLlmBase = validateTelemetryBaseUrl(this.config.liteLlmUrl);
+    if (liteLlmBase && this.config.liteLlmKey) {
+      const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+      const { status, body } = await this.getJson(
+        liteLlmBase,
+        `/spend/logs?summarize=false&start_date=${day(now - 86400000)}&end_date=${day(now + 86400000)}`,
+        this.config.liteLlmKey
+      );
+      if (status === 200 && Array.isArray(body)) {
+        liteLlmConnected = true;
+        const byModel = new Map<string, ModelUsage>();
+        for (const log of body.slice(0, 50000)) {
+          if (!log || typeof log.model !== 'string' || !log.model) continue;
+          const startedAt = Date.parse(log.startTime ?? log.start_time ?? '');
+          if (Number.isFinite(startedAt) && startedAt < now - 86400000) continue;
+          const m = byModel.get(log.model) ?? { model: log.model, requests: 0, totalTokens: 0, promptTokens: 0, completionTokens: 0 };
+          m.requests += 1;
+          m.totalTokens += Number(log.total_tokens) || 0;
+          m.promptTokens += Number(log.prompt_tokens) || 0;
+          m.completionTokens += Number(log.completion_tokens) || 0;
+          byModel.set(log.model, m);
         }
-      } catch {
-        // Fallback silently without throwing
+        models = [...byModel.values()].sort((x, y) => y.totalTokens - x.totalTokens);
+      } else if (status === 401 || status === 403) {
+        notes.push('LiteLLM key cannot read spend logs; per-model usage needs an admin (master) key in LITELLM_KEY.');
+      } else if (status === 200) {
+        notes.push('LiteLLM spend logs returned an unrecognized format.');
+      } else {
+        notes.push('LiteLLM is not reachable (set LITELLM_URL).');
       }
+    } else {
+      notes.push('Per-model usage needs LiteLLM (set LITELLM_URL and an admin LITELLM_KEY).');
     }
 
     const connected = liteLlmConnected || cliProxyConnected;
@@ -288,8 +280,10 @@ export class TelemetryService {
           cliproxy: cliProxyConnected,
         },
         lastCheckedAt: new Date().toISOString(),
+        notes,
       },
       accounts: accountTelemetryMap,
+      models,
     };
 
     this.cache = result;

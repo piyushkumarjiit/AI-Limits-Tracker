@@ -25,6 +25,9 @@ import { QuotaCache, QuotaQuery } from './quotaCache';
 import { renderMetrics } from './metrics';
 import { TelemetryService } from './telemetry';
 import { sendTelegram } from './notify';
+
+/** Shared so the telemetry TTL cache survives across requests. */
+let defaultTelemetry: TelemetryService | undefined;
 import {
   type WatermarkFleetOverview,
   type WatermarkAccountView,
@@ -635,8 +638,8 @@ async function handleApi(
   }
 
   if (path === '/api/telemetry' && method === 'GET') {
-  const service = deps.telemetryService ?? new TelemetryService();
-  const accounts = store.listAccounts().map((a) => a.id);
+  const service = deps.telemetryService ?? (defaultTelemetry ??= new TelemetryService());
+  const accounts = store.listAccounts().map((a) => ({ id: a.id, email: a.email }));
   const telemetry = await service.getTelemetry(accounts);
   return send(res, 200, telemetry);
 }
