@@ -85,11 +85,18 @@ All integrations are configured through environment variables; see [`.env.exampl
 | CLIProxy | `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY` | Account discovery, quota and routing. Plain `http://` is accepted only for loopback and private-network addresses. |
 | CLIProxy request counts | `CPA_USAGE_POLL_SEC` | Needs `usage-statistics-enabled` in the CLIProxy config (v8+). |
 | Routing mode | `CPA_ROUTING_MODE` | `off`, `shadow` (default) or `enforce`. Enforce requires CLIProxy's weighted round-robin strategy. |
-| LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Usage by alias, model and provider. The key needs admin read access (master key or a `proxy_admin_viewer` user). |
+| LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Usage by alias, model and provider. Use a read-only `proxy_admin_viewer` user key and not your master key. |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional alert channel. |
 
 Accounts that CLIProxy does not serve can be added directly from the Accounts page.
 
+For LiteLLM key, only use a read-only key and never your master key. You can create a user with the proxy_admin_viewer role and generate a key for it. FQD only reads LiteLLM's daily usage summary and model list; it never creates keys, changes settings or sends requests through your models, and the key is sent only to the LITELLM_URL you configure.
+
+```bash
+curl -X POST http://<litellm>:4000/user/new \
+  -H "Authorization: Bearer MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"user_role": "proxy_admin_viewer", "user_alias": "fqd-telemetry"}'
+```
 ---
 
 ## Supported providers
