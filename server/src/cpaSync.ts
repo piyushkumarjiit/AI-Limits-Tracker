@@ -6,6 +6,7 @@ import { CpaLink, ReconcileAction, reconcile } from '../../src/services/cpa/reco
 import type { AccountCredentials } from '../../src/models/types';
 import type { CpaRoutingExecutor } from './cpaRouting';
 import type { CpaWatermarkService } from './cpaWatermarkService';
+import type { WatermarkAccountState } from './cpaWatermarkTypes';
 
 export interface CpaSyncEngineConfig {
   syncIntervalSec?: number;
@@ -21,6 +22,35 @@ export interface CpaSyncStatus {
 }
 
 export type RoutingRunner = CpaRoutingExecutor | CpaWatermarkService;
+
+/**
+ * Dual-barrier airgap write helper:
+ * For 'exhausted' or 'quarantined' (or 'airgapped'): writes weight: 0 AND disabled: true.
+ * For recovery to 'healthy': writes disabled: false AND positive weight (default 1).
+ */
+export async function applyDualBarrier(
+  transport: Pick<CpaTransport, 'patchFields'>,
+  cpaName: string,
+  state: WatermarkAccountState | 'exhausted' | 'quarantined' | 'airgapped' | 'healthy' | 'tight' | string,
+  positiveWeight: number = 1
+): Promise<{ weight: number; disabled: boolean }> {
+  const isAirgapped = state === 'exhausted' || state === 'quarantined' || state === 'airgapped';
+  const weight = isAirgapped ? 0 : positiveWeight > 0 ? positiveWeight : 1;
+  const disabled = isAirgapped;
+
+  if (typeof (transport as any).patchCredentialDualBarrier === 'function') {
+    await (transport as any).patchCredentialDualBarrier(cpaName, disabled, weight);
+  } else {
+    await transport.patchFields({
+      name: cpaName,
+      weight,
+      disabled,
+      alt_managed_weight: true,
+    });
+  }
+
+  return { weight, disabled };
+}
 
 export class CpaSyncEngine {
   private timer: NodeJS.Timeout | null = null;
@@ -76,6 +106,14 @@ export class CpaSyncEngine {
 
   getRoutingExecutor(): RoutingRunner | undefined {
     return this.routingExecutor;
+  }
+
+  async applyDualBarrier(
+    cpaName: string,
+    state: WatermarkAccountState | 'exhausted' | 'quarantined' | 'airgapped' | 'healthy' | 'tight' | string,
+    positiveWeight: number = 1
+  ): Promise<{ weight: number; disabled: boolean }> {
+    return applyDualBarrier(this.t, cpaName, state, positiveWeight);
   }
 
   start(): void {

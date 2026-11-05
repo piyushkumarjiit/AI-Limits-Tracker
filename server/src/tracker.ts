@@ -11,6 +11,7 @@ import type { ProviderFetchResult, UsageProvider } from '../../src/services/prov
 import { PROVIDER_NAMES } from '../../src/constants/theme';
 import { notify } from './notify';
 import { ServerAccount, Store } from './store';
+import { circuitBreakers } from './cpaTripwireEngine';
 
 const b64url = (buf: Buffer) => buf.toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 
@@ -30,6 +31,8 @@ export class Tracker {
   private timer: NodeJS.Timeout | null = null;
   private onSyncAllCallbacks: Array<() => void | Promise<void>> = [];
   private onSyncedCallbacks: Array<(accountId: string) => void | Promise<void>> = [];
+  private reactive429Handler?: (accountId: string) => Promise<void> | void;
+
   lastSyncAllAt: string | null = null;
   cpaJitterEnabled: boolean = true;
   cpaJitterMaxMs?: number;
@@ -42,6 +45,17 @@ export class Tracker {
 
   onSynced(cb: (accountId: string) => void | Promise<void>): void {
     this.onSyncedCallbacks.push(cb);
+  }
+
+  setReactive429Handler(handler: (accountId: string) => Promise<void> | void): void {
+    this.reactive429Handler = handler;
+  }
+
+  triggerReactive429(accountId: string): Promise<void> | void {
+    circuitBreakers.recordError(accountId, '429');
+    if (this.reactive429Handler) {
+      return this.reactive429Handler(accountId);
+    }
   }
 
   setCpaProvider(provider: UsageProvider): void {
@@ -208,6 +222,11 @@ export class Tracker {
       return;
     }
 
+    // Delay token refresh / sync attempts until circuit breaker cooldown expires
+    if (circuitBreakers.isCooldownActive(accountId)) {
+      return;
+    }
+
     // For CPA accounts: skip quota fetch if link is unlinked or cpaStatus === 'disabled'
     if (creds.authType === 'cpa') {
       const link = this.store.getCpaLink(accountId);
@@ -228,8 +247,27 @@ export class Tracker {
     let result: ProviderFetchResult;
     try {
       result = await provider.fetchUsage(accountId, creds);
+    } catch (err: any) {
+      if (err?.status === 429 || err?.statusCode === 429) {
+        circuitBreakers.recordError(accountId, '429');
+        if (this.reactive429Handler) {
+          Promise.resolve(this.reactive429Handler(accountId)).catch((hErr: unknown) => {
+            console.error('[tracker] reactive429Handler failed:', hErr);
+          });
+        }
+      }
+      throw err;
     } finally {
       release();
+    }
+
+    if (result.snapshot.status === 'rate_limited') {
+      circuitBreakers.recordError(accountId, '429');
+      if (this.reactive429Handler) {
+        Promise.resolve(this.reactive429Handler(accountId)).catch((hErr: unknown) => {
+          console.error('[tracker] reactive429Handler failed:', hErr);
+        });
+      }
     }
 
     if (result.updatedCredentials) {
