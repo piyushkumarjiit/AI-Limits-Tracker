@@ -44,6 +44,7 @@
     "tests/cpa_architect_safety_tests.ts",
     "tests/cpaWatermarkEngine.test.ts",
     "tests/cpaWatermarkPolicy.test.ts",
-    "tests/cpaWatermarkService.test.ts"
+    "tests/cpaWatermarkService.test.ts",
+    "tests/cpaWatermarkTypes.test.ts"
   ]
 }
