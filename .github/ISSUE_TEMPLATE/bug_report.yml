@@ -1,0 +1,72 @@
+name: Bug report
+description: Something in FQD is wrong or broken
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove email addresses, tokens and other personal data from anything you paste.
+        Security vulnerabilities should be reported privately (Security → Report a vulnerability), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FQD version or commit
+      placeholder: ghcr.io/piyushkumarjiit/fqd:latest (image digest) or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker run
+        - Docker Compose (public)
+        - Docker Compose (internal)
+        - Docker Compose (direct)
+        - Bare metal / systemd
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: providers
+    attributes:
+      label: Providers involved
+      multiple: true
+      options:
+        - Google Antigravity
+        - Claude
+        - ChatGPT / Codex
+        - Gemini CLI
+        - Recipe provider (Cursor, Copilot, ...)
+        - Not provider-specific
+  - type: dropdown
+    id: gateways
+    attributes:
+      label: Gateways involved
+      multiple: true
+      options:
+        - CLIProxy
+        - LiteLLM
+        - None
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Server log lines (docker logs fqd) and screenshots, with personal data removed.
+      render: text

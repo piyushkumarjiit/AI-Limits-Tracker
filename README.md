@@ -1,297 +1,237 @@
 <div align="center">
 
-<img src="web/public/icon.svg" width="88" height="88" alt="FQD (Fleet Quota Display)" />
+<img src="web/public/icon.svg" width="88" height="88" alt="FQD logo" />
 
 # FQD — Fleet Quota Display
 
-**The unified observability deck and routing intelligence for AI subscription fleets, CLIProxy pools, and LiteLLM gateways.**
+**Self-hosted quota monitoring and routing control for pools of AI subscription accounts behind CLIProxy and LiteLLM.**
 
-*Monitor 5-hour rolling bursts, 7-day weekly quota cycles, and multi-model burn rates before you hit provider limits. Self-hosted, private by design, with credentials staying on infrastructure you control.*
-
-<a href="https://github.com/piyushkumarjiit/FQD"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
-<img src="https://img.shields.io/badge/Docker-Ready-2496ed?logo=docker&logoColor=white" alt="Docker Ready" />
-<img src="https://img.shields.io/badge/Gateways-CLIProxy%20·%20LiteLLM-38bdf8" alt="Supported Gateways" />
-<img src="https://img.shields.io/badge/Providers-Claude%20·%20ChatGPT%20·%20Gemini%20·%20Antigravity-8b5cf6" alt="Supported Providers" />
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
+<img src="https://img.shields.io/badge/Docker-ghcr.io%2Fpiyushkumarjiit%2Ffqd-2496ed?logo=docker&logoColor=white" alt="Docker image" />
+<img src="https://img.shields.io/badge/Gateways-CLIProxy%20·%20LiteLLM-38bdf8" alt="Supported gateways" />
 
 <br/><br/>
-<img src="web/public/screenshot-overview.png" width="92%" alt="FQD Fleet Cockpit Screenshot" style="border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);" />
+<img src="docs/screenshot-overview.png" width="92%" alt="FQD overview page showing fleet headroom, account states and attention list" />
+
+<sub>Overview of a real 15-account fleet (email addresses anonymised).</sub>
 
 </div>
 
+---
+
+## What FQD does
+
+If you route coding agents through a pool of subscription accounts (Google Antigravity, Claude, ChatGPT/Codex, Gemini CLI) with [CLIProxy](https://github.com/router-for-me/CLIProxyAPI) or [LiteLLM](https://github.com/BerriAI/litellm), FQD tells you how much quota each account has left and can keep exhausted accounts out of the pool.
+
+- **Per-account quota windows.** Reads the 5-hour and weekly limits each provider reports, with reset countdowns, burn rate and projected exhaustion time.
+- **Four account states**, used the same way across every page:
+
+  | State | Meaning |
+  | :--- | :--- |
+  | Healthy | Tightest window above 35% |
+  | Tight | Tightest window at 35% or below |
+  | Exhausted | 0% left (or rate-limited) while still receiving traffic |
+  | Cooldown | Taken out of the CLIProxy pool by FQD or an operator |
+
+- **CLIProxy pool control.** Discovers the credentials CLIProxy is serving, then plans routing weights from headroom. In `shadow` mode (the default) it only logs what it would do; in `enforce` mode it sets weight 0 and disables exhausted accounts, and restores them after they recover. Operators can also quarantine or airgap an account by hand from the account drawer.
+- **Proxy telemetry.** Requests per account from CLIProxy, and per-model request and token counts from LiteLLM spend logs.
+- **Machine-readable output.** `GET /api/quota` (JSON) and `GET /metrics` (Prometheus) for dashboards and alerting.
+- **Alerts.** Low-quota, reset and re-login alerts in the app, and optionally in Telegram.
+
+### Data honesty
+
+FQD never invents numbers. Percentages come from the providers' own usage endpoints; burn rates and exhaustion times are derived from how those percentages change between polls. When a provider does not report a window or a reset time, FQD shows "not reported" or "No data" rather than a placeholder. Quota polling only reads usage endpoints and never sends prompts.
 
 ---
 
-## Why FQD?
+## Quick start
 
-Modern AI engineering workflows increasingly rely on multiple accounts, subscription tiers, and local proxy gateways:
-
-1. **For Fleet Operators & AI Engineers:**
-   You route agentic workloads through **CLIProxy** or **LiteLLM** across pools of accounts (Claude Max, ChatGPT Team/Pro, Google Antigravity). You need machine-readable headroom, predictive reset countdowns, and Prometheus metrics to steer traffic away from accounts nearing exhaustion and spill over cleanly to metered API keys.
-2. **For Power Users & Developers:**
-   You juggle multiple AI subscriptions (e.g. personal Claude, team Claude, Codex, Gemini) and need a single, honest dashboard instead of repeatedly logging in and out to check remaining window capacity.
-
----
-
-## How the Numbers Are Honest
-
-No major AI subscription exposes an arbitrary message counter, so **FQD never invents numbers**.
-- **Ground-Truth Percentages:** It reads the exact rate-limit window percentages reported by official provider endpoints.
-- **Derived Velocity:** Streaks, burn-rate forecasts ("will exhaust in 1h 40m"), and load classifications are derived from real window delta changes over time.
-- **Transparent Health:** When a provider endpoint returns no data or fails to refresh, FQD explicitly marks the measurement as **stale** or **no data** — never a fabricated 0%.
-- **Read-Only by Default:** Quota polling only reads usage and never issues generative prompts, placing zero overhead on your active quotas.
-
----
-
-## Key Capabilities
-
--  **Unified Multi-Horizon Radar:** Dual-horizon monitoring tracking short-term 5-hour rolling burst limits alongside 7-day weekly cycle balances.
--  **Multi-Account Fleet Isolation:** Pool 10, 20, or 50+ accounts across Google Antigravity, Claude Code, and ChatGPT with fully isolated sessions, encryption, and token refreshes.
--  **Dynamic Reset Countdowns:** Precise rolling countdowns (e.g. `resets in 1h 14m (14:30 UTC)`) refreshed in real-time.
--  **Intelligent Gateway Integration:** Exposes normalized `/api/quota` JSON and Prometheus `/metrics` for dynamic routing in CLIProxy and LiteLLM.
--  **30-Day Velocity Histograms:** Model-level token burn velocity (Gemini 2.5 Pro, Flash, Claude 3.7 Sonnet) with 30 discrete daily telemetry bars.
--  **Proactive Quota Warnings:** Automatically flags slots as **Exhausted** ($\le 15\%$), **Tight** ($\le 35\%$), or **Healthy** ($> 35\%$).
--  **Self-Hosted & Private:** All authentication tokens and cookies remain encrypted on your host (AES-256-GCM) with no third-party telemetry.
-
----
-
-## Quickstart
-
-### 1-Line Docker Run
-
-Run FQD instantly on port 1455:
+### Docker
 
 ```bash
-docker run -d \
-  --name fqd \
-  -p 1455:1455 \
-  -e ADMIN_PASSWORD="your-strong-password" \
+docker run -d --name fqd -p 1455:1455 \
+  -e ADMIN_PASSWORD="$(openssl rand -hex 32)" \
   -e APP_SECRET="$(openssl rand -hex 32)" \
   -v fqd-data:/app/data \
   ghcr.io/piyushkumarjiit/fqd:latest
-
-# Open http://localhost:1455
 ```
 
-### Production Deployment with Docker Compose
+Open `http://localhost:1455` and sign in with `ADMIN_PASSWORD`. FQD refuses to start with weak or placeholder secrets.
 
-FQD includes production Caddy integration supporting automated Let's Encrypt certificates or internal LAN CAs:
+Keep `APP_SECRET` safe: it encrypts the stored account credentials, and changing it makes them unreadable.
+
+### Docker Compose (with HTTPS)
 
 ```bash
 git clone https://github.com/piyushkumarjiit/FQD.git
 cd FQD
-
-cp .env.example .env
-# Edit .env and set:
-#   ADMIN_PASSWORD=your-secure-password
-#   APP_SECRET=$(openssl rand -hex 32)
-#   SITE_ADDRESS=fqd.yourdomain.com (or local IP)
-
+cp .env.example .env            # set ADMIN_PASSWORD, APP_SECRET, SITE_ADDRESS
 mkdir -p data && sudo chown -R 1000:1000 data
 
-# Mode 1: Public domain with automatic Let's Encrypt TLS
-docker compose --profile public up -d
-
-# Mode 2: Local LAN / LXC with internal self-signed CA
-docker compose --profile internal up -d
-
-# Mode 3: Direct HTTP on port 1455 (behind your own reverse proxy)
-docker compose --profile direct up -d
+docker compose --profile public up -d     # public DNS name, Let's Encrypt certificate
+docker compose --profile internal up -d   # LAN address, Caddy's internal CA
+docker compose --profile direct up -d     # plain HTTP on PORT, behind your own proxy
 ```
+
+`deploy/` also contains a systemd unit and an nginx example for running without Docker.
+
+### Connecting gateways
+
+All integrations are configured through environment variables; see [`.env.example`](.env.example) for the full list.
+
+| Integration | Variables | Notes |
+| :--- | :--- | :--- |
+| CLIProxy | `CPA_BASE_URL`, `CPA_MANAGEMENT_KEY` | Account discovery, quota and routing. Plain `http://` is accepted only for loopback and private-network addresses. |
+| CLIProxy request counts | `CPA_USAGE_POLL_SEC` | Needs `usage-statistics-enabled` in the CLIProxy config (v8+). |
+| Routing mode | `CPA_ROUTING_MODE` | `off`, `shadow` (default) or `enforce`. Enforce requires CLIProxy's weighted round-robin strategy. |
+| LiteLLM | `LITELLM_URL`, `LITELLM_KEY` | Per-model usage. The key needs admin read access (master key or a `proxy_admin_viewer` user). |
+| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional alert channel. |
+
+Accounts that CLIProxy does not serve can be added directly from the Accounts page.
 
 ---
 
-## Machine-Readable API & Integrations
+## Supported providers
 
-### 1. Unified Quota Endpoint (`GET /api/quota`)
+| Provider | Windows read | Sign-in |
+| :--- | :--- | :--- |
+| Google Antigravity | 5-hour and weekly, per model family | Google OAuth |
+| Claude (Pro / Max / Team) | 5-hour session and 7-day | Claude OAuth or session cookie |
+| ChatGPT / Codex | 5-hour and weekly Codex limits, credits | ChatGPT OAuth or session cookie |
+| Gemini CLI | Session and weekly | Google OAuth |
+| Cursor, Copilot, Perplexity, Grok, Mistral, DeepSeek, Qwen, Groq, Poe | Whatever the service's usage page reports | Pasted request (recipe-based) |
 
-Returns normalized headroom, burst window states, and reset countdowns across your entire fleet:
+Accounts discovered through CLIProxy are matched to these providers automatically.
+
+---
+
+## API
+
+Both endpoints accept `Authorization: Bearer <token>`. `/api/quota` also accepts a signed-in browser session.
+
+| Endpoint | Token | Notes |
+| :--- | :--- | :--- |
+| `GET /api/quota` | `API_TOKEN` | Filters: `provider=claude\|chatgpt\|antigravity` (repeatable), `source=cpa\|native\|all`. Supports `ETag` / `If-None-Match`. |
+| `GET /metrics` | `METRICS_TOKEN`, or `API_TOKEN` if unset | Returns 404 when neither token is configured. Bearer only; cookies are rejected. |
+
+### `GET /api/quota`
 
 ```bash
-curl -H "Authorization: Bearer <ADMIN_PASSWORD_OR_API_TOKEN>" http://localhost:1455/api/quota
+curl -H "Authorization: Bearer $API_TOKEN" http://localhost:1455/api/quota
 ```
 
-#### Sample Response:
+Response (one account shown):
+
 ```json
 {
-  "summary": {
-    "total_accounts": 15,
-    "active_accounts": 15,
-    "aggregate_headroom_pct": 38.6,
-    "status": "tight"
+  "version": 1,
+  "generatedAt": "2026-11-05T07:22:21.251Z",
+  "intervalSec": 900,
+  "cpa": {
+    "enabled": true,
+    "lastDiscoveryAt": "2026-11-05T07:21:27.863Z",
+    "lastDiscoveryOk": true,
+    "routingMode": "shadow",
+    "routingBlocked": null
   },
   "accounts": [
     {
-      "id": "antigravity:test-account-01@example.com",
-      "slot": "03",
-      "provider": "antigravity",
-      "email": "test-account-01@example.com",
-      "burst_5h": {
-        "remaining_pct": 6,
-        "status": "exhausted",
-        "requests_remaining": 9,
-        "resets_in": "1h 14m",
-        "reset_at": 1793725800
-      },
-      "cycle_7d": {
-        "balance_pct": 97,
-        "status": "healthy",
-        "reset_at": 1793985000
-      },
-      "routing_weight": 0.06
-    },
-    {
-      "id": "claude:test-account-02@example.com",
-      "slot": "01",
+      "id": "cpa-89d6c4a459d0b5d9",
+      "name": "account-14@example.com",
       "provider": "claude",
-      "email": "test-account-02@example.com",
-      "burst_5h": {
-        "remaining_pct": 30,
-        "status": "tight",
-        "requests_remaining": 47,
-        "resets_in": "2h 45m",
-        "reset_at": 1793731800
-      },
-      "routing_weight": 0.30
+      "source": "cpa",
+      "cpa": { "authIndex": "89d6c4a459d0b5d9", "name": "account-14@example.com", "linkState": "linked" },
+      "email": "account-14@example.com",
+      "plan": "oauth",
+      "status": "ok",
+      "error": null,
+      "fetchedAt": "2026-11-05T07:15:54.479Z",
+      "ageSeconds": 387,
+      "stale": false,
+      "headroom": 0.13,
+      "effectiveRemainingPct": 13,
+      "windows": [
+        {
+          "id": "five_hour", "type": "session_5h",
+          "usedPct": 30, "remainingPct": 70,
+          "resetsAt": "2026-11-05T09:00:00.414516+00:00", "resetInSec": 5859,
+          "burnPctPerHour": 10, "exhaustAt": "2026-11-05T14:20:50.715Z",
+          "exhausted": false, "severity": "normal"
+        },
+        {
+          "id": "seven_day", "type": "weekly_7d",
+          "usedPct": 87, "remainingPct": 13,
+          "resetsAt": "2026-11-05T13:00:00.414537+00:00", "resetInSec": 20259,
+          "burnPctPerHour": 1.8, "exhaustAt": "2026-11-05T14:29:48.775Z",
+          "exhausted": false, "severity": "warning"
+        }
+      ],
+      "routing": { "planned": 0, "applied": null, "managed": true, "cooldown": false, "reason": "headroom" }
     }
   ]
 }
 ```
 
----
+### `GET /metrics`
 
-### 2. Prometheus Metrics (`GET /metrics`)
+Every account series carries `provider`, `account`, `auth_index` and `email` labels; window series add `window`.
 
-FQD exports native Prometheus metrics designed for Grafana dashboards and Alertmanager rules:
+| Metric | Type | Meaning |
+| :--- | :--- | :--- |
+| `alt_quota_used_ratio` / `alt_quota_remaining_ratio` | gauge | Fraction of each window used / left |
+| `alt_quota_reset_timestamp_seconds` | gauge | When each window resets |
+| `alt_quota_burn_ratio_per_hour` | gauge | Observed burn rate per window |
+| `alt_quota_exhaust_timestamp_seconds` | gauge | Projected exhaustion time |
+| `alt_account_headroom_ratio` | gauge | Headroom score used for routing |
+| `alt_account_up` | gauge | 1 when the last poll succeeded and is fresh |
+| `alt_account_last_success_timestamp_seconds` | gauge | Last successful poll |
+| `alt_cpa_routing_weight` | gauge | Planned and applied CLIProxy weight |
+| `alt_cpa_routing_writes_total`, `alt_cpa_routing_blocked` | counter / gauge | Routing write activity and blocks |
+| `alt_cpa_credentials`, `alt_cpa_ignored_credentials`, `alt_cpa_requests_total`, `alt_cpa_discovery_last_success_timestamp_seconds` | mixed | CLIProxy discovery health |
 
-```
-# HELP alt_account_headroom_ratio Normalized headroom score [0, 1]
-# TYPE alt_account_headroom_ratio gauge
-alt_account_headroom_ratio{provider="antigravity",slot="03",account="test_account_01"} 0.06
-alt_account_headroom_ratio{provider="claude",slot="01",account="test_account_02"} 0.30
+The `alt_` prefix is kept from the project FQD is derived from so existing dashboards keep working.
 
-# HELP alt_quota_window_remaining_ratio Remaining fraction of rate limit window [0, 1]
-# TYPE alt_quota_window_remaining_ratio gauge
-alt_quota_window_remaining_ratio{provider="antigravity",window="5h",slot="03"} 0.06
-alt_quota_window_remaining_ratio{provider="antigravity",window="7d",slot="03"} 0.97
-
-# HELP alt_quota_window_reset_timestamp_seconds Epoch timestamp of next window reset
-# TYPE alt_quota_window_reset_timestamp_seconds gauge
-alt_quota_window_reset_timestamp_seconds{provider="antigravity",window="5h",slot="03"} 1793725800
-
-# HELP alt_cpa_routing_weight Calculated load routing weight
-# TYPE alt_cpa_routing_weight gauge
-alt_cpa_routing_weight{provider="antigravity",slot="03",kind="applied"} 0.06
-```
-
----
-
-### 3. LiteLLM Proxy Integration
-
-#### The Challenge:
-LiteLLM excels at routing across models and API keys, but standard API-key routing is blind to subscription rate limits (e.g. Claude 5-hour rolling windows). Routing high volume blindly into subscriptions causes unexpected HTTP 429 errors.
-
-#### The Solution: Subscription-First Routing with Metered Fallback
-Use FQD's routing weights to exhaust fixed-price subscription pools first, dynamically diverting traffic to metered pay-per-token keys only when subscription headroom drops below safety thresholds:
-
-```
-                  ┌──────────────────────────────────────────────┐
-                  │                 LiteLLM Proxy                │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-             ┌───────────────────────────┴───────────────────────────┐
-             ▼ (Primary: Headroom > 15%)                             ▼ (Spillover: Headroom <= 15%)
-┌─────────────────────────────────────────┐             ┌─────────────────────────────────────────┐
-│     FQD-Monitored CLIProxy Pool         │             │          Direct API Key Fallback        │
-│   (Claude Pro / Max / Antigravity)      │             │         (Pay-per-token Anthropic)       │
-└────────────────────┬────────────────────┘             └─────────────────────────────────────────┘
-                     │
-                     ▼
-         [ Ground Truth Telemetry ]
-           FQD Polling & Radar
-```
-
-#### Dynamic Routing Configuration:
-LiteLLM can query FQD's `/api/quota` via a lightweight routing hook or sidecar to dynamically adjust deployment weights:
+Example alert:
 
 ```yaml
-# litellm_config.yaml
-model_list:
-  # Primary Subscription Pool (CLIProxy endpoint)
-  - model_name: claude-3-7-sonnet
-    litellm_params:
-      model: openai/claude-3-7-sonnet
-      api_base: http://cliproxy.internal:8317/v1
-      api_key: os.environ/CPA_ACCESS_TOKEN
-    model_info:
-      fqd_slot: "01"
-      tier: "subscription_pool"
-
-  # Spillover Metered Key (Invoked only on subscription exhaustion)
-  - model_name: claude-3-7-sonnet
-    litellm_params:
-      model: anthropic/claude-3-7-sonnet-20250219
-      api_key: os.environ/ANTHROPIC_DIRECT_KEY
-    model_info:
-      tier: "spillover_metered"
-
-router_settings:
-  routing_strategy: "latency-based-routing"
-  fallbacks: [{"claude-3-7-sonnet": ["claude-3-5-haiku"]}]
+- alert: FleetAccountExhaustingSoon
+  expr: alt_quota_exhaust_timestamp_seconds - time() < 3600
+  labels: { severity: warning }
 ```
 
 ---
 
-## Supported Providers & Modalities
+## Security
 
-| Provider | Supported Rate-Limit Windows | Telemetry Tracked | Auth Mechanics |
-| :--- | :--- | :--- | :--- |
-| **Google Antigravity** | 5-Hour Rolling Burst · 7-Day Cycle Limit | Velocity (Gemini 2.5 Pro / Flash), daily slots | Cloud Code OAuth refresh token |
-| **Claude Code / Anthropic** | 5-Hour Session Burst · 7-Day Rolling Budget | Pro/Team tier headroom, reset epoch | Session cookie (`sessionKey`) / CLI token |
-| **ChatGPT / OpenAI Codex** | 5-Hour Codex Window · Weekly Cap · Credits | Reasoning quota, Plus/Team limit status | Session token / Access token |
-| **Google Gemini CLI** | Session Limit · Weekly Horizon | Per-slot request volume & balance | OAuth refresh token |
+- **Encrypted credentials.** Stored tokens and cookies are encrypted with AES-256-GCM using a key derived from `APP_SECRET`.
+- **Hardened container.** Read-only root filesystem, all Linux capabilities dropped, runs as the non-root `node` user (UID 1000).
+- **Outbound guard.** Provider requests resolve hostnames first and refuse private or reserved addresses; CLIProxy and LiteLLM connections go only to the URLs you configure.
+- **Sign-in protection.** Constant-time secret comparison, per-address and global throttling, CSRF checks on state-changing requests, optional `ALLOWED_HOSTS`.
+- **Supply chain.** Multi-arch images are signed with keyless cosign and published with provenance and SBOM attestations; CI actions are pinned to commit SHAs.
 
----
-
-## Security Architecture
-
-FQD is designed from the ground up for zero-trust environments:
-- **AES-256-GCM at Rest:** All stored credentials and session tokens are encrypted with unique initialization vectors (`APP_SECRET`).
-- **Read-Only Enclosure:** The Docker container operates with a read-only root filesystem, dropped Linux capabilities, and runs as non-root user `node` (UID 1000).
-- **Outbound SSRF Protection:** Polling client restricts outbound network requests strictly to verified provider endpoints (`*.anthropic.com`, `*.google.com`, `*.openai.com`, or configured local proxy hosts).
-- **Supply Chain Security:** Signed multi-arch container images published with keyless cosign, SBOM attestations, and SHA-pinned CI GitHub Actions.
+Report vulnerabilities privately; see [CONTRIBUTING.md](CONTRIBUTING.md#reporting-security-issues).
 
 ---
 
-## Verification & Testing
+## Development
 
-Run the test suite across core parsers, API endpoints, and cryptographic security boundaries:
+Requires Node.js 22 or 24 (the server uses the built-in `node:sqlite`); CI tests both.
 
 ```bash
-# Run unit & isolation tests
-npm test
-
-# Typecheck all workspaces (shared, server, web)
-npm run typecheck:all
-
-# Security & deployment tests
-npm run test:security
+npm ci
+npm run build            # server/dist/server.mjs and web/dist
+npm test                 # full test suite
+npm run typecheck:all    # shared code, server and web
 ```
 
----
-
-## Contributors & Acknowledgments
-
-- **[Piyush Kumar](https://github.com/piyushkumarjiit)** — Lead maintainer & fleet architecture
-- **[Rauan](https://github.com/Rauan228)** — Original author of [AI-Limits-Tracker](https://github.com/Rauan228/AI-Limits-Tracker)
-- **Gemini (Google DeepMind Antigravity)** — AI pair programmer & engineering co-pilot
+See [docs/architecture.md](docs/architecture.md) for how the pieces fit together and [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
 
 ---
 
-## License & Attribution
+## Acknowledgements
 
-MIT License © 2026 [Piyush Kumar](https://github.com/piyushkumarjiit)
+FQD is a substantially refactored derivative of [AI Limits Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by [Rauan](https://github.com/Rauan228), used under the MIT License.
 
-Based upon and substantially modernized from the original [AI Limits Tracker](https://github.com/Rauan228/AI-Limits-Tracker) by Rauan:
-Copyright (c) 2026 Rauan
+## License
 
-<div align="center"><sub>Fleet Quota Display — High capacity observability for modern AI stacks.</sub></div>
+[MIT](LICENSE) © 2026 [Piyush Kumar](https://github.com/piyushkumarjiit). Portions © 2026 Rauan.

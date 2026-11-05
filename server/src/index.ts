@@ -68,7 +68,7 @@ const API_TOKEN = process.env.API_TOKEN || '';
 const METRICS_TOKEN = process.env.METRICS_TOKEN || '';
 const SESSION_DAYS = resolveSessionDays(process.env, DEFAULT_SESSION_DAYS);
 const DATA_DIR = resolve(process.env.DATA_DIR || 'data');
-const WEB_DIR = resolve(process.env.WEB_DIR || 'public');
+const WEB_DIR = resolve(process.env.WEB_DIR || 'web/dist');
 const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || '')
   .split(',')
   .map((h) => h.trim().toLowerCase())
