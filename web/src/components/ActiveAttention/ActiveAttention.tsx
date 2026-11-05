@@ -30,12 +30,16 @@ export const ActiveAttention: React.FC<ActiveAttentionProps> = ({
     <div className="card fqd-active-attention" style={{ marginBottom: 14 }}>
       <div className="card-header">
         <span className="card-title">Active Attention &amp; Quota Warnings</span>
-        <span className={`badge ${attentionAccounts.length > 0 ? 'badge-warn' : 'badge-ok'}`}>
-          {attentionAccounts.length > 0 ? `${attentionAccounts.length} Attention Required` : 'All Accounts Optimal'}
-        </span>
+        {accounts.length > 0 && (
+          <span className={`badge ${attentionAccounts.length > 0 ? 'badge-warn' : 'badge-ok'}`}>
+            {attentionAccounts.length > 0 ? `${attentionAccounts.length} Attention Required` : 'All Accounts Healthy'}
+          </span>
+        )}
       </div>
       <div style={{ display: 'grid', gap: 10 }}>
-        {attentionAccounts.length === 0 ? (
+        {accounts.length === 0 ? (
+          <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>No accounts yet. Add one from the Accounts tab, or connect CLIProxy in the server environment.</div>
+        ) : attentionAccounts.length === 0 ? (
           <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>All accounts are above the 35% headroom floor.</div>
         ) : (
           attentionAccounts.slice(0, 3).map(({ account: a, idx, status }) => {

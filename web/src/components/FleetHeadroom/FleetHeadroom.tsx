@@ -70,8 +70,14 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
         </div>
       </div>
 
+      {effectiveAccounts.length === 0 && (
+        <div style={{ padding: 14, color: 'var(--muted)', fontSize: 12 }}>
+          Headroom appears here once accounts report quota.
+        </div>
+      )}
+
       {/* 1. Cell View */}
-      {activeView === 'cell' && (
+      {effectiveAccounts.length > 0 && activeView === 'cell' && (
         <div id="view-cap-cell" className="scale-box" style={{ borderLeft: '3px solid var(--blue)' }}>
           <div className="fqd-fleet-headroom__row-header" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
             <span><strong>Google Antigravity</strong> ({plural(agyAccounts.length)})</span>
@@ -182,7 +188,7 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
       )}
 
       {/* 2. Matrix View: one compact cell per account, every provider */}
-      {activeView === 'matrix' && (
+      {effectiveAccounts.length > 0 && activeView === 'matrix' && (
         <div id="view-cap-matrix" className="scale-box" style={{ borderLeft: '3px solid var(--purple)' }}>
           <div style={{ fontSize: 11, marginBottom: 8, color: 'var(--muted)' }}>
             {plural(effectiveAccounts.length)} · tightest window per account
@@ -214,7 +220,7 @@ export const FleetHeadroom: React.FC<FleetHeadroomProps> = ({
       )}
 
       {/* 3. Aggregate View: accounts grouped by headroom band */}
-      {activeView === 'aggregate' && (
+      {effectiveAccounts.length > 0 && activeView === 'aggregate' && (
         <div id="view-cap-aggregate" className="scale-box" style={{ borderLeft: '3px solid var(--ok)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             {AGGREGATE_BANDS.map((band) => {
