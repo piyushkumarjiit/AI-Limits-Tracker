@@ -66,6 +66,16 @@ export interface LinkRoutingState {
   cooldown?: boolean;
   managed?: boolean;
   reason?: string;
+  /** Who set disabled: true in CLIProxy. Absent on a disabled credential: not FQD. */
+  disabledBy?: 'policy' | 'reactive_429' | 'operator_hold';
+  /** Epoch ms when FQD disabled it. */
+  disabledAt?: number;
+  /** Epoch ms when a reactive-429 cooldown ends. Kept until the account is re-enabled. */
+  cooldownUntil?: number;
+  /** CLIProxy weight just before an operator hold, restored where the engine does not manage the account. */
+  preHoldWeight?: number;
+  /** Epoch ms when an operator hold ended (released or expired) and the account went back to the engine. */
+  holdEndedAt?: number;
   [key: string]: unknown;
 }
 

@@ -17,6 +17,7 @@ import { CpaSyncEngine } from './cpaSync';
 import { CpaUsageCollector } from './cpaUsageCollector';
 import { TelemetryService } from './telemetry';
 import { CpaWatermarkService } from './cpaWatermarkService';
+import { ResetRecoveryWatcher } from './resetRecoveryWatcher';
 import { CpaPolicyLoader, classifyAccount, statusLevelsOf } from './cpaWatermarkPolicy';
 import { resolveCpaConfig } from './config';
 import { QuotaCache } from './quotaCache';
@@ -88,6 +89,7 @@ let cpaSync: CpaSyncEngine | undefined;
 let cpaUsage: CpaUsageCollector | undefined;
 let cpaRouting: CpaWatermarkService | undefined;
 let cpaWatermarkService: CpaWatermarkService | undefined;
+let resetRecoveryWatcher: ResetRecoveryWatcher | undefined;
 // The watermark policy drives routing, account status, bar colours and alerts, with or
 // without CLIProxy. Load it once at startup and hot-reload it when the file changes.
 const cpaPolicyLoader = new CpaPolicyLoader({
@@ -124,6 +126,7 @@ if (cpaConfig) {
     tracker,
   });
   cpaRouting = cpaWatermarkService;
+  cpaWatermarkService.migrateRoutingProvenance();
 
   cpaSync = new CpaSyncEngine(
     store,
@@ -134,6 +137,12 @@ if (cpaConfig) {
     },
     cpaWatermarkService
   );
+
+  resetRecoveryWatcher = new ResetRecoveryWatcher({
+    store,
+    tracker,
+    policyLoader: cpaPolicyLoader,
+  });
 }
 
 const quotaCache = new QuotaCache(
@@ -216,6 +225,7 @@ function shutdown(signal: string): void {
   tracker.stop();
   cpaPolicyLoader.stopWatcher();
   if (cpaSync) cpaSync.stop();
+  if (resetRecoveryWatcher) resetRecoveryWatcher.stop();
   if (cpaUsage) cpaUsage.stop();
   server.close(() => {
     try {
@@ -237,5 +247,6 @@ server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   console.log(`FQD server on :${PORT} (data: ${DATA_DIR}, web: ${WEB_DIR})`);
   tracker.start();
   if (cpaSync) cpaSync.start();
+  if (resetRecoveryWatcher) resetRecoveryWatcher.start();
   if (cpaUsage) cpaUsage.start();
 });

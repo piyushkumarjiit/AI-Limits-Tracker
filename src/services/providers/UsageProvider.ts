@@ -5,11 +5,16 @@ export interface ProviderFetchResult {
   updatedCredentials?: AccountCredentials;
 }
 
+export interface FetchUsageOptions {
+  /** Probe even though CLIProxy reports the credential as disabled (FQD disabled it itself). */
+  allowDisabled?: boolean;
+}
+
 export interface UsageProvider {
   readonly id: string;
   readonly type: ProviderType;
   readonly name: string;
 
   validateCredentials(credentials: AccountCredentials): boolean;
-  fetchUsage(accountId: string, credentials: AccountCredentials): Promise<ProviderFetchResult>;
+  fetchUsage(accountId: string, credentials: AccountCredentials, options?: FetchUsageOptions): Promise<ProviderFetchResult>;
 }
