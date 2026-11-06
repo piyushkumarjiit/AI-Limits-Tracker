@@ -32,9 +32,11 @@ FQD is a single Node.js (22 or 24) process that polls quota data, stores it in S
 | `config.ts` | Environment parsing and startup checks; refuses weak or placeholder secrets. |
 | `app.ts` | HTTP routing, sessions and bearer auth, CSRF, rate limiting, host allowlist. |
 | `store.ts` | SQLite schema and access; encrypts stored credentials. Its key-derivation salts must never change. |
-| `tracker.ts` | Polls each native account's provider on the refresh interval and records snapshots and history. |
+| `tracker.ts` | Polls accounts on the refresh interval and records snapshots and history; continues polling accounts disabled by FQD so resets are observed. |
 | `cpaSync.ts` | Discovers credentials served by CLIProxy and links them to FQD accounts. |
+| `cpaHoldState.ts` | Tracks disablement provenance (`fqd`, `operator`, `external`, `none`) to govern polling and recovery. |
 | `cpaWatermarkPolicy.ts`, `cpaWatermarkEngine.ts`, `cpaTripwireEngine.ts`, `cpaWatermarkService.ts` | The routing policy: loads the optional YAML policy, evaluates per-account state (healthy, tight, exhausted, quarantined, airgapped), applies manual holds and, in `enforce` mode, writes weights and disabled flags to CLIProxy. |
+| `resetRecoveryWatcher.ts` | Proactively polls accounts taken out by FQD when their recovery point (quota reset, reactive-429 cooldown end, or operator hold release) is reached. |
 | `cpaUsageCollector.ts`, `telemetry.ts` | Read-only request and token telemetry from CLIProxy's usage queue. |
 | `src/services/liteLlmUsage.ts` | LiteLLM usage for `/api/usage`: reads the aggregated daily activity and the alias map (`/model/info`), groups by alias and provider family, and joins aliases to CLIProxy accounts on the model name. Needs an admin-read key. |
 | `quotaCache.ts`, `metrics.ts` | Build the `/api/quota` view and Prometheus text with ETags. |

@@ -17,7 +17,7 @@ import { CpaSyncEngine } from './cpaSync';
 import { CpaUsageCollector } from './cpaUsageCollector';
 import { TelemetryService } from './telemetry';
 import { CpaWatermarkService } from './cpaWatermarkService';
-import { ResetRecoveryWatcher } from './resetRecoveryWatcher';
+import { ResetRecoveryWatcher, type ResetRecoveryConfig } from './resetRecoveryWatcher';
 import { CpaPolicyLoader, classifyAccount, statusLevelsOf } from './cpaWatermarkPolicy';
 import { resolveCpaConfig } from './config';
 import { QuotaCache } from './quotaCache';
@@ -138,11 +138,32 @@ if (cpaConfig) {
     cpaWatermarkService
   );
 
-  resetRecoveryWatcher = new ResetRecoveryWatcher({
-    store,
-    tracker,
-    policyLoader: cpaPolicyLoader,
-  });
+  const watcherConfig: Partial<ResetRecoveryConfig> = {};
+  if (process.env.RESET_RECOVERY_TICK_SEC) {
+    const v = Number(process.env.RESET_RECOVERY_TICK_SEC);
+    if (!Number.isNaN(v) && v > 0) watcherConfig.tickSec = v;
+  }
+  if (process.env.RESET_RECOVERY_MIN_POLL_GAP_SEC) {
+    const v = Number(process.env.RESET_RECOVERY_MIN_POLL_GAP_SEC);
+    if (!Number.isNaN(v) && v >= 0) watcherConfig.minPollGapSec = v;
+  }
+  if (process.env.RESET_RECOVERY_RETRY_LADDER_SEC) {
+    const parts = process.env.RESET_RECOVERY_RETRY_LADDER_SEC.split(',').map((s) => Number(s.trim())).filter((n) => !Number.isNaN(n));
+    if (parts.length > 0) watcherConfig.retryLadderSec = parts;
+  }
+  if (process.env.RESET_RECOVERY_CLOCK_SKEW_SEC) {
+    const v = Number(process.env.RESET_RECOVERY_CLOCK_SKEW_SEC);
+    if (!Number.isNaN(v) && v >= 0) watcherConfig.clockSkewBufferSec = v;
+  }
+
+  resetRecoveryWatcher = new ResetRecoveryWatcher(
+    {
+      store,
+      tracker,
+      policyLoader: cpaPolicyLoader,
+    },
+    watcherConfig
+  );
 }
 
 const quotaCache = new QuotaCache(
