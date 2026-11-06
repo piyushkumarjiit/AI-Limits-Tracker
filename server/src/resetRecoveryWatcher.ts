@@ -34,6 +34,7 @@ export class ResetRecoveryWatcher {
   private isTicking: boolean = false;
   private lastPollAt: number = 0;
   private retries = new Map<string, RetryState>();
+  private exhausted = new Map<string, number>();
 
   constructor(
     deps: {
@@ -150,6 +151,14 @@ export class ResetRecoveryWatcher {
 
       if (recoveryAt === undefined) continue;
 
+      const exhaustedAt = this.exhausted.get(link.accountId);
+      if (exhaustedAt !== undefined) {
+        if (exhaustedAt === recoveryAt) {
+          continue;
+        }
+        this.exhausted.delete(link.accountId);
+      }
+
       const retry = this.retries.get(link.accountId);
       const effectiveAt = Math.max(recoveryAt, retry?.nextAt ?? 0);
       const isDue = currentNow >= effectiveAt && (fetchedAtMs < recoveryAt || retry !== undefined);
@@ -187,8 +196,14 @@ export class ResetRecoveryWatcher {
       let resultSummary = '';
       let nextIso = 'none';
 
-      // 1. Probe failed: fetchedAt predates recoveryAt or error/rate_limited status
-      if (
+      // 1. Terminal auth / quarantine errors
+      if (snap?.status === 'reauth_required' || account?.lastStatus === 'quarantined') {
+        resultSummary = `error: ${snap?.status === 'reauth_required' ? 'reauth_required' : 'quarantined'}`;
+        this.retries.delete(due.accountId);
+        this.exhausted.set(due.accountId, due.recoveryAt);
+      }
+      // 2. Probe failed: fetchedAt predates recoveryAt or error/rate_limited status
+      else if (
         fetchedAtMs < due.recoveryAt ||
         snap?.status === 'error' ||
         snap?.status === 'rate_limited'
@@ -202,12 +217,8 @@ export class ResetRecoveryWatcher {
           nextIso = new Date(nextAt).toISOString();
         } else {
           this.retries.delete(due.accountId);
+          this.exhausted.set(due.accountId, due.recoveryAt);
         }
-      }
-      // 2. Terminal auth / quarantine errors
-      else if (snap?.status === 'reauth_required' || account?.lastStatus === 'quarantined') {
-        resultSummary = `error: ${snap?.status === 'reauth_required' ? 'reauth_required' : 'quarantined'}`;
-        this.retries.delete(due.accountId);
       }
       // 3. Reset-based rule check
       else if (due.pointType === 'reset') {
@@ -231,16 +242,19 @@ export class ResetRecoveryWatcher {
               nextIso = new Date(nextAt).toISOString();
             } else {
               this.retries.delete(due.accountId);
+              this.exhausted.set(due.accountId, due.recoveryAt);
             }
           } else {
             // Reset now in the future -> clear retry state, new reset gives next recovery point
             this.retries.delete(due.accountId);
+            this.exhausted.delete(due.accountId);
             nextIso = new Date(latestReset + this.config.clockSkewBufferSec * 1000).toISOString();
           }
         } else {
           // Recovered!
           resultSummary = 'recovered';
           this.retries.delete(due.accountId);
+          this.exhausted.delete(due.accountId);
         }
       }
       // 4. Status ok otherwise (429 cooldown or hold ended)
@@ -255,6 +269,7 @@ export class ResetRecoveryWatcher {
           resultSummary = 'recovered';
         }
         this.retries.delete(due.accountId);
+        this.exhausted.delete(due.accountId);
       }
 
       console.log(

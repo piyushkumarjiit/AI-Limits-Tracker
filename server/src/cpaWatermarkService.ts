@@ -923,6 +923,14 @@ export class CpaWatermarkService {
           console.error('[cpaWatermarkService] tracker.syncAll failed after hold end:', err);
         });
       }
+    } else if (cause === 'expired' && !writesActive) {
+      const updatedRouting: LinkRoutingState = {
+        ...routing,
+      };
+      delete updatedRouting.disabledBy;
+      delete updatedRouting.disabledAt;
+      delete updatedRouting.preHoldWeight;
+      this.store.updateCpaLinkRouting(accountId, updatedRouting);
     } else {
       const targetWeight = routing.preHoldWeight ?? 1;
       await applyDualBarrier(this.transport, link.cpaName, 'healthy', targetWeight);

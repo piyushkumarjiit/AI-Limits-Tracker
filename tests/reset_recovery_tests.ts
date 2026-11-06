@@ -790,6 +790,87 @@ async function runResetRecoveryTests() {
     }
     assertEquals(threw, false, 'watcher.tick() catches exceptions cleanly');
 
+    // 9. Persistent probe failure ladder exhaustion
+    const cooldownAt = fakeNow + 100_000;
+    w.store.updateCpaLinkRouting(idA, {
+      ...w.store.getCpaLinkRouting(idA)!,
+      disabledBy: 'reactive_429',
+      cooldownUntil: cooldownAt,
+    });
+    w.store.upsertAccount({
+      ...w.store.getAccount(idA)!,
+      lastStatus: 'ok',
+      latestSnapshot: {
+        ...w.store.getAccount(idA)!.latestSnapshot!,
+        fetchedAt: new Date(cooldownAt - 50_000).toISOString(),
+        status: 'error',
+      },
+    });
+    w.tracker.syncAll = async () => {
+      syncAllCalls++;
+    };
+
+    fakeNow = cooldownAt + 1000;
+    syncAllCalls = 0;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 1, 'persistent failure: initial poll at recoveryAt');
+
+    fakeNow += 121_000;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 2, 'persistent failure: retry 1 at +120s');
+
+    fakeNow += 301_000;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 3, 'persistent failure: retry 2 at +300s');
+
+    fakeNow += 901_000;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 4, 'persistent failure: retry 3 at +900s');
+
+    fakeNow += 70_000;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 4, 'no repeat poll after persistent failure exhaustion');
+    fakeNow += 70_000;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 4, 'remains stopped on subsequent ticks');
+
+    const newCooldownAt = fakeNow + 50_000;
+    w.store.updateCpaLinkRouting(idA, {
+      ...w.store.getCpaLinkRouting(idA)!,
+      cooldownUntil: newCooldownAt,
+    });
+    fakeNow = newCooldownAt + 1000;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 5, 'polls when new recoveryAt appears');
+
+    // 10. Probe returns reauth_required before fetchedAt check
+    const reauthRecoveryAt = fakeNow + 125_000;
+    w.store.updateCpaLinkRouting(idA, {
+      ...w.store.getCpaLinkRouting(idA)!,
+      cooldownUntil: reauthRecoveryAt,
+    });
+    w.tracker.syncAll = async () => {
+      syncAllCalls++;
+      const acc = w.store.getAccount(idA)!;
+      w.store.upsertAccount({
+        ...acc,
+        lastStatus: 'reauth_required',
+        latestSnapshot: {
+          ...acc.latestSnapshot!,
+          status: 'reauth_required',
+          fetchedAt: new Date(reauthRecoveryAt - 10_000).toISOString(),
+        },
+      });
+    };
+    fakeNow = reauthRecoveryAt + 1000;
+    syncAllCalls = 0;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 1, 'polls at recoveryAt');
+
+    fakeNow += 121_000;
+    await watcher.tick();
+    assertEquals(syncAllCalls, 1, 'reauth_required probe result stops further polling');
+
     watcher.stop();
     w.cleanup();
     pass('Case 9: ResetRecoveryWatcher full test suite passes');
@@ -983,6 +1064,17 @@ async function runResetRecoveryTests() {
 
     assertEquals(wShadow.cred('pro-a').disabled, false, 'disabled: false written in shadow Return to rotation');
     assertEquals(wShadow.cred('pro-a').weight, 1, 'weight 1 written in shadow Return to rotation');
+
+    // Shadow hold expiry clears provenance without writing to CLIProxy
+    await wShadow.service.setManualHold(idA, 'airgap', 'shadow expiring hold');
+    assertEquals(wShadow.cred('pro-a').disabled, true, 'airgapped in CLIProxy before expiry');
+    wShadow.store.deleteManualHold(idA);
+    await wShadow.service.run();
+    assertEquals(wShadow.cred('pro-a').disabled, true, 'shadow expiry does not write to CLIProxy');
+    const shadowRouting = wShadow.store.getCpaLinkRouting(idA)!;
+    assertEquals(shadowRouting.disabledBy, undefined, 'shadow expiry clears disabledBy');
+    assertEquals(shadowRouting.disabledAt, undefined, 'shadow expiry clears disabledAt');
+    assertEquals(shadowRouting.preHoldWeight, undefined, 'shadow expiry clears preHoldWeight');
 
     // 2. Policy-unmanaged account
     const unmanagedRule = [
