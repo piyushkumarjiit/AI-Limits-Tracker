@@ -47,6 +47,7 @@ import {
   type TripwireConfig,
 } from './cpaTripwireEngine';
 import type { Tracker } from './tracker';
+import { holdOwnerOf } from './cpaHoldState';
 
 export {
   DEFAULT_LEAD_TIME_SEC,
@@ -63,6 +64,10 @@ export {
   type TripwireEvaluation,
   type TripwireConfig,
 };
+
+function sanitizeLog(value: unknown): string {
+  return String(value ?? '').replace(/[\r\n\x00-\x1f\x7f-\x9f]/g, '');
+}
 
 export interface CpaWatermarkRunResult {
   mode: 'off' | 'shadow' | 'enforce';
@@ -93,6 +98,7 @@ export class CpaWatermarkService {
   private readonly transport: CpaTransport;
   private readonly policyLoader: CpaPolicyLoader;
   private readonly watermarkStore: CpaWatermarkStore;
+  private readonly tracker?: Tracker;
   private readonly now: () => number;
 
   private inFlightRun: Promise<CpaWatermarkRunResult> | null = null;
@@ -120,6 +126,7 @@ export class CpaWatermarkService {
       options.watermarkStore ??
       this.store.watermarkStore ??
       new CpaWatermarkStore((this.store as any).db);
+    this.tracker = options.tracker;
 
     if (options.tracker) {
       options.tracker.setReactive429Handler((accountId) => this.handleReactive429(accountId));
@@ -239,32 +246,14 @@ export class CpaWatermarkService {
       return { mode: 'off', applied: false, plans: [], writes: 0, blocked: null };
     }
 
+    const writesActive = await this.engineWritesActive(currentNow);
     let blocked: string | null = null;
     let effectiveMode = mode;
-
-    // Verify WRR routing strategy in enforce mode
-    if (mode === 'enforce') {
-      let strategy: string;
-      if (this.cachedStrategy && currentNow < this.cachedStrategy.expiresAt) {
-        strategy = this.cachedStrategy.value;
-      } else {
-        try {
-          strategy = await this.transport.getRoutingStrategy();
-          this.cachedStrategy = {
-            value: strategy,
-            expiresAt: currentNow + 5 * 60 * 1000,
-          };
-        } catch (err) {
-          console.error('[cpaWatermarkService] Failed to query routing strategy:', err);
-          strategy = 'unknown';
-        }
-      }
-
-      if (strategy !== 'weighted-round-robin') {
-        blocked = 'strategy';
-        effectiveMode = 'shadow';
-      }
+    if (mode === 'enforce' && !writesActive) {
+      blocked = 'strategy';
+      effectiveMode = 'shadow';
     }
+
     // Say so once when enforce mode cannot write, instead of failing silently.
     if (blocked && blocked !== this.lastRunBlocked) {
       console.warn(
@@ -291,6 +280,33 @@ export class CpaWatermarkService {
           writes: 0,
           blocked: 'list_failed',
         };
+      }
+    }
+
+    const links = this.store.listCpaLinks().filter((l) => l.state === 'linked');
+
+    // Per-run cleanup: if credential is not disabled and disabledBy was policy or reactive_429, clean them
+    for (const link of links) {
+      const entry = cpaEntries.find((e) => e.name === link.cpaName || e.auth_index === link.authIndex);
+      if (!entry) continue;
+      const isEntryDisabled = entry.disabled === true || entry.status === 'disabled';
+      const routing = this.store.getCpaLinkRouting(link.accountId);
+      if (!isEntryDisabled && routing && (routing.disabledBy === 'policy' || routing.disabledBy === 'reactive_429')) {
+        const updated = { ...routing };
+        delete updated.disabledBy;
+        delete updated.disabledAt;
+        this.store.updateCpaLinkRouting(link.accountId, updated);
+      }
+    }
+
+    // Expiry detection for manual holds (links with disabledBy === 'operator_hold' and no active hold)
+    for (const link of links) {
+      const routing = this.store.getCpaLinkRouting(link.accountId);
+      if (routing?.disabledBy === 'operator_hold') {
+        const hold = this.store.getManualHold(link.accountId, currentNow);
+        if (!hold) {
+          await this.endHold(link.accountId, 'expired', cpaEntries, currentNow);
+        }
       }
     }
 
@@ -421,6 +437,15 @@ export class CpaWatermarkService {
         policy.classificationRules
       );
 
+      const isEntryDisabled = Boolean(entry && (entry.disabled === true || entry.status === 'disabled'));
+      const activeHold = this.store.getManualHold(link.accountId, currentNow) !== null;
+      const owner = holdOwnerOf({ disabled: isEntryDisabled, routing, activeHold });
+
+      let managedForRun = isManaged && classification.managed;
+      if (isEntryDisabled && owner === 'external') {
+        managedForRun = false;
+      }
+
       // Compute dual ring effective remaining percentage
       const snapshot = account.latestSnapshot;
       const dualRing = dualRingData(snapshot);
@@ -466,7 +491,18 @@ export class CpaWatermarkService {
         stalenessSec = 9999;
       }
 
-      const isCooldown = Boolean(routing.cooldown);
+      const cooldownUntil = routing.cooldownUntil ?? ((routing.at ?? 0) + DEFAULT_COOLDOWN_SEC * 1000);
+      let isCooldown = Boolean(routing.cooldown) && cooldownUntil > currentNow;
+      if (routing.cooldown !== undefined && cooldownUntil <= currentNow) {
+        const updated = { ...routing };
+        delete updated.cooldown;
+        this.store.updateCpaLinkRouting(link.accountId, updated);
+        routing = updated;
+        isCooldown = false;
+      }
+      if (activeHold) {
+        isCooldown = true;
+      }
 
       const snapProvider = (
         ['antigravity', 'claude', 'codex', 'deepseek'].includes(classification.provider)
@@ -487,7 +523,7 @@ export class CpaWatermarkService {
         stalenessSec,
         isCooldown,
         currentWeight: currentEntryWeight,
-        managed: isManaged && classification.managed,
+        managed: managedForRun,
       });
 
       if (currentEntryWeight !== null) {
@@ -616,15 +652,29 @@ export class CpaWatermarkService {
             ...existingRouting,
             applied: item.weight,
             at: currentNow,
-            cooldown: plan?.cooldown ?? false,
             managed: true,
             reason: plan?.reason,
           };
+          if (plan?.cooldown) {
+            updatedRouting.cooldown = true;
+          } else {
+            delete updatedRouting.cooldown;
+          }
+          if (item.weight === 0) {
+            updatedRouting.disabledBy = existingRouting.disabledBy ?? 'policy';
+            updatedRouting.disabledAt = existingRouting.disabledAt ?? currentNow;
+          } else {
+            delete updatedRouting.disabledBy;
+            delete updatedRouting.disabledAt;
+            delete updatedRouting.cooldownUntil;
+            delete updatedRouting.preHoldWeight;
+            delete updatedRouting.holdEndedAt;
+          }
           this.store.updateCpaLinkRouting(accountId, updatedRouting);
         }
       } catch (err) {
         errCount++;
-        console.error('[cpaWatermarkService] Failed to patch credential weight for %s:', item.name, err);
+        console.error('[cpaWatermarkService] Failed to patch credential weight for %s:', sanitizeLog(item.name), err);
         const status = (err as any)?.status;
         if (status === 400 && accountId) {
           const existingRouting = this.store.getCpaLinkRouting(accountId) || {};
@@ -659,7 +709,7 @@ export class CpaWatermarkService {
           discrepancies++;
           console.warn(
             '[cpaWatermarkService] Read-back verification mismatch for %s: expected %d, got %s',
-            name,
+            sanitizeLog(name),
             targetWeight,
             found ? found.weight : 'missing'
           );
@@ -676,7 +726,7 @@ export class CpaWatermarkService {
   /**
    * Reactive circuit breaker handler: Upstream 429 immediately transitions
    * account to exhausted and executes dual-barrier airgap (weight 0, disabled true)
-   * without waiting for scheduled sync.
+   * in enforce mode without waiting for scheduled sync.
    */
   public async handleReactive429(
     accountId: string,
@@ -684,6 +734,7 @@ export class CpaWatermarkService {
   ): Promise<void> {
     const now = this.now();
     const cooldownMs = options?.cooldownMs ?? DEFAULT_COOLDOWN_SEC * 1000;
+    const cooldownUntil = now + cooldownMs;
     const reason = options?.reason ?? 'upstream_429';
 
     // 1. Record error in circuit breaker registry
@@ -699,28 +750,42 @@ export class CpaWatermarkService {
       });
     }
 
-    // 3. Find CPA link and dispatch immediate dual-barrier write
+    // 3. Find CPA link and update routing / dispatch write if automatic writes active
     const link = this.store.getCpaLink(accountId);
     if (link) {
       const routing = this.store.getCpaLinkRouting(accountId) || {};
-      this.store.updateCpaLinkRouting(accountId, {
-        ...routing,
-        applied: 0,
-        cooldown: true,
-        reason,
-        at: now,
-      });
-      this.activeWeightsMap[accountId] = 0;
+      const writesActive = await this.engineWritesActive(now);
 
-      try {
-        await applyDualBarrier(this.transport, link.cpaName, 'exhausted', 0);
-      } catch (err) {
-        console.error('[cpaWatermarkService] Failed dual-barrier write on reactive 429 for %s:', link.cpaName, err);
+      if (writesActive) {
+        this.store.updateCpaLinkRouting(accountId, {
+          ...routing,
+          applied: 0,
+          at: now,
+          cooldown: true,
+          cooldownUntil,
+          reason,
+          disabledBy: 'reactive_429',
+          disabledAt: now,
+        });
+        this.activeWeightsMap[accountId] = 0;
+
+        try {
+          await applyDualBarrier(this.transport, link.cpaName, 'exhausted', 0);
+        } catch (err) {
+          console.error('[cpaWatermarkService] Failed dual-barrier write on reactive 429 for %s:', sanitizeLog(link.cpaName), err);
+        }
+      } else {
+        // Shadow, off, or strategy blocked: do NOT write to CLIProxy
+        this.store.updateCpaLinkRouting(accountId, {
+          ...routing,
+          at: now,
+          cooldown: true,
+          cooldownUntil,
+          reason,
+        });
       }
-    }
 
-    // 4. Update in-memory engine state for account
-    if (link) {
+      // 4. Update in-memory engine state for account
       this.engineState.accountStates[link.cpaName] = {
         state: 'cooldown',
         enteredAt: now,
@@ -755,13 +820,40 @@ export class CpaWatermarkService {
     const link = this.store.getCpaLink(accountId);
     if (link) {
       if (hold === 'quarantine' || hold === 'airgap') {
+        const routing = this.store.getCpaLinkRouting(accountId) || {};
+        let preHoldWeight = routing.preHoldWeight;
+        if (preHoldWeight === undefined) {
+          if (this.activeWeightsMap[accountId] !== undefined) {
+            preHoldWeight = this.activeWeightsMap[accountId];
+          } else {
+            try {
+              const listRes = await this.transport.listCredentials();
+              const files = Array.isArray(listRes) ? listRes : (listRes?.files ?? []);
+              const found = files.find((e: any) => e.name === link.cpaName || e.auth_index === link.authIndex);
+              if (typeof found?.weight === 'number') {
+                preHoldWeight = found.weight;
+              }
+            } catch {
+              // fallback
+            }
+          }
+        }
+
         // Immediate dual-barrier write: weight 0 AND disabled true
         await applyDualBarrier(this.transport, link.cpaName, hold === 'airgap' ? 'airgapped' : 'quarantined', 0);
         this.activeWeightsMap[accountId] = 0;
+
+        const updatedRouting: LinkRoutingState = {
+          ...routing,
+          applied: 0,
+          at: now,
+          disabledBy: 'operator_hold',
+          disabledAt: now,
+          ...(preHoldWeight !== undefined ? { preHoldWeight } : {}),
+        };
+        this.store.updateCpaLinkRouting(accountId, updatedRouting);
       } else if (hold === 'none') {
-        // Released hold: restore healthy weight
-        await applyDualBarrier(this.transport, link.cpaName, 'healthy', 1);
-        this.activeWeightsMap[accountId] = 1;
+        await this.endHold(accountId, 'released', undefined, now);
       }
     }
 
@@ -777,6 +869,169 @@ export class CpaWatermarkService {
     const effectiveState = effectiveAccountState(hold, autoState);
 
     return { hold: holdRecord, effectiveState };
+  }
+
+  private async endHold(
+    accountId: string,
+    cause: 'released' | 'expired',
+    cpaEntries?: CpaCredential[],
+    simulatedNow?: number
+  ): Promise<void> {
+    const now = simulatedNow ?? this.now();
+    const link = this.store.getCpaLink(accountId);
+    if (!link) return;
+
+    if (cause === 'released') {
+      this.store.deleteManualHold(accountId);
+    }
+
+    const routing = this.store.getCpaLinkRouting(accountId) || {};
+    const policy = this.policyLoader.getPolicy();
+    const classification = classifyAccount(link.cpaName, policy.classificationRules);
+    const writesActive = await this.engineWritesActive(now);
+    const policyManages = classification.managed !== false;
+
+    if (writesActive && policyManages) {
+      let currentCliWeight = 0;
+      if (cpaEntries) {
+        const found = cpaEntries.find((e) => e.name === link.cpaName || e.auth_index === link.authIndex);
+        if (typeof found?.weight === 'number') currentCliWeight = found.weight;
+      } else {
+        try {
+          const listRes = await this.transport.listCredentials();
+          const files = Array.isArray(listRes) ? listRes : (listRes?.files ?? []);
+          const found = files.find((e: any) => e.name === link.cpaName || e.auth_index === link.authIndex);
+          if (typeof found?.weight === 'number') currentCliWeight = found.weight;
+        } catch {
+          currentCliWeight = 0;
+        }
+      }
+
+      const updatedRouting: LinkRoutingState = {
+        ...routing,
+        managed: true,
+        disabledBy: 'policy',
+        applied: currentCliWeight,
+        holdEndedAt: now,
+      };
+      this.store.updateCpaLinkRouting(accountId, updatedRouting);
+
+      this.engineState.accountStates[link.cpaName] = {
+        state: 'cooldown',
+        enteredAt: now,
+        targetWeight: 0,
+      };
+
+      if (this.tracker) {
+        this.tracker.syncAll().catch((err) => {
+          console.error('[cpaWatermarkService] tracker.syncAll failed after hold end:', err);
+        });
+      }
+    } else if (cause === 'expired' && !writesActive) {
+      const updatedRouting: LinkRoutingState = {
+        ...routing,
+      };
+      delete updatedRouting.disabledBy;
+      delete updatedRouting.disabledAt;
+      delete updatedRouting.preHoldWeight;
+      this.store.updateCpaLinkRouting(accountId, updatedRouting);
+    } else {
+      const targetWeight = routing.preHoldWeight ?? 1;
+      await applyDualBarrier(this.transport, link.cpaName, 'healthy', targetWeight);
+      this.activeWeightsMap[accountId] = targetWeight;
+
+      const updatedRouting: LinkRoutingState = {
+        ...routing,
+        managed: true,
+        applied: targetWeight,
+      };
+      delete updatedRouting.disabledBy;
+      delete updatedRouting.disabledAt;
+      delete updatedRouting.preHoldWeight;
+      this.store.updateCpaLinkRouting(accountId, updatedRouting);
+
+      if (this.tracker) {
+        this.tracker.syncAll().catch((err) => {
+          console.error('[cpaWatermarkService] tracker.syncAll failed after hold end:', err);
+        });
+      }
+    }
+
+    console.log(
+      `[routing] ${sanitizeLog(link.cpaName)}: manual hold ${cause === 'released' ? 'released' : 'ended'}; back to automatic routing`
+    );
+  }
+
+  public migrateRoutingProvenance(): void {
+    if (this.store.getSetting('routing_provenance_v1')) {
+      return;
+    }
+    const now = this.now();
+    const links = this.store.listCpaLinks().filter((l) => l.state === 'linked');
+    for (const link of links) {
+      const creds = this.store.getCredentials(link.accountId);
+      const routing = this.store.getCpaLinkRouting(link.accountId) || {};
+      if (routing.disabledBy) continue;
+      if (creds?.cpaStatus !== 'disabled' && routing.applied !== 0) continue;
+
+      const activeHold = this.store.getManualHold(link.accountId, now) !== null;
+      const persisted = this.engineState.accountStates[link.cpaName];
+      const persistedState = persisted?.state;
+      const persistedTargetWeight = persisted?.targetWeight;
+
+      if (activeHold) {
+        routing.disabledBy = 'operator_hold';
+        routing.disabledAt = routing.disabledAt ?? (routing.at ?? now);
+        this.store.updateCpaLinkRouting(link.accountId, routing);
+      } else if (routing.cooldown === true) {
+        routing.disabledBy = 'reactive_429';
+        routing.disabledAt = routing.disabledAt ?? (routing.at ?? now);
+        routing.cooldownUntil = (routing.at ?? now) + DEFAULT_COOLDOWN_SEC * 1000;
+        this.store.updateCpaLinkRouting(link.accountId, routing);
+      } else if (
+        routing.managed !== false &&
+        (routing.applied === 0 ||
+          persistedState === 'hard_stop' ||
+          persistedState === 'cooldown' ||
+          persistedState === 'unknown' ||
+          persistedTargetWeight === 0)
+      ) {
+        routing.disabledBy = 'policy';
+        routing.disabledAt = routing.disabledAt ?? (routing.at ?? now);
+        this.store.updateCpaLinkRouting(link.accountId, routing);
+      } else {
+        console.log(
+          `[routing] ${sanitizeLog(link.cpaName)} is disabled in CLIProxy but not by FQD; leaving it alone. Return to rotation hands it to FQD.`
+        );
+      }
+    }
+    this.store.setSetting('routing_provenance_v1', '1');
+  }
+
+  private async engineWritesActive(currentNow: number = this.now()): Promise<boolean> {
+    const policy = this.policyLoader.getPolicy();
+    const mode = policy.mode ?? 'shadow';
+    if (mode !== 'enforce') {
+      return false;
+    }
+
+    let strategy: string;
+    if (this.cachedStrategy && currentNow < this.cachedStrategy.expiresAt) {
+      strategy = this.cachedStrategy.value;
+    } else {
+      try {
+        strategy = await this.transport.getRoutingStrategy();
+        this.cachedStrategy = {
+          value: strategy,
+          expiresAt: currentNow + 5 * 60 * 1000,
+        };
+      } catch (err) {
+        console.error('[cpaWatermarkService] Failed to query routing strategy:', err);
+        strategy = 'unknown';
+      }
+    }
+
+    return strategy === 'weighted-round-robin';
   }
 
   /**

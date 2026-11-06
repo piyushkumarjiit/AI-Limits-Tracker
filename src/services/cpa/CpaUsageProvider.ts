@@ -5,7 +5,7 @@ import {
   UsageSnapshot,
 } from '../../models/types';
 import { failureSnapshot } from '../providers/common';
-import { ProviderFetchResult, UsageProvider } from '../providers/UsageProvider';
+import { FetchUsageOptions, ProviderFetchResult, UsageProvider } from '../providers/UsageProvider';
 import { parseClaudeUsage } from '../providers/ClaudeProvider';
 import { parseChatGPTUsage } from '../providers/ChatGPTProvider';
 import { parseAntigravityQuotaSummary } from '../providers/antigravityQuota';
@@ -84,6 +84,7 @@ export class MemoryRefreshGate implements RefreshGate {
 
 export interface CpaUsageProviderOptions {
   usePassiveSignals?: boolean;
+  now?: () => number;
 }
 
 /**
@@ -98,6 +99,7 @@ export class CpaUsageProvider implements UsageProvider {
   private transport: CpaTransport;
   private refreshGate: RefreshGate;
   private usePassiveSignals: boolean;
+  private readonly now: () => number;
 
   constructor(
     transport: CpaTransport,
@@ -107,6 +109,7 @@ export class CpaUsageProvider implements UsageProvider {
     this.transport = transport;
     this.refreshGate = refreshGate ?? new MemoryRefreshGate();
     this.usePassiveSignals = options?.usePassiveSignals ?? false;
+    this.now = options?.now ?? (() => Date.now());
   }
 
   validateCredentials(credentials: AccountCredentials): boolean {
@@ -116,7 +119,8 @@ export class CpaUsageProvider implements UsageProvider {
 
   async fetchUsage(
     accountId: string,
-    credentials: AccountCredentials
+    credentials: AccountCredentials,
+    options?: FetchUsageOptions
   ): Promise<ProviderFetchResult> {
     const creds = credentials;
     const provider = this.resolveProviderType(creds);
@@ -146,7 +150,7 @@ export class CpaUsageProvider implements UsageProvider {
     }
 
     // 1. Check if CPA credential state flags indicate reauth required without network call
-    if (creds.cpaStatus === 'error' || creds.cpaStatus === 'disabled') {
+    if (creds.cpaStatus === 'error' || (creds.cpaStatus === 'disabled' && !options?.allowDisabled)) {
       return {
         snapshot: failureSnapshot(
           accountId,
@@ -202,7 +206,7 @@ export class CpaUsageProvider implements UsageProvider {
         providerType: provider,
         planName: creds.plan || '',
         status: 'ok',
-        fetchedAt: new Date().toISOString(),
+        fetchedAt: new Date(this.now()).toISOString(),
         buckets,
       };
       return { snapshot };
@@ -554,7 +558,7 @@ export class CpaUsageProvider implements UsageProvider {
       providerType: provider,
       planName,
       status: 'ok',
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: new Date(this.now()).toISOString(),
       buckets,
     };
 

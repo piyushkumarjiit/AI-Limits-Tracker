@@ -13,6 +13,7 @@ import {
 import { effectiveAccountState } from '../server/src/cpaWatermarkTypes';
 import { Store } from '../server/src/store';
 import { CpaWatermarkService } from '../server/src/cpaWatermarkService';
+import { CpaPolicyLoader, DEFAULT_WATERMARK_POLICY } from '../server/src/cpaWatermarkPolicy';
 import type { CpaTransport } from '../src/services/cpa/CpaTransport';
 import { applyDualBarrier } from '../server/src/cpaSync';
 
@@ -281,9 +282,16 @@ async function run() {
       getRoutingStrategy: async () => 'weighted-round-robin',
     };
 
+    class EnforcePolicyLoader extends CpaPolicyLoader {
+      override getPolicy() {
+        return { ...DEFAULT_WATERMARK_POLICY, mode: 'enforce' as const };
+      }
+    }
+
     const service = new CpaWatermarkService({
       store,
       transport: mockTransport as CpaTransport,
+      policyLoader: new EnforcePolicyLoader(),
       now: () => 1000000,
     });
 

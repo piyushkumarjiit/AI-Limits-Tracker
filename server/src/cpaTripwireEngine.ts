@@ -414,6 +414,11 @@ export class CircuitBreakerRegistry {
     this.cooldowns.delete(accountId);
   }
 
+  clear(): void {
+    this.cooldowns.clear();
+    this.errors15m.clear();
+  }
+
   getErrors15m(accountId: string, now: number = Date.now()): { http429: number; http5xx: number } {
     const cutoff = now - 15 * 60 * 1000;
     const list = (this.errors15m.get(accountId) ?? []).filter((e) => e.t >= cutoff);

@@ -12,6 +12,7 @@ import { PROVIDER_NAMES } from '../../src/constants/theme';
 import { notify } from './notify';
 import { ServerAccount, Store } from './store';
 import { circuitBreakers } from './cpaTripwireEngine';
+import { holdOwner } from './cpaHoldState';
 import { DEFAULT_STATUS_LEVELS, type StatusLevels } from '../../src/constants/statusLevels';
 
 const b64url = (buf: Buffer) => buf.toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -29,6 +30,7 @@ export type ConnectResult = { ok: true; account: ServerAccount } | { ok: false; 
 export class Tracker {
   private pending = new Map<string, PendingLogin>();
   private inFlight = new Map<string, Promise<void>>();
+  private inFlightSyncAll: Promise<void> | null = null;
   private timer: NodeJS.Timeout | null = null;
   private onSyncAllCallbacks: Array<() => void | Promise<void>> = [];
   private onSyncedCallbacks: Array<(accountId: string) => void | Promise<void>> = [];
@@ -168,7 +170,17 @@ export class Tracker {
     }
   }
 
-  async syncAll(): Promise<void> {
+  syncAll(): Promise<void> {
+    if (this.inFlightSyncAll) {
+      return this.inFlightSyncAll;
+    }
+    this.inFlightSyncAll = this.doSyncAll().finally(() => {
+      this.inFlightSyncAll = null;
+    });
+    return this.inFlightSyncAll;
+  }
+
+  private async doSyncAll(): Promise<void> {
     const accounts = this.store.listAccounts().filter((a) => a.isActive);
     const eligibleAccounts = accounts.filter((a) => {
       if (a.lastStatus === 'quarantined') return false;
@@ -177,7 +189,7 @@ export class Tracker {
       if (creds?.authType === 'cpa') {
         const link = this.store.getCpaLink(a.id);
         if (link && link.state === 'unlinked') return false;
-        if (creds.cpaStatus === 'disabled') return false;
+        if (creds.cpaStatus === 'disabled' && holdOwner(this.store, a.id) !== 'fqd') return false;
       }
       return true;
     });
@@ -235,13 +247,13 @@ export class Tracker {
       return;
     }
 
-    // For CPA accounts: skip quota fetch if link is unlinked or cpaStatus === 'disabled'
+    // For CPA accounts: skip quota fetch if link is unlinked or cpaStatus === 'disabled' unless FQD holds it
     if (creds.authType === 'cpa') {
       const link = this.store.getCpaLink(accountId);
       if (link && link.state === 'unlinked') {
         return;
       }
-      if (creds.cpaStatus === 'disabled') {
+      if (creds.cpaStatus === 'disabled' && holdOwner(this.store, accountId) !== 'fqd') {
         return;
       }
     }
@@ -254,7 +266,9 @@ export class Tracker {
     const release = await this.acquireProbeSlot();
     let result: ProviderFetchResult;
     try {
-      result = await provider.fetchUsage(accountId, creds);
+      result = await provider.fetchUsage(accountId, creds, {
+        allowDisabled: creds.cpaStatus === 'disabled',
+      });
     } catch (err: any) {
       if (err?.status === 429 || err?.statusCode === 429) {
         circuitBreakers.recordError(accountId, '429');
