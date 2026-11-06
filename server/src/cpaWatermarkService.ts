@@ -65,6 +65,10 @@ export {
   type TripwireConfig,
 };
 
+function sanitizeLog(value: unknown): string {
+  return String(value ?? '').replace(/[\r\n\x00-\x1f\x7f-\x9f]/g, '');
+}
+
 export interface CpaWatermarkRunResult {
   mode: 'off' | 'shadow' | 'enforce';
   applied: boolean;
@@ -670,7 +674,7 @@ export class CpaWatermarkService {
         }
       } catch (err) {
         errCount++;
-        console.error('[cpaWatermarkService] Failed to patch credential weight for %s:', item.name, err);
+        console.error('[cpaWatermarkService] Failed to patch credential weight for %s:', sanitizeLog(item.name), err);
         const status = (err as any)?.status;
         if (status === 400 && accountId) {
           const existingRouting = this.store.getCpaLinkRouting(accountId) || {};
@@ -705,7 +709,7 @@ export class CpaWatermarkService {
           discrepancies++;
           console.warn(
             '[cpaWatermarkService] Read-back verification mismatch for %s: expected %d, got %s',
-            name,
+            sanitizeLog(name),
             targetWeight,
             found ? found.weight : 'missing'
           );
@@ -768,7 +772,7 @@ export class CpaWatermarkService {
         try {
           await applyDualBarrier(this.transport, link.cpaName, 'exhausted', 0);
         } catch (err) {
-          console.error('[cpaWatermarkService] Failed dual-barrier write on reactive 429 for %s:', link.cpaName, err);
+          console.error('[cpaWatermarkService] Failed dual-barrier write on reactive 429 for %s:', sanitizeLog(link.cpaName), err);
         }
       } else {
         // Shadow, off, or strategy blocked: do NOT write to CLIProxy
@@ -954,7 +958,7 @@ export class CpaWatermarkService {
     }
 
     console.log(
-      `[routing] ${link.cpaName}: manual hold ${cause === 'released' ? 'released' : 'ended'}; back to automatic routing`
+      `[routing] ${sanitizeLog(link.cpaName)}: manual hold ${cause === 'released' ? 'released' : 'ended'}; back to automatic routing`
     );
   }
 
@@ -997,7 +1001,7 @@ export class CpaWatermarkService {
         this.store.updateCpaLinkRouting(link.accountId, routing);
       } else {
         console.log(
-          `[routing] ${link.cpaName} is disabled in CLIProxy but not by FQD; leaving it alone. Return to rotation hands it to FQD.`
+          `[routing] ${sanitizeLog(link.cpaName)} is disabled in CLIProxy but not by FQD; leaving it alone. Return to rotation hands it to FQD.`
         );
       }
     }

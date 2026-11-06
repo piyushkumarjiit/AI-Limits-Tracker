@@ -23,6 +23,10 @@ interface RetryState {
   nextAt: number;
 }
 
+function sanitizeLog(value: unknown): string {
+  return String(value ?? '').replace(/[\r\n\x00-\x1f\x7f-\x9f]/g, '');
+}
+
 export class ResetRecoveryWatcher {
   private readonly store: Store;
   private readonly tracker: Tracker;
@@ -272,8 +276,12 @@ export class ResetRecoveryWatcher {
         this.exhausted.delete(due.accountId);
       }
 
+      const safeName = sanitizeLog(due.cpaName);
+      const safePointType = sanitizeLog(due.pointType);
+      const safeResult = sanitizeLog(resultSummary);
+      const safeNext = sanitizeLog(nextIso);
       console.log(
-        `[reset-probe] ${due.cpaName}: recovery point ${new Date(due.recoveryAt).toISOString()} (${due.pointType}), result ${resultSummary}, next ${nextIso}`
+        `[reset-probe] ${safeName}: recovery point ${new Date(due.recoveryAt).toISOString()} (${safePointType}), result ${safeResult}, next ${safeNext}`
       );
     }
   }
