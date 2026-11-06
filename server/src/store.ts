@@ -533,7 +533,6 @@ export class Store {
     return active;
   }
 
-  /** Flushes the write-ahead log into the database file (used on shutdown). */
   transaction<T>(fn: () => T): T {
     this.db.exec('BEGIN TRANSACTION');
     try {
@@ -541,11 +540,16 @@ export class Store {
       this.db.exec('COMMIT');
       return res;
     } catch (e) {
-      this.db.exec('ROLLBACK');
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Rollback may fail if SQLite already rolled back (e.g. on disk full or I/O error)
+      }
       throw e;
     }
   }
 
+  /** Flushes the write-ahead log into the database file (used on shutdown). */
   checkpoint(): void {
     this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   }
